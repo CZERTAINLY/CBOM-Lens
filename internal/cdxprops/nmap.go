@@ -62,8 +62,8 @@ func (c Converter) parseNmap(ctx context.Context, nmap model.Nmap) (compos []cdx
 			c := c.tlsToCompos(ctx, port)
 			compos = append(compos, c...)
 		default:
-			err = fmt.Errorf("can't parse unsupported nmap service: %s", port.Service.Name)
-			return
+			slog.WarnContext(ctx, "can't parse unsupported nmap service: ignoring", "service", port.Service.Name)
+			continue
 		}
 	}
 	// FIXME: handle cdx services too
