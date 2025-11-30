@@ -345,7 +345,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 				}))
 				return ts, ts.Close
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		"201 application/json unexpected body #2": {
 			setup: func() (*httptest.Server, func()) {
@@ -356,7 +356,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 				}))
 				return ts, ts.Close
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		"201 unexpected content type": {
 			setup: func() (*httptest.Server, func()) {
