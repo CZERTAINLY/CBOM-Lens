@@ -138,3 +138,56 @@ func TestParseNmapUnsupportedService(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "can't parse unsupported nmap service: ftp")
 }
+
+func TestParseTLSCiphers(t *testing.T) {
+	cv := Converter{}
+	ciphers := []model.SSLCipher{
+		{Name: "TLS_AES_128_GCM_SHA256"},
+		{Name: "TLS_RSA_WITH_AES_128_CBC_SHA"},
+	}
+	suites := cv.parseTLSCiphers(t.Context(), ciphers, "")
+	require.Len(t, suites, 2)
+	require.Equal(t, "TLS_AES_128_GCM_SHA256", suites[0].name)
+	require.Equal(t, "TLS_RSA_WITH_AES_128_CBC_SHA", suites[1].name)
+	require.NotEmpty(t, suites[0].identifiers)
+	require.NotEmpty(t, suites[0].compos)
+}
+
+func TestCipherSuite_cdx(t *testing.T) {
+	compos := []cdx.Component{
+		{BOMRef: "ref1"},
+		{BOMRef: "ref2"},
+	}
+	cs := cipherSuite{
+		name:        "TLS_AES_128_GCM_SHA256",
+		compos:      compos,
+		identifiers: []string{"0x13", "0x01"},
+	}
+	cdxSuite := cs.cdx()
+	require.Equal(t, "TLS_AES_128_GCM_SHA256", cdxSuite.Name)
+	require.NotNil(t, cdxSuite.Algorithms)
+	require.Len(t, *cdxSuite.Algorithms, 2)
+	require.Equal(t, "ref1", string((*cdxSuite.Algorithms)[0]))
+	require.Equal(t, []string{"0x13", "0x01"}, *cdxSuite.Identifiers)
+}
+
+func TestTlsCipherToCompos(t *testing.T) {
+	cv := Converter{}
+	cipherEnum := model.SSLEnumCiphers{
+		Name: "TLSv1.3",
+		Ciphers: []model.SSLCipher{
+			{Name: "TLS_AES_128_GCM_SHA256"},
+			{Name: "TLS_AES_256_GCM_SHA384"},
+		},
+	}
+	compos := cv.tlsCipherToCompos(t.Context(), cipherEnum, nil, "")
+	require.NotEmpty(t, compos)
+	require.Equal(t, "TLSv1.3", compos[0].Name)
+	require.Equal(t, cdx.ComponentTypeCryptographicAsset, compos[0].Type)
+	require.NotNil(t, compos[0].CryptoProperties)
+	require.Equal(t, cdx.CryptoAssetTypeProtocol, compos[0].CryptoProperties.AssetType)
+	require.NotNil(t, compos[0].CryptoProperties.ProtocolProperties)
+	require.Equal(t, "1.3", compos[0].CryptoProperties.ProtocolProperties.Version)
+	require.NotNil(t, compos[0].CryptoProperties.ProtocolProperties.CipherSuites)
+	require.Len(t, *compos[0].CryptoProperties.ProtocolProperties.CipherSuites, 2)
+}
