@@ -40,7 +40,7 @@ func TestParseSSHHostKey(t *testing.T) {
 	}
 
 	t.Run("without czertainly properties", func(t *testing.T) {
-		c := NewConverter().WithCzertainlyExtenstions(false)
+		c := NewConverter().WithCzertainlyExtensions(false)
 
 		compo := c.ParseSSHHostKey(key)
 		require.Equal(t, "crypto/algorithm/ssh-ed25519@256", compo.BOMRef)
@@ -55,7 +55,7 @@ func TestParseSSHHostKey(t *testing.T) {
 	})
 
 	t.Run("with czertainly properties", func(t *testing.T) {
-		c := NewConverter().WithCzertainlyExtenstions(true)
+		c := NewConverter().WithCzertainlyExtensions(true)
 
 		compo := c.ParseSSHHostKey(key)
 		require.NotNil(t, compo.Properties)

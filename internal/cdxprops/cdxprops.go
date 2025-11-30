@@ -34,9 +34,9 @@ func NewConverter() Converter {
 	}
 }
 
-// WithCzertainlyExtenstions configures the mode in which CZERTAINLY specific properties will be included in Components or not
+// WithCzertainlyExtensions configures the mode in which CZERTAINLY specific properties will be included in Components or not
 // Default is yes
-func (c Converter) WithCzertainlyExtenstions(czertainly bool) Converter {
+func (c Converter) WithCzertainlyExtensions(czertainly bool) Converter {
 	c.czertainly = czertainly
 	return c
 }
