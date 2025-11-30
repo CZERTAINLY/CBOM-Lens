@@ -137,8 +137,8 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm) (cdx.C
 		algorithmFamily = "RSASSA-PKCS1"
 		paramSetID = "512" // SHA-512 digest size
 		padding = cdx.CryptoPaddingPKCS1v15
-		hash = "SHA-256"
-		classicalSecurityLevel = 128
+		hash = "SHA-512"
+		classicalSecurityLevel = 256
 
 	case x509.SHA256WithRSAPSS:
 		algorithmFamily = "RSASSA-PSS"
@@ -156,7 +156,7 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm) (cdx.C
 		algorithmFamily = "RSASSA-PSS"
 		paramSetID = "512" // SHA-512 digest size
 		hash = "SHA-512"
-		classicalSecurityLevel = 128
+		classicalSecurityLevel = 256
 
 	case x509.ECDSAWithSHA1:
 		algorithmFamily = "ECDSA"
