@@ -174,8 +174,20 @@ var stringToHash = map[string]crypto.Hash{
 	"BLAKE2b512":  crypto.BLAKE2b_512,
 }
 
-func (c Converter) hashAlgorithm(name string) cdx.Component {
+func (c Converter) hashAlgorithmCompo(name string) cdx.Component {
 	name = strings.ToUpper(name)
+	// normalize nmap TLS names
+	switch name {
+	case "SHA1":
+		name = "SHA-1"
+	case "SHA256":
+		name = "SHA-256"
+	case "SHA-384":
+		name = "SHA-384"
+	}
+	if name == "SHA" {
+		name = "SHA1"
+	}
 	var info hashAlgorithmInfo
 	if name == "MD2" {
 		info = md2Info
@@ -214,6 +226,6 @@ func (c Converter) hashAlgorithm(name string) cdx.Component {
 		},
 	}
 
-	c.BOMRefHash(&compo, "crypto/hash/"+strings.ToLower(info.Name))
+	c.BOMRefHash(&compo, "crypto/algorithm/"+strings.ToLower(info.Name))
 	return compo
 }

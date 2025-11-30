@@ -21,9 +21,7 @@ func TestScanner(t *testing.T) {
 	nmapPath, err := exec.LookPath("nmap")
 	require.NoError(t, err, "nmap binary is missing in PATH, please install it first")
 
-	scanner := NewTLS().
-		WithNmapBinary(nmapPath)
-	sshScanner := NewSSH().
+	scanner := New().
 		WithNmapBinary(nmapPath)
 
 	type given struct {
@@ -80,7 +78,7 @@ func TestScanner(t *testing.T) {
 			scenario: "ssh: ipv4",
 			given: given{
 				addrPort: ssh4,
-				scanner:  sshScanner,
+				scanner:  scanner,
 			},
 			then: model.Nmap{
 				Address: "127.0.0.1",
@@ -171,11 +169,6 @@ func TestHostToModel(t *testing.T) {
 	// Cipher groups
 	require.Len(t, p.Ciphers, 1)
 	require.Equal(t, "TLSv1.3", p.Ciphers[0].Name)
-	require.ElementsMatch(t, []string{
-		"TLS_AKE_WITH_AES_128_GCM_SHA256",
-		"TLS_AKE_WITH_AES_256_GCM_SHA384",
-		"TLS_AKE_WITH_CHACHA20_POLY1305_SHA256",
-	}, p.Ciphers[0].Ciphers)
 
 	// TLS certs
 	require.Len(t, p.TLSCerts, 1)

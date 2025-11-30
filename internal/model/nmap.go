@@ -36,7 +36,12 @@ type SSHHostKey struct {
 // SSLEnumCiphers is an output of `ssl-enum-ciphers` script of nmap
 type SSLEnumCiphers struct {
 	Name    string
-	Ciphers []string
+	Ciphers []SSLCipher
+}
+
+type SSLCipher struct {
+	Name    string // eg TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+	KexInfo string // eg secp256r1
 }
 
 // NmapScript is a raw output of nmap script, which is not

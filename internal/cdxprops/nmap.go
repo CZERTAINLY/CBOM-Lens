@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/CZERTAINLY/Seeker/internal/cdxprops/czertainly"
 	"github.com/CZERTAINLY/Seeker/internal/model"
@@ -46,15 +47,20 @@ var (
 	}
 )
 
+type TLSInfo struct {
+	Name    string
+	Version string
+	OID     string
+}
+
 func (c Converter) parseNmap(ctx context.Context, nmap model.Nmap) (compos []cdx.Component, deps []cdx.Dependency, services []cdx.Service, err error) {
 	for _, port := range nmap.Ports {
 		switch port.Service.Name {
 		case "ssh":
 			compos = append(compos, c.sshToCompos(ctx, port)...)
 		case "ssl", "http", "https":
-			c, d := c.tlsToCompos(ctx, port)
+			c := c.tlsToCompos(ctx, port)
 			compos = append(compos, c...)
-			deps = append(deps, d...)
 		default:
 			err = fmt.Errorf("can't parse unsupported nmap service: %s", port.Service.Name)
 			return
@@ -73,27 +79,8 @@ func (c Converter) sshToCompos(_ context.Context, port model.NmapPort) []cdx.Com
 	return ret
 }
 
-func (c Converter) tlsToCompos(ctx context.Context, port model.NmapPort) ([]cdx.Component, []cdx.Dependency) {
+func (c Converter) tlsToCompos(ctx context.Context, port model.NmapPort) []cdx.Component {
 	compos := make([]cdx.Component, 0, len(port.Ciphers)+len(port.TLSCerts))
-	var dependencies []cdx.Dependency
-
-	for _, cipher := range port.Ciphers {
-		proto, ver := ParseTLSVersion(cipher.Name)
-		compo := cdx.Component{
-			Name:   cipher.Name,
-			Type:   cdx.ComponentTypeCryptographicAsset,
-			BOMRef: "crypto/protocol/" + proto + "@" + ver,
-			CryptoProperties: &cdx.CryptoProperties{
-				AssetType: cdx.CryptoAssetTypeProtocol,
-				ProtocolProperties: &cdx.CryptoProtocolProperties{
-					Type:         "tls",
-					Version:      ver,
-					CipherSuites: ParseTLSCiphers(ctx, cipher.Ciphers),
-				},
-			},
-		}
-		compos = append(compos, compo)
-	}
 
 	for _, certHit := range port.TLSCerts {
 		detection := c.CertHit(ctx, certHit)
@@ -102,64 +89,190 @@ func (c Converter) tlsToCompos(ctx context.Context, port model.NmapPort) ([]cdx.
 			continue
 		}
 		compos = append(compos, detection.Components...)
-		dependencies = append(dependencies, detection.Dependencies...)
 	}
-	return compos, dependencies
+
+	var cryptoRefArray *[]cdx.BOMReference
+	var authSize string
+	for _, compo := range compos {
+		if compo.CryptoProperties != nil && compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeCertificate {
+			var refs = []cdx.BOMReference{
+				cdx.BOMReference(compo.BOMRef),
+			}
+			cryptoRefArray = &refs
+
+			// infer auth size
+			if compo.CryptoProperties != nil &&
+				compo.CryptoProperties.CertificateProperties != nil {
+				authSize = publicKeySizeFromPkeyRef(string(compo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef))
+			}
+			break
+		}
+	}
+
+	for _, cipher := range port.Ciphers {
+		compos = append(
+			compos,
+			c.tlsCipherToCompos(ctx, cipher, cryptoRefArray, authSize)...)
+	}
+	return compos
 }
 
-func ParseTLSVersion(input string) (string, string) {
-	// Common TLS/SSL version patterns
-	patterns := map[string]struct {
-		protocol string
-		version  string
-	}{
-		"TLSv1.3": {"tls", "1.3"},
-		"TLSv1.2": {"tls", "1.2"},
-		"TLSv1.1": {"tls", "1.1"},
-		"TLSv1.0": {"tls", "1.0"},
-		"TLSv1":   {"tls", "1.0"},
-		"SSLv3":   {"ssl", "3.0"},
-		"SSLv2":   {"ssl", "2.0"},
-		// Alternative formats
-		"TLS1.3":  {"tls", "1.3"},
-		"TLS1.2":  {"tls", "1.2"},
-		"TLS1.1":  {"tls", "1.1"},
-		"TLS1.0":  {"tls", "1.0"},
-		"TLS 1.3": {"tls", "1.3"},
-		"TLS 1.2": {"tls", "1.2"},
-		"TLS 1.1": {"tls", "1.1"},
-		"TLS 1.0": {"tls", "1.0"},
+func publicKeySizeFromPkeyRef(ref string) string {
+	// Example: "crypto/algorithm/rsa-2048@sha256:..."
+	//          "crypto/algorithm/ecdsa-secp256r1@sha256:..."
+	parts := strings.Split(ref, "@")
+	if len(parts) == 0 {
+		return ""
 	}
+	algo := strings.TrimPrefix(parts[0], "crypto/algorithm/")
+	if ret, ok := strings.CutPrefix(algo, "rsa-"); ok {
+		return ret // e.g., "2048"
+	}
+	if ret, ok := strings.CutPrefix(algo, "ecdsa-"); ok {
+		return ret // e.g., "secp256r1"
+	}
+	return ""
+}
 
+func ParseTLSInfo(input string) TLSInfo {
+	patterns := map[string]TLSInfo{
+		"TLSv1.3": {Name: "tls", Version: "1.3", OID: "1.3.6.1.5.5.7.6.2"},
+		"TLSv1.2": {Name: "tls", Version: "1.2", OID: "1.3.6.1.5.5.7.6.1"},
+		"TLSv1.1": {Name: "tls", Version: "1.1", OID: "1.3.6.1.5.5.7.6.0"},
+		"TLSv1.0": {Name: "tls", Version: "1.0", OID: "1.3.6.1.4.1.311.10.3.3"},
+		"TLSv1":   {Name: "tls", Version: "1.0", OID: "1.3.6.1.4.1.311.10.3.3"},
+		"SSLv3":   {Name: "ssl", Version: "3.0", OID: "1.3.6.1.4.1.311.10.3.2"},
+		"SSLv2":   {Name: "ssl", Version: "2.0", OID: "1.3.6.1.4.1.311.10.3.1"},
+		"TLS1.3":  {Name: "tls", Version: "1.3", OID: "1.3.6.1.5.5.7.6.2"},
+		"TLS1.2":  {Name: "tls", Version: "1.2", OID: "1.3.6.1.5.5.7.6.1"},
+		"TLS1.1":  {Name: "tls", Version: "1.1", OID: "1.3.6.1.5.5.7.6.0"},
+		"TLS1.0":  {Name: "tls", Version: "1.0", OID: "1.3.6.1.4.1.311.10.3.3"},
+		"TLS 1.3": {Name: "tls", Version: "1.3", OID: "1.3.6.1.5.5.7.6.2"},
+		"TLS 1.2": {Name: "tls", Version: "1.2", OID: "1.3.6.1.5.5.7.6.1"},
+		"TLS 1.1": {Name: "tls", Version: "1.1", OID: "1.3.6.1.5.5.7.6.0"},
+		"TLS 1.0": {Name: "tls", Version: "1.0", OID: "1.3.6.1.4.1.311.10.3.3"},
+	}
 	if result, ok := patterns[input]; ok {
-		return result.protocol, result.version
+		return result
 	}
-
-	return "n/a", "n/a"
+	return TLSInfo{Name: "n/a", Version: "n/a", OID: "n/a"}
 }
 
-func ParseTLSCiphers(ctx context.Context, ciphers []string) *[]cdx.CipherSuite {
-	ret := make([]cdx.CipherSuite, 0, len(ciphers))
+func (cv Converter) parseTLSCiphers(ctx context.Context, ciphers []model.SSLCipher, authKeyLen string) []cipherSuite {
+	ret := make([]cipherSuite, 0, len(ciphers))
 	for _, c := range ciphers {
 		suite, ok := ParseCipherSuite(c)
 		if !ok {
 			slog.WarnContext(ctx, "cipher suite not supported: ignoring", "name", c)
 			continue
 		}
-		algos := suite.Algorithms()
 		var identifiers = []string{
 			fmt.Sprintf("0x%X", byte(suite.Code>>8)),
 			fmt.Sprintf("0x%X", byte(suite.Code&0xFF)),
 		}
 
-		s := cdx.CipherSuite{
-			Name:        c,
-			Algorithms:  &algos,
-			Identifiers: &identifiers,
+		compos := make([]cdx.Component, 0, 4)
+		// kex info
+		info, ok := suite.KeyExchange.Exchange.info(suite.KexInfo)
+		if ok {
+			compo := info.componentWOBomRef(cv.czertainly)
+			setAlgorithmPrimitive(&compo, cdx.CryptoPrimitiveKeyAgree)
+			cv.BOMRefHash(&compo, info.algorithmName)
+			compos = append(compos, compo)
 		}
+
+		// kex-auth
+		info, ok = suite.KeyExchange.Auth.info(authKeyLen)
+		if ok {
+			compo := info.componentWOBomRef(cv.czertainly)
+			if suite.KeyExchange.Auth != "" {
+				setAlgorithmPrimitive(&compo, cdx.CryptoPrimitiveSignature)
+			}
+			cv.BOMRefHash(&compo, info.algorithmName)
+			compos = append(compos, compo)
+		}
+
+		// cipher algorithm
+		info, ok = suite.Cipher.info(suite.KeyLen, suite.Mode)
+		if ok {
+			compo := info.componentWOBomRef(cv.czertainly)
+			setAlgorithmPrimitive(&compo, cdx.CryptoPrimitiveBlockCipher)
+			cv.BOMRefHash(&compo, info.algorithmName)
+			compos = append(compos, compo)
+		}
+
+		// hash algorithm
+		if suite.Hash != "" {
+			compo := cv.hashAlgorithmCompo(string(suite.Hash))
+			cv.BOMRefHash(&compo, "crypto/algorithm/"+string(suite.Hash))
+			compos = append(compos, compo)
+		}
+
+		s := cipherSuite{
+			name:        c.Name,
+			identifiers: identifiers,
+			compos:      compos,
+		}
+
 		ret = append(ret, s)
 	}
-	return &ret
+	return ret
+}
+
+type cipherSuite struct {
+	name        string
+	compos      []cdx.Component
+	identifiers []string
+}
+
+func (c cipherSuite) cdx() cdx.CipherSuite {
+	var algos = make([]cdx.BOMReference, 0, len(c.compos))
+	for _, compo := range c.compos {
+		algos = append(algos, cdx.BOMReference(compo.BOMRef))
+	}
+	var algop *[]cdx.BOMReference
+	if len(algos) != 0 {
+		algop = &algos
+	}
+	return cdx.CipherSuite{
+		Name:        c.name,
+		Algorithms:  algop,
+		Identifiers: &c.identifiers,
+	}
+}
+
+func (c Converter) tlsCipherToCompos(ctx context.Context, cipher model.SSLEnumCiphers, cryptoRefArray *[]cdx.BOMReference, authKeyLen string) []cdx.Component {
+	info := ParseTLSInfo(cipher.Name)
+
+	var compos []cdx.Component
+	var suites []cdx.CipherSuite
+
+	for _, cs := range c.parseTLSCiphers(ctx, cipher.Ciphers, authKeyLen) {
+		compos = append(compos, cs.compos...)
+		suites = append(suites, cs.cdx())
+	}
+
+	var suitesp *[]cdx.CipherSuite
+	if len(suites) != 0 {
+		suitesp = &suites
+	}
+
+	protoCompo := cdx.Component{
+		Name:   cipher.Name,
+		Type:   cdx.ComponentTypeCryptographicAsset,
+		BOMRef: "crypto/protocol/" + info.Name + "@" + info.Version,
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType: cdx.CryptoAssetTypeProtocol,
+			ProtocolProperties: &cdx.CryptoProtocolProperties{
+				Type:           cdx.CryptoProtocolTypeTLS,
+				Version:        info.Version,
+				CipherSuites:   suitesp,
+				CryptoRefArray: cryptoRefArray,
+			},
+			OID: info.OID,
+		},
+	}
+	return append([]cdx.Component{protoCompo}, compos...)
 }
 
 // ParseSSHAlgorithm returns CycloneDX crypto algorithm properties for a known SSH

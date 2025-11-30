@@ -224,23 +224,16 @@ func nmaps(_ context.Context, cfg model.Ports) ([]nmap.Scanner, []netip.Addr) {
 		ips = append(ips, netip.IPv6Loopback())
 	}
 
-	var scanners = []nmap.Scanner{
-		nmap.NewTLS(),
-		nmap.NewSSH(),
-	}
+	var scanner = nmap.New()
 
 	if cfg.Binary != "" {
-		for idx, s := range scanners {
-			scanners[idx] = s.WithNmapBinary(cfg.Binary)
-		}
+		scanner.WithNmapBinary(cfg.Binary)
 	}
 	if cfg.Ports != "" {
-		for idx, s := range scanners {
-			scanners[idx] = s.WithPorts(cfg.Ports)
-		}
+		scanner = scanner.WithPorts(cfg.Ports)
 	}
 
-	return scanners, ips
+	return []nmap.Scanner{scanner}, ips
 }
 
 type scanner[T any] interface {

@@ -1,6 +1,9 @@
 package cdxprops
 
 import (
+	"strconv"
+
+	"github.com/CZERTAINLY/Seeker/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 
@@ -75,6 +78,7 @@ const (
 type CipherSuite struct {
 	Protocol    Protocol
 	KeyExchange KeyExchange
+	KexInfo     string
 	Cipher      CipherAlgorithm
 	KeyLen      KeyLen
 	Mode        CipherMode
@@ -83,57 +87,197 @@ type CipherSuite struct {
 	Code        CipherSuiteCode
 }
 
-// Algorithms returns a list of algorithm identifiers for the cipher suite.
-func (c CipherSuite) Algorithms() []cdx.BOMReference {
-	var ret []cdx.BOMReference
-	add := func(s string) {
-		ret = append(ret, cdx.BOMReference(s))
-	}
-	switch c.KeyExchange.Exchange {
+func (kex KeyExchangeAlgorithm) info(kexInfo string) (algorithmInfo, bool) {
+	cryptoFunctions := []cdx.CryptoFunction{cdx.CryptoFunctionKeyderive, cdx.CryptoFunctionKeygen}
+	switch kex {
 	case KexDHE:
-		add("crypto/algorithm/dhe@1.2.840.10046.2.1")    // ANSI X9.42 dhpublicnumber
-		add("crypto/algorithm/dhe@1.2.840.113549.1.3.1") // PKCS#3 dkKeyAgreement
-	case KexRSA:
-		add("crypto/algorithm/rsa-2048@1.2.840.113549.1.1.1")
+		var level int
+		var size int
+		switch kexInfo {
+		case "1024":
+			level = 80
+			size = 1024
+		case "2048":
+			level = 112
+			size = 2048
+		case "3072":
+			level = 128
+			size = 3072
+		case "4096":
+			level = 152
+			size = 4096
+		default:
+			level = 112 // default to 2048 bits
+			size = 2048
+		}
+		return algorithmInfo{
+			name:                   "DHE-" + strconv.Itoa(size),
+			oid:                    "1.2.840.113549.1.3.1",
+			algorithmName:          "crypto/algorithm/dhe-" + strconv.Itoa(size),
+			paramSetID:             kexInfo,
+			cryptoFunctions:        cryptoFunctions,
+			classicalSecurityLevel: level,
+		}, true
 	case KexECDHE:
-		add("crypto/algorithm/ecdh-curve25519@1.3.132.1.12")
+		return algorithmInfo{
+			name:                   "ECDHE-" + kexInfo,
+			oid:                    "1.3.132.1.12",
+			algorithmName:          "crypto/algorithm/ecdhe-" + kexInfo,
+			paramSetID:             kexInfo,
+			cryptoFunctions:        cryptoFunctions,
+			classicalSecurityLevel: inferECDSASecurityLevel(kexInfo),
+		}, true
+	case KexRSA:
+		if kexInfo == "" {
+			kexInfo = "2048"
+		}
+		return algorithmInfo{
+			name:                   "RSA-" + kexInfo,
+			oid:                    "1.2.840.113549.1.1.1",
+			algorithmName:          "crypto/algorithm/rsa-" + kexInfo,
+			paramSetID:             kexInfo,
+			cryptoFunctions:        cryptoFunctions,
+			classicalSecurityLevel: inferRSASecurityLevel(kexInfo),
+		}, true
+	default:
+		return algorithmInfo{}, false
 	}
+}
 
-	switch c.KeyExchange.Auth {
+func (auth KeyAuthenticationAlgorithm) info(keyLen string) (algorithmInfo, bool) {
+	switch auth {
 	case KauthECDSA:
-		add("crypto/algorithm/ecdsa@1.2.840.10045.4.3.2")
+		return algorithmInfo{
+			name:                   "ECDSA-" + keyLen,
+			oid:                    "1.2.840.10045.4.3.2",
+			algorithmName:          "crypto/algorithm/ecdsa",
+			paramSetID:             keyLen,
+			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionSign, cdx.CryptoFunctionVerify},
+			classicalSecurityLevel: inferECDSASecurityLevel(keyLen),
+		}, true
 	case KauthRSA:
-		add("crypto/algorithm/rsa-2048@1.2.840.113549.1.1.1")
+		return algorithmInfo{
+			name:                   "RSA-" + keyLen,
+			oid:                    "1.2.840.113549.1.1.1",
+			algorithmName:          "crypto/algorithm/rsa",
+			paramSetID:             keyLen,
+			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionSign, cdx.CryptoFunctionVerify},
+			classicalSecurityLevel: inferRSASecurityLevel(keyLen),
+		}, true
+	default:
+		return algorithmInfo{}, false
 	}
+}
 
-	// Cipher + KeyLen + Mode
+// Example helper functions:
+func inferECDSASecurityLevel(curve string) int {
+	switch curve {
+	case "secp256r1", "x25519":
+		return 128
+	case "secp384r1":
+		return 192
+	case "secp521r1":
+		return 256
+	default:
+		return 128
+	}
+}
+
+func inferRSASecurityLevel(bits string) int {
+	switch bits {
+	case "1024":
+		return 80
+	case "2048":
+		return 112
+	case "3072":
+		return 128
+	case "4096":
+		return 152
+	default:
+		return 112
+	}
+}
+
+func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInfo, bool) {
+	var info algorithmInfo
 	switch {
-	case c.Cipher == CipherRC4 && c.KeyLen == KeyLen128:
-		add("crypto/algorithm/rc4-128@1.2.840.113549.3.4")
-	case c.Cipher == Cipher3DES && c.Mode == CipherModeEDE_CBC:
-		add("crypto/algorithm/3des-ede-cbc@1.2.840.113549.3.7")
-	case c.Cipher == CipherAES && c.KeyLen == KeyLen128 && c.Mode == CipherModeCBC:
-		add("crypto/algorithm/aes-128-cbc@2.16.840.1.101.3.4.1.2")
-	case c.Cipher == CipherAES && c.KeyLen == KeyLen256 && c.Mode == CipherModeCBC:
-		add("crypto/algorithm/aes-256-cbc@2.16.840.1.101.3.4.1.42")
-	case c.Cipher == CipherAES && c.KeyLen == KeyLen128 && c.Mode == CipherModeGCM:
-		add("crypto/algorithm/aes-128-gcm@2.16.840.1.101.3.4.1.6")
-	case c.Cipher == CipherAES && c.KeyLen == KeyLen256 && c.Mode == CipherModeGCM:
-		add("crypto/algorithm/aes-256-gcm@2.16.840.1.101.3.4.1.46")
-	case c.Cipher == CipherCHACHA20 && c.Mode == CipherModePOLY1305:
-		add("crypto/algorithm/chacha20-poly1305@ietf-rfc8439")
+	case cipher == CipherRC4 && keyLen == KeyLen128:
+		info = algorithmInfo{
+			name:                   "RC4-128",
+			oid:                    "1.2.840.113549.3.4",
+			algorithmName:          "crypto/algorithm/rc4-128",
+			keySize:                int(KeyLen128),
+			paramSetID:             string(CipherModeEmpty),
+			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
+			classicalSecurityLevel: 128,
+		}
+	case cipher == Cipher3DES && mode == CipherModeEDE_CBC:
+		info = algorithmInfo{
+			name:                   "3DES-EDE-CBC",
+			oid:                    "1.2.840.113549.3.7",
+			algorithmName:          "crypto/algorithm/3des-ede-cbc",
+			keySize:                int(KeyLen168),
+			paramSetID:             string(CipherModeEDE_CBC),
+			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
+			classicalSecurityLevel: 112,
+		}
+	case cipher == CipherAES:
+		switch {
+		case keyLen == KeyLen128 && mode == CipherModeCBC:
+			info = algorithmInfo{
+				name:                   "AES-128-CBC",
+				oid:                    "2.16.840.1.101.3.4.1.2",
+				algorithmName:          "crypto/algorithm/aes-128-cbc",
+				keySize:                int(KeyLen128),
+				paramSetID:             string(CipherModeCBC),
+				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
+				classicalSecurityLevel: 128,
+			}
+		case keyLen == KeyLen256 && mode == CipherModeCBC:
+			info = algorithmInfo{
+				name:                   "AES-256-CBC",
+				oid:                    "2.16.840.1.101.3.4.1.42",
+				algorithmName:          "crypto/algorithm/aes-256-cbc",
+				keySize:                int(KeyLen256),
+				paramSetID:             string(CipherModeCBC),
+				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
+				classicalSecurityLevel: 256,
+			}
+		case keyLen == KeyLen128 && mode == CipherModeGCM:
+			info = algorithmInfo{
+				name:                   "AES-128-GCM",
+				oid:                    "2.16.840.1.101.3.4.1.6",
+				algorithmName:          "crypto/algorithm/aes-128-gcm",
+				keySize:                int(KeyLen128),
+				paramSetID:             string(CipherModeGCM),
+				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
+				classicalSecurityLevel: 128,
+			}
+		case keyLen == KeyLen256 && mode == CipherModeGCM:
+			info = algorithmInfo{
+				name:                   "AES-256-GCM",
+				oid:                    "2.16.840.1.101.3.4.1.46",
+				algorithmName:          "crypto/algorithm/aes-256-gcm",
+				keySize:                int(KeyLen256),
+				paramSetID:             string(CipherModeGCM),
+				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
+				classicalSecurityLevel: 256,
+			}
+		}
+	case cipher == CipherCHACHA20 && mode == CipherModePOLY1305:
+		info = algorithmInfo{
+			name:                   "ChaCha20-Poly1305",
+			oid:                    "ietf-rfc8439",
+			algorithmName:          "crypt/algorithm/chacha20-poly1305",
+			keySize:                int(KeyLen256),
+			paramSetID:             string(CipherModePOLY1305),
+			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
+			classicalSecurityLevel: 128,
+		}
+	default:
+		return algorithmInfo{}, false
 	}
-
-	switch c.Hash {
-	case HashSHA:
-		add("crypto/algorithm/sha-1@1.3.14.3.2.26")
-	case HashSHA256:
-		add("crypto/algorithm/sha-256@2.16.840.1.101.3.4.2.1")
-	case HashSHA384:
-		add("crypto/algorithm/sha-384@2.16.840.1.101.3.4.2.2")
-	}
-
-	return ret
+	return info, true
 }
 
 var _fallbackNames = map[string]string{
@@ -430,8 +574,9 @@ var byCode = map[CipherSuiteCode]CipherSuite{
 // ParseCipherSuite parses a TLS cipher suite name into its components.
 // this function check fallback names and returned CipherSuite name is
 // always normalized
-func ParseCipherSuite(name string) (CipherSuite, bool) {
+func ParseCipherSuite(c model.SSLCipher) (CipherSuite, bool) {
 	var ret CipherSuite
+	name := c.Name
 
 	// fallback names
 	if fallback, ok := _fallbackNames[name]; ok {
@@ -450,5 +595,6 @@ func ParseCipherSuite(name string) (CipherSuite, bool) {
 
 	suite.Name = name
 	suite.Code = code
+	suite.KexInfo = c.KexInfo
 	return suite, true
 }

@@ -183,9 +183,8 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 	cryptoProps, props, hashName := c.getAlgorithmProperties(sigAlg)
 
 	sigAlgCompo = cdx.Component{
-		Type:    cdx.ComponentTypeCryptographicAsset,
-		Name:    algName,
-		Version: oid,
+		Type: cdx.ComponentTypeCryptographicAsset,
+		Name: algName,
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType:           cdx.CryptoAssetTypeAlgorithm,
 			AlgorithmProperties: &cryptoProps,
@@ -194,7 +193,7 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 		Properties: &props,
 	}
 
-	hashAlgCompo = c.hashAlgorithm(hashName)
+	hashAlgCompo = c.hashAlgorithmCompo(hashName)
 	c.BOMRefHash(&sigAlgCompo, bomName)
 	return
 }
@@ -254,94 +253,6 @@ func sha256Hash(data []byte) []byte {
 func sha1Hash(data []byte) []byte {
 	hash := sha1.Sum(data) // NOSONAR - we provide sha1 and sha256 hashes
 	return hash[:]
-}
-
-// extractSubjectAlternativeNames extracts SANs from certificate
-func extractSubjectAlternativeNames(cert *x509.Certificate) []string {
-	sans := []string{}
-
-	for _, dns := range cert.DNSNames {
-		sans = append(sans, fmt.Sprintf("DNS:%s", dns))
-	}
-
-	for _, email := range cert.EmailAddresses {
-		sans = append(sans, fmt.Sprintf("EMAIL:%s", email))
-	}
-
-	for _, ip := range cert.IPAddresses {
-		sans = append(sans, fmt.Sprintf("IP:%s", ip.String()))
-	}
-
-	for _, uri := range cert.URIs {
-		sans = append(sans, fmt.Sprintf("URI:%s", uri.String()))
-	}
-
-	return sans
-}
-
-// extractKeyUsage extracts key usage flags
-func extractKeyUsage(usage x509.KeyUsage) []string {
-	ret := []string{}
-
-	if usage&x509.KeyUsageDigitalSignature != 0 {
-		ret = append(ret, "DigitalSignature")
-	}
-	if usage&x509.KeyUsageContentCommitment != 0 {
-		ret = append(ret, "ContentCommitment")
-	}
-	if usage&x509.KeyUsageKeyEncipherment != 0 {
-		ret = append(ret, "KeyEncipherment")
-	}
-	if usage&x509.KeyUsageDataEncipherment != 0 {
-		ret = append(ret, "DataEncipherment")
-	}
-	if usage&x509.KeyUsageKeyAgreement != 0 {
-		ret = append(ret, "KeyAgreement")
-	}
-	if usage&x509.KeyUsageCertSign != 0 {
-		ret = append(ret, "CertSign")
-	}
-	if usage&x509.KeyUsageCRLSign != 0 {
-		ret = append(ret, "CRLSign")
-	}
-	if usage&x509.KeyUsageEncipherOnly != 0 {
-		ret = append(ret, "EncipherOnly")
-	}
-	if usage&x509.KeyUsageDecipherOnly != 0 {
-		ret = append(ret, "DecipherOnly")
-	}
-
-	return ret
-}
-
-// extractExtendedKeyUsage extracts extended key usage
-func extractExtendedKeyUsage(extKeyUsage []x509.ExtKeyUsage) []string {
-	ret := []string{}
-
-	ekuMap := map[x509.ExtKeyUsage]string{
-		x509.ExtKeyUsageAny:                            "Any",
-		x509.ExtKeyUsageServerAuth:                     "ServerAuth",
-		x509.ExtKeyUsageClientAuth:                     "ClientAuth",
-		x509.ExtKeyUsageCodeSigning:                    "CodeSigning",
-		x509.ExtKeyUsageEmailProtection:                "EmailProtection",
-		x509.ExtKeyUsageIPSECEndSystem:                 "IPSECEndSystem",
-		x509.ExtKeyUsageIPSECTunnel:                    "IPSECTunnel",
-		x509.ExtKeyUsageIPSECUser:                      "IPSECUser",
-		x509.ExtKeyUsageTimeStamping:                   "TimeStamping",
-		x509.ExtKeyUsageOCSPSigning:                    "OCSPSigning",
-		x509.ExtKeyUsageMicrosoftServerGatedCrypto:     "MicrosoftServerGatedCrypto",
-		x509.ExtKeyUsageNetscapeServerGatedCrypto:      "NetscapeServerGatedCrypto",
-		x509.ExtKeyUsageMicrosoftCommercialCodeSigning: "MicrosoftCommercialCodeSigning",
-		x509.ExtKeyUsageMicrosoftKernelCodeSigning:     "MicrosoftKernelCodeSigning",
-	}
-
-	for _, eku := range extKeyUsage {
-		if name, ok := ekuMap[eku]; ok {
-			ret = append(ret, name)
-		}
-	}
-
-	return ret
 }
 
 func ReadSubjectPublicKeyRef(ctx context.Context, cert *x509.Certificate) cdx.BOMReference {

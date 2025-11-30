@@ -26,21 +26,12 @@ type Scanner struct {
 
 // NewTLS creates a nmap scanner with -sV and --script ssl-enum-ciphers,ssl-cert
 // for TLS/SSL (if available) detection
-func NewTLS() Scanner {
+func New() Scanner {
 	return Scanner{
 		options: []nmap.Option{
+			nmap.WithTimingTemplate(nmap.TimingAggressive),
 			nmap.WithServiceInfo(),
-			nmap.WithScripts("ssl-enum-ciphers", "ssl-cert"),
-		},
-	}
-}
-
-// NewSSH creates a nmap scanner with -sV and --script ssh-hostkey
-func NewSSH() Scanner {
-	return Scanner{
-		options: []nmap.Option{
-			nmap.WithServiceInfo(),
-			nmap.WithScripts("ssh-hostkey"),
+			nmap.WithScripts("ssl-enum-ciphers", "ssl-cert", "ssh-hostkey"),
 		},
 	}
 }
@@ -67,12 +58,6 @@ func (s Scanner) Scan(ctx context.Context, addr netip.Addr) (model.Nmap, error) 
 		options = append(options, nmap.WithBinaryPath(s.nmap))
 	}
 
-	ports := s.ports
-	if ports == nil {
-		ports = []string{"1-65535"}
-	}
-	options = append(options, nmap.WithPorts(ports...))
-
 	options = append(options, []nmap.Option{
 		nmap.WithTargets(addr.String()),
 	}...)
@@ -80,6 +65,12 @@ func (s Scanner) Scan(ctx context.Context, addr netip.Addr) (model.Nmap, error) 
 	if addr.Is6() {
 		options = append(options, nmap.WithIPv6Scanning())
 	}
+
+	ports := s.ports
+	if ports == nil {
+		ports = []string{"1-65535"}
+	}
+	options = append(options, nmap.WithPorts(ports...))
 
 	logCtx := log.ContextAttrs(
 		ctx,
@@ -93,7 +84,7 @@ func (s Scanner) Scan(ctx context.Context, addr netip.Addr) (model.Nmap, error) 
 	)
 	run, err := scan(logCtx, options)
 	if err != nil {
-		return model.Nmap{}, fmt.Errorf("nmap scan: %w", err)
+		return model.Nmap{}, fmt.Errorf("nmap scan services: %w", err)
 	}
 
 	if run == nil || len(run.Hosts) == 0 {
@@ -111,11 +102,23 @@ func scan(ctx context.Context, options []nmap.Option) (*nmap.Run, error) {
 	}
 
 	now := time.Now()
-	slog.DebugContext(ctx, "scan started")
+	slog.InfoContext(ctx, "scan started")
 	scan, warningsp, err := scanner.Run()
 	if err != nil {
 		slog.DebugContext(ctx, "scan failed", "error", err)
 		return nil, fmt.Errorf("nmap scan: %w", err)
+	}
+
+	if scan != nil {
+		slog.InfoContext(ctx, "scan finished",
+			slog.Group("stats",
+				"args", scan.Args,
+				"start", scan.StartStr,
+				"finished", scan.Stats.Finished.TimeStr,
+				"elapsed", scan.Stats.Finished.Elapsed,
+				"summary", scan.Stats.Finished.Summary,
+			),
+		)
 	}
 
 	if scan == nil || len(scan.Hosts) == 0 {
@@ -204,18 +207,23 @@ func sslEnumCiphers(ctx context.Context, s nmap.Script) []model.SSLEnumCiphers {
 	return ciphers
 }
 
-func cipherSuites(_ context.Context, tables []nmap.Table) []string {
-	var ret []string
+func cipherSuites(_ context.Context, tables []nmap.Table) []model.SSLCipher {
+	var ret []model.SSLCipher
 	for _, row := range tables {
 		if row.Key != "ciphers" {
 			continue
 		}
 		for _, cipher := range row.Tables {
+			var item model.SSLCipher
 			for _, element := range cipher.Elements {
 				if element.Key == "name" {
-					ret = append(ret, element.Value)
+					item.Name = element.Value
+				}
+				if element.Key == "kex_info" {
+					item.KexInfo = element.Value
 				}
 			}
+			ret = append(ret, item)
 		}
 	}
 	return ret
