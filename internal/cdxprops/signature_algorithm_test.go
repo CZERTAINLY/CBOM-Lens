@@ -163,3 +163,60 @@ func TestGetAlgorithmProperties(t *testing.T) {
 	require.Equal(t, "SHA-512", hash)
 	require.Equal(t, 128, *props.ClassicalSecurityLevel)
 }
+
+func TestConverter_getAlgorithmProperties(t *testing.T) {
+	tests := []struct {
+		name           string
+		czertainly     bool
+		sigAlg         x509.SignatureAlgorithm
+		wantFamily     string
+		wantParamSetID string
+		wantHash       string
+		wantPadding    cdx.CryptoPadding
+		wantClassical  int
+	}{
+		{"MD2WithRSA", false, x509.MD2WithRSA, "RSASSA-PKCS1", "128", "MD2", "", 0},
+		{"MD5WithRSA", false, x509.MD5WithRSA, "RSASSA-PKCS1", "128", "MD5", "", 0},
+		{"SHA1WithRSA", false, x509.SHA1WithRSA, "RSASSA-PKCS1", "160", "SHA-1", "", 0},
+		{"SHA256WithRSA", false, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, 112},
+		{"SHA384WithRSA", false, x509.SHA384WithRSA, "RSASSA-PKCS1", "384", "SHA-384", cdx.CryptoPaddingPKCS1v15, 128},
+		{"SHA512WithRSA", false, x509.SHA512WithRSA, "RSASSA-PKCS1", "512", "SHA-512", cdx.CryptoPaddingPKCS1v15, 256},
+		{"SHA256WithRSAPSS", false, x509.SHA256WithRSAPSS, "RSASSA-PSS", "256", "SHA-256", "", 112},
+		{"SHA384WithRSAPSS", false, x509.SHA384WithRSAPSS, "RSASSA-PSS", "384", "SHA-384", "", 128},
+		{"SHA512WithRSAPSS", false, x509.SHA512WithRSAPSS, "RSASSA-PSS", "512", "SHA-512", "", 256},
+		{"ECDSAWithSHA1", false, x509.ECDSAWithSHA1, "ECDSA", "160", "SHA-1", "", 0},
+		{"ECDSAWithSHA256", false, x509.ECDSAWithSHA256, "ECDSA", "256", "SHA-256", "", 128},
+		{"ECDSAWithSHA384", false, x509.ECDSAWithSHA384, "ECDSA", "384", "SHA-384", "", 192},
+		{"ECDSAWithSHA512", false, x509.ECDSAWithSHA512, "ECDSA", "512", "SHA-512", "", 256},
+		{"DSAWithSHA1", false, x509.DSAWithSHA1, "DSA", "160", "SHA-1", "", 0},
+		{"DSAWithSHA256", false, x509.DSAWithSHA256, "DSA", "256", "SHA-256", "", 112},
+		{"PureEd25519", false, x509.PureEd25519, "EdDSA", "256", "SHA-512", "", 128},
+		{"Unknown", false, x509.SignatureAlgorithm(999), "Unknown", "0", "", "", 0},
+		{"SHA256WithRSA czertainly", true, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, 112},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Converter{czertainly: tt.czertainly}
+			got, props, hash := c.getAlgorithmProperties(tt.sigAlg)
+
+			if got.ParameterSetIdentifier != tt.wantParamSetID {
+				t.Errorf("ParameterSetIdentifier = %v, want %v", got.ParameterSetIdentifier, tt.wantParamSetID)
+			}
+			if hash != tt.wantHash {
+				t.Errorf("hash = %v, want %v", hash, tt.wantHash)
+			}
+			if got.Padding != tt.wantPadding {
+				t.Errorf("Padding = %v, want %v", got.Padding, tt.wantPadding)
+			}
+			if got.ClassicalSecurityLevel == nil || *got.ClassicalSecurityLevel != tt.wantClassical {
+				t.Errorf("ClassicalSecurityLevel = %v, want %v", got.ClassicalSecurityLevel, tt.wantClassical)
+			}
+			if tt.czertainly {
+				if len(props) == 0 || props[0].Value != tt.wantFamily {
+					t.Errorf("czertainly prop Value = %v, want %v", props, tt.wantFamily)
+				}
+			}
+		})
+	}
+}
