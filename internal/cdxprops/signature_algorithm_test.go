@@ -152,13 +152,13 @@ func TestGetAlgorithmProperties(t *testing.T) {
 	require.Empty(t, props.Curve)
 	require.Empty(t, extra)
 
-	props, extra, hash = cv.getAlgorithmProperties(x509.ECDSAWithSHA384)
+	props, _, hash = cv.getAlgorithmProperties(x509.ECDSAWithSHA384)
 	require.Equal(t, "secp384r1", props.Curve)
 	require.Equal(t, "SHA-384", hash)
 	require.NotNil(t, props.ClassicalSecurityLevel)
 	require.Equal(t, 192, *props.ClassicalSecurityLevel)
 
-	props, extra, hash = cv.getAlgorithmProperties(x509.PureEd25519)
+	props, _, hash = cv.getAlgorithmProperties(x509.PureEd25519)
 	require.Equal(t, "256", props.ParameterSetIdentifier)
 	require.Equal(t, "SHA-512", hash)
 	require.Equal(t, 128, *props.ClassicalSecurityLevel)
