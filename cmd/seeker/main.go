@@ -23,7 +23,7 @@ var (
 	configPath     string // actual config file used (if loaded)
 
 	flagConfigFilePath string // value of --config flag
-	flagVerbose        bool   //value if --verbose flag
+	flagVerbose        bool   // value of --verbose flag
 )
 
 var rootCmd = &cobra.Command{
