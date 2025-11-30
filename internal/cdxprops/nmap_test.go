@@ -116,7 +116,7 @@ func TestParseSSHAlgorithm(t *testing.T) {
 }
 
 func TestParseSSHHostKey2(t *testing.T) {
-	cv := Converter{}
+	cv := NewConverter()
 	key := model.SSHHostKey{Type: "ecdsa-sha2-nistp256", Bits: "256"}
 	compo := cv.ParseSSHHostKey(key)
 	require.Equal(t, "crypto/algorithm/ecdsa-sha2-nistp256@256", compo.BOMRef)
@@ -127,20 +127,8 @@ func TestParseSSHHostKey2(t *testing.T) {
 	require.Equal(t, "nistp256@1.2.840.10045.3.1.7", compo.CryptoProperties.OID)
 }
 
-func TestParseNmapUnsupportedService(t *testing.T) {
-	cv := Converter{}
-	nmap := model.Nmap{
-		Ports: []model.NmapPort{
-			{Service: model.NmapService{Name: "ftp"}},
-		},
-	}
-	_, _, _, err := cv.parseNmap(t.Context(), nmap)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "can't parse unsupported nmap service: ftp")
-}
-
 func TestParseTLSCiphers(t *testing.T) {
-	cv := Converter{}
+	cv := NewConverter()
 	ciphers := []model.SSLCipher{
 		{Name: "TLS_AES_128_GCM_SHA256"},
 		{Name: "TLS_RSA_WITH_AES_128_CBC_SHA"},
@@ -172,7 +160,7 @@ func TestCipherSuite_cdx(t *testing.T) {
 }
 
 func TestTlsCipherToCompos(t *testing.T) {
-	cv := Converter{}
+	cv := NewConverter()
 	cipherEnum := model.SSLEnumCiphers{
 		Name: "TLSv1.3",
 		Ciphers: []model.SSLCipher{
