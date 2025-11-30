@@ -100,6 +100,7 @@ service?: #ServiceFields
 #SeekerServer: {
   addr: string
   base_url: #URL
+  state_file: string | *"./seeker-state-file"
 }
 
 #Core: {

@@ -33,8 +33,9 @@ const (
 	AuthTypeNone        = "none"
 	AuthTypeStaticToken = "static_token"
 
-	ServiceModeManual = "manual"
-	ServiceModeTimer  = "timer"
+	ServiceModeManual    = "manual"
+	ServiceModeTimer     = "timer"
+	ServiceModeDiscovery = "discovery"
 
 	LogStderr  = "stderr"
 	LogStdout  = "stdout"
@@ -98,7 +99,7 @@ type ServiceFields struct {
 type Service struct {
 	ServiceFields `yaml:",inline"`
 
-	Mode       string         `json:"mode"`                                             // must be "manual" or "timer"
+	Mode       string         `json:"mode"`                                             // must be "manual", "timer" or "discovery"
 	Dir        string         `json:"dir,omitempty"`                                    // output directory
 	Repository *Repository    `json:"repository,omitempty" yaml:"repository,omitempty"` // remote publication
 	Schedule   *TimerSchedule `json:"schedule,omitempty"`                               // only for mode timer
@@ -119,8 +120,9 @@ type Repository struct {
 
 // SeekerServer is configuration for the discovery mode server.
 type SeekerServer struct {
-	Addr    TCPAddr `json:"addr"` // :port or ip:port
-	BaseURL URL     `json:"base_url"`
+	Addr      TCPAddr `json:"addr"` // :port or ip:port
+	BaseURL   URL     `json:"base_url"`
+	StateFile string  `json:"state_file"`
 }
 
 // Core is configuration for CZERTAINLY Core API integration.

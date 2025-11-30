@@ -86,7 +86,55 @@ service:
 					},
 					"seeker": {
 						"addr": ":8080",
-						"base_url": "https://seeker.example.net/api"
+						"base_url": "https://seeker.example.net/api",
+						"state_file": "./seeker-state-file"
+					},
+					"core": {
+						"base_url": "https://core-demo.example.net/api"
+					}
+				},
+				"containers": {
+					"enabled": false,
+					"Config": null
+				},
+				"filesystem": {
+					"enabled": false
+				},
+				"ports": {
+					"enabled": false,
+					"ipv4": false,
+					"ipv6": false
+				}
+			}`,
+		},
+		{
+			scenario: "discovery mode with repository, core and non-default state file",
+			yml: `
+version: 0
+service:
+  mode: discovery
+  log: stderr
+  repository:
+    base_url: https://example.com/repo
+  seeker:
+    addr: :8080
+    base_url: https://seeker.example.net/api
+    state_file: /tmp/some/path/seeker-sqlite
+  core:
+    base_url: https://core-demo.example.net/api
+`,
+			expectedJSON: `{
+				"version": 0,
+				"service": {
+					"mode": "discovery",
+					"log": "stderr",
+					"repository": {
+						"base_url": "https://example.com/repo"
+					},
+					"seeker": {
+						"addr": ":8080",
+						"base_url": "https://seeker.example.net/api",
+						"state_file": "/tmp/some/path/seeker-sqlite"
 					},
 					"core": {
 						"base_url": "https://core-demo.example.net/api"

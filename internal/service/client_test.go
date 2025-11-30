@@ -20,22 +20,19 @@ func TestNewBOMRepoUploaderFunc(t *testing.T) {
 		serverURL string
 		wantErr   bool
 	}{
-		"success http no trailing slash":          {serverURL: "http://some-server.com", wantErr: false},
-		"success http trailing slash":             {serverURL: "http://some-server.com/", wantErr: false},
-		"success http port no trailing slash":     {serverURL: "http://some-server.com:8080", wantErr: false},
-		"success http port trailing slash":        {serverURL: "https://some-server-com:8090/", wantErr: false},
-		"success https no trailing slash":         {serverURL: "https://some-server.com", wantErr: false},
-		"success https trailing slash":            {serverURL: "https://some-server.com/", wantErr: false},
-		"success https port no trailing slash":    {serverURL: "https://some-server.com:8080", wantErr: false},
-		"success https port trailing slash":       {serverURL: "https://some-server-com:8090/", wantErr: false},
-		"fail missing schema":                     {serverURL: "some-server.com", wantErr: true},
-		"fail missing schema trailing slash":      {serverURL: "some-server.com/", wantErr: true},
-		"fail missing schema port":                {serverURL: "some-server.com:8080", wantErr: true},
-		"fail missing schema port trailing slash": {serverURL: "some-server.com:8090/", wantErr: true},
-		"fail http path set":                      {serverURL: "http://some-server.com/some/path", wantErr: true},
-		"fail http port path set":                 {serverURL: "http://some-server.com:8080/some/path", wantErr: true},
-		"fail https path set":                     {serverURL: "https://some-server.com/some/path", wantErr: true},
-		"fail https port path set":                {serverURL: "https://some-server.com:8080/some/path", wantErr: true},
+		"success http no trailing slash":        {serverURL: "http://some-server.com", wantErr: false},
+		"success http trailing slash":           {serverURL: "http://some-server.com/", wantErr: false},
+		"success http port no trailing slash":   {serverURL: "http://some-server.com:8080", wantErr: false},
+		"success http port trailing slash":      {serverURL: "http://some-server.com:8080/", wantErr: false},
+		"success http port path":                {serverURL: "http://some-server.com:8080/cbom", wantErr: false},
+		"success http port path trailing slash": {serverURL: "http://some-server.com:8080/cbom/else/", wantErr: false},
+
+		"success https no trailing slash":        {serverURL: "https://some-server.com", wantErr: false},
+		"success https trailing slash":           {serverURL: "https://some-server.com/", wantErr: false},
+		"success https port no trailing slash":   {serverURL: "https://some-server.com:8080", wantErr: false},
+		"success https port trailing slash":      {serverURL: "https://some-server-com:8090/", wantErr: false},
+		"success https port path":                {serverURL: "https://some-server.com:8080/cbom", wantErr: false},
+		"success https port path trailing slash": {serverURL: "https://some-server.com:8080/cbom/else/", wantErr: false},
 	}
 
 	for name, tc := range testCases {
@@ -65,7 +62,7 @@ func TestDecodeUploadResponse(t *testing.T) {
 	testCases := map[string]struct {
 		resp     func() *http.Response
 		wantErr  bool
-		expected BOMCreateResponse
+		expected string
 	}{
 		"201 application/json expected body": {
 			resp: func() *http.Response {
@@ -77,11 +74,8 @@ func TestDecodeUploadResponse(t *testing.T) {
 				resp.Header.Set("Content-Type", "application/json")
 				return resp
 			},
-			wantErr: false,
-			expected: BOMCreateResponse{
-				SerialNumber: "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79",
-				Version:      1,
-			},
+			wantErr:  false,
+			expected: `{"version":1,"serialNumber":"urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79"}`,
 		},
 		"201 application/json unexpected body": {
 			resp: func() *http.Response {
@@ -93,7 +87,8 @@ func TestDecodeUploadResponse(t *testing.T) {
 				resp.Header.Set("Content-Type", "application/json")
 				return resp
 			},
-			wantErr: true,
+			wantErr:  false,
+			expected: `{"return":{"version":1,"serialNumber":"urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79"}}`,
 		},
 		"201 application/json unexpected body #2": {
 			resp: func() *http.Response {
@@ -105,7 +100,8 @@ func TestDecodeUploadResponse(t *testing.T) {
 				resp.Header.Set("Content-Type", "application/json")
 				return resp
 			},
-			wantErr: true,
+			wantErr:  false,
+			expected: `just some string`,
 		},
 		"201 unexpected content type": {
 			resp: func() *http.Response {
@@ -315,7 +311,7 @@ func TestBOMRepoUploadNetworkError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
-	err = u.Upload(context.Background(), []byte(`abcd`))
+	err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
 	require.Error(t, err)
 }
 
@@ -349,7 +345,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 				}))
 				return ts, ts.Close
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		"201 application/json unexpected body #2": {
 			setup: func() (*httptest.Server, func()) {
@@ -360,7 +356,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 				}))
 				return ts, ts.Close
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		"201 unexpected content type": {
 			setup: func() (*httptest.Server, func()) {
@@ -514,7 +510,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, u)
 
-			err = u.Upload(context.Background(), []byte(`abcd`))
+			err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
 			if tc.wantErr {
 				require.Error(t, err)
 				t.Log(err)
@@ -523,6 +519,56 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 			}
 		})
 	}
+}
+
+type helper struct {
+	count int
+}
+
+func (h *helper) C(e error, j, i string) {
+	h.count = h.count + 1
+}
+
+func TestBOMRepoUploadFuncWithCallbackSuccess(t *testing.T) {
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"version":1,"serialNumber":"urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79"}`))
+	}))
+	defer ts.Close()
+
+	mu := parseURL(t, ts.URL)
+	u, err := NewBOMRepoUploader(mu)
+	require.NoError(t, err)
+	require.NotNil(t, u)
+
+	x := &helper{count: 0}
+	u = u.WithUploadCallback(x.C)
+	err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
+	require.NoError(t, err)
+	require.Equal(t, 1, x.count)
+}
+
+func TestBOMRepoUploadFuncWithCallbackFail(t *testing.T) {
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"Message":"something failed"}`))
+	}))
+	defer ts.Close()
+
+	mu := parseURL(t, ts.URL)
+	u, err := NewBOMRepoUploader(mu)
+	require.NoError(t, err)
+	require.NotNil(t, u)
+
+	x := &helper{count: 0}
+	u = u.WithUploadCallback(x.C)
+	err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
+	require.Error(t, err)
+	require.Equal(t, 1, x.count)
 }
 
 func parseURL(t *testing.T, s string) model.URL {

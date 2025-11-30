@@ -182,8 +182,9 @@ func (s *Supervisor) Do(ctx context.Context) error {
 				slog.ErrorContext(ctx, "scan have failed", "reason", reason, "result", result)
 				continue
 			}
-			slog.DebugContext(ctx, "scan succeeded: uploading")
-			err := s.upload(ctx, result.Stdout)
+
+			slog.DebugContext(ctx, "scan succeeded: uploading", slog.String("job-name", result.JobName))
+			err := s.upload(ctx, result.JobName, result.Stdout)
 			if s.cfg.Mode == model.ServiceModeManual {
 				return err
 			}
@@ -193,6 +194,20 @@ func (s *Supervisor) Do(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// JobConfiguration returns a copy of configuration for job 'name' on success,
+// error otherwise.
+func (s *Supervisor) JobConfiguration(ctx context.Context, name string) (model.Scan, error) {
+	s.jobsMx.Lock()
+	defer s.jobsMx.Unlock()
+
+	j, ok := s.jobs[name]
+	if !ok {
+		slog.WarnContext(ctx, "Job does not exist.", slog.String("job-name", name))
+		return model.Scan{}, fmt.Errorf("job %q does not exist", name)
+	}
+	return j.Config(), nil
 }
 
 func (s *Supervisor) closeUploaders(ctx context.Context) {
@@ -219,6 +234,7 @@ func (s *Supervisor) closeJobs() {
 func (s *Supervisor) handleJobAdd(ctx context.Context, j jobAdd) {
 	s.jobsMx.Lock()
 	defer s.jobsMx.Unlock()
+
 	job := j.job
 	if _, ok := s.jobs[job.Name()]; ok {
 		slog.WarnContext(ctx, "job already added: ignoring", "job_name", job.Name())
@@ -268,10 +284,10 @@ func (s *Supervisor) callStart(ctx context.Context, name string) error {
 	return nil
 }
 
-func (s *Supervisor) upload(ctx context.Context, stdout []byte) error {
+func (s *Supervisor) upload(ctx context.Context, jobName string, stdout []byte) error {
 	var errs []error
 	for _, u := range s.uploaders {
-		err := u.Upload(ctx, stdout)
+		err := u.Upload(ctx, jobName, stdout)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -351,7 +367,7 @@ func NewWriteUploader(w io.Writer) WriteUploader {
 	return WriteUploader{w: w}
 }
 
-func (u WriteUploader) Upload(_ context.Context, raw []byte) error {
+func (u WriteUploader) Upload(_ context.Context, _ string, raw []byte) error {
 	if u.w == nil {
 		u.w = os.Stdout
 	}
@@ -371,7 +387,7 @@ func NewOSRootUploader(path string) (*OSRootUploader, error) {
 	return &OSRootUploader{root: root}, nil
 }
 
-func (u *OSRootUploader) Upload(ctx context.Context, b []byte) error {
+func (u *OSRootUploader) Upload(ctx context.Context, _ string, b []byte) error {
 	if u.root == nil {
 		return errors.New("root already closed")
 	}

@@ -26,6 +26,7 @@ func TestRunner(t *testing.T) {
 	})
 
 	cmd := service.Command{
+		JobName: "seeker.yaml",
 		Path:    yes,
 		Args:    []string{"golang"},
 		Env:     []string{"LC_ALL=C"},
@@ -38,6 +39,7 @@ func TestRunner(t *testing.T) {
 		require.NoError(t, err)
 		res := runner.LastResult()
 		require.NoError(t, res.Err)
+		require.Equal(t, "seeker.yaml", res.JobName)
 	})
 	t.Run("in progress", func(t *testing.T) {
 		err = runner.Start(ctx, cmd)
@@ -50,6 +52,7 @@ func TestRunner(t *testing.T) {
 		require.Equal(t, []string{"golang"}, res.Args)
 		require.NotZero(t, res.Started)
 		require.NotZero(t, res.Stopped)
+		require.Equal(t, "seeker.yaml", res.JobName)
 		// on GHA command `yes` finishes up earlier with
 		// ERROR processing stderr error="read |0: file already closed"
 		// lets not make this a fatal error
@@ -66,7 +69,8 @@ func TestRunner(t *testing.T) {
 	})
 	t.Run("exec error", func(t *testing.T) {
 		noCmd := service.Command{
-			Path: "does not exist",
+			JobName: "seeker.yaml",
+			Path:    "does not exist",
 		}
 		err := runner.Start(ctx, noCmd)
 		require.Error(t, err)
@@ -85,6 +89,7 @@ func TestStderr(t *testing.T) {
 	}
 
 	cmd := service.Command{
+		JobName: "something",
 		Path:    sh,
 		Args:    []string{"-c", "echo stdout; echo 1>&2 'stderr\nstderr\n'"},
 		Timeout: 50 * time.Second,
@@ -101,6 +106,7 @@ func TestStderr(t *testing.T) {
 	require.NoError(t, err)
 	res := <-runner.ResultsChan()
 	require.Equal(t, "stdout\n", string(res.Stdout))
+	require.Equal(t, "something", res.JobName)
 
 	var stderr = []string{
 		<-stderrChan,

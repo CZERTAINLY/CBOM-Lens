@@ -161,6 +161,6 @@ func TestOSRootUploader(t *testing.T) {
 	dir := t.TempDir()
 	u, err := service.NewOSRootUploader(dir)
 	require.NoError(t, err)
-	err = u.Upload(t.Context(), []byte("raw"))
+	err = u.Upload(t.Context(), "seeker.yaml", []byte("raw"))
 	require.NoError(t, err)
 }

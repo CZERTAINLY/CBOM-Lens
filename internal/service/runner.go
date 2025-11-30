@@ -86,6 +86,7 @@ func NewRunner(f StderrFunc) *Runner {
 }
 
 type Command struct {
+	JobName string
 	Path    string
 	Args    []string
 	Env     []string
@@ -94,6 +95,7 @@ type Command struct {
 }
 
 type Result struct {
+	JobName string
 	Path    string
 	Args    []string
 	Env     []string
@@ -119,10 +121,11 @@ func (r *Runner) Start(ctx context.Context, proto Command) error {
 	}
 
 	r.result = Result{
-		Path: proto.Path,
-		Args: append([]string(nil), proto.Args...),
-		Env:  append([]string(nil), proto.Env...),
-		Err:  nil,
+		JobName: proto.JobName,
+		Path:    proto.Path,
+		Args:    append([]string(nil), proto.Args...),
+		Env:     append([]string(nil), proto.Env...),
+		Err:     nil,
 	}
 
 	if proto.Timeout == 0 {

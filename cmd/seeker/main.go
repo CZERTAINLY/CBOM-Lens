@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"time"
 
+	"github.com/CZERTAINLY/Seeker/internal/dscvr"
 	"github.com/CZERTAINLY/Seeker/internal/log"
 	"github.com/CZERTAINLY/Seeker/internal/model"
 	"github.com/CZERTAINLY/Seeker/internal/service"
@@ -17,6 +20,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
+
+const defaultHttpServerGracefulPeriod = 5 * time.Second
 
 var (
 	userConfigPath string // /default/config/path/seeker on given OS
@@ -124,9 +129,9 @@ func doScan(cmd *cobra.Command, args []string) error {
 
 	config, err := model.LoadScanConfigFromPath(configPath)
 	if err != nil {
-		// fallback to the service config - if config does not comes from stdin
+		// fallback to the service config - if config does not come from stdin
 		// this allows one to debug the scanning part directly while using the same
-		// seeker.yaml as with a supervisor.
+		// seeker.yaml as with the supervisor.
 		if configPath != "-" {
 			serviceConfig, fallbackErr := model.LoadConfigFromPath(configPath)
 			if fallbackErr != nil {
@@ -209,11 +214,68 @@ func doRun(cmd *cobra.Command, args []string) error {
 			Log:     config.Service.Log,
 		},
 	})
-	if config.Service.Mode == model.ServiceModeManual {
+
+	var discoveryHttp *http.Server
+	var dscvrSrv *dscvr.Server
+
+	switch config.Service.Mode {
+	case model.ServiceModeManual:
 		supervisor.Start("**")
+
+	case model.ServiceModeDiscovery:
+		if dscvrSrv, err = dscvr.New(ctx, config.Service, supervisor, configPath); err != nil {
+			return err
+		}
+
+		var uploaders []model.Uploader
+		if config.Service.Dir != "" {
+			u, err := service.NewOSRootUploader(config.Service.Dir)
+			if err != nil {
+				return err
+			}
+			uploaders = append(uploaders, u)
+		}
+		bomUploader, err := service.NewBOMRepoUploader(config.Service.Repository.URL)
+		if err != nil {
+			return err
+		}
+		bomUploader = bomUploader.WithUploadCallback(dscvrSrv.UploadedCallback)
+		uploaders = append(uploaders, bomUploader)
+
+		supervisor = supervisor.WithUploaders(ctx, uploaders...)
+		discoveryHttp = &http.Server{
+			Addr:    config.Service.Seeker.Addr.String(),
+			Handler: dscvrSrv.Handler(),
+		}
+
+		go func() {
+			slog.InfoContext(ctx, "Starting http server.", slog.String("addr", config.Service.Seeker.Addr.String()))
+			if err := discoveryHttp.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("`ListenAndServe()` failed.", slog.String("error", err.Error()))
+			}
+		}()
+		if err := dscvrSrv.RegisterConnector(ctx); err != nil {
+			return err
+		}
 	}
 
-	return <-errChan
+	retErr := <-errChan
+
+	if discoveryHttp != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), defaultHttpServerGracefulPeriod)
+		defer shutdownCancel()
+
+		if err := discoveryHttp.Shutdown(shutdownCtx); err != nil {
+			slog.InfoContext(ctx, "Discovery server shutdown error.", slog.String("error", err.Error()))
+		} else {
+			slog.InfoContext(ctx, "Discovery server shutdown gracefully.")
+		}
+	}
+	if dscvrSrv != nil {
+		dscvrSrv.Close(ctx)
+	}
+
+	return retErr
 }
 
 func loadConfig(_ *cobra.Command, _ []string) (model.Config, error) {

@@ -43,8 +43,9 @@ func NewJob(name string, oneshot bool, config model.Scan, results chan<- Result)
 	}
 
 	cmd := Command{
-		Path: seeker,
-		Args: args,
+		JobName: name,
+		Path:    seeker,
+		Args:    args,
 		Env: append(
 			os.Environ(),
 			"GODEBUG=tlssha1=1,x509rsacrt=0,x509negativeserial=1",
@@ -104,6 +105,17 @@ func (j *Job) MergeConfig(cfg model.Scan) {
 	j.cfgMx.Lock()
 	defer j.cfgMx.Unlock()
 	j.config.Merge(cfg)
+}
+
+// Config returns a copy of the current job configuration.
+func (j *Job) Config() model.Scan {
+	var cpy model.Scan
+
+	j.cfgMx.Lock()
+	cpy = j.config
+	j.cfgMx.Unlock()
+
+	return cpy
 }
 
 func (j *Job) LogAttrs() []slog.Attr {
