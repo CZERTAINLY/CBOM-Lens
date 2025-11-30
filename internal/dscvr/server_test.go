@@ -194,7 +194,7 @@ func TestNew(t *testing.T) {
 				require.False(t, strings.HasSuffix(server.cfg.Core.BaseURL.Path, "/"))
 
 				// Cleanup
-				server.db.Close()
+				_ = server.db.Close()
 			}
 		})
 	}
@@ -352,7 +352,9 @@ func TestServer_startIf(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			s := tt.setupServer(t)
-			defer s.db.Close()
+			defer func() {
+				_ = s.db.Close()
+			}()
 
 			got, err := s.startIf(ctx, tt.dscvrUUID)
 
@@ -463,7 +465,9 @@ func TestServer_UploadedCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			s := tt.setupServer(t)
-			defer s.db.Close()
+			defer func() {
+				_ = s.db.Close()
+			}()
 
 			// Setup discovery in store if UUID is set
 			if tt.setupUUID != "" {
@@ -508,7 +512,9 @@ func TestServer_Handler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := tt.setupServer(t)
-			defer s.db.Close()
+			defer func() {
+				_ = s.db.Close()
+			}()
 
 			mux := s.Handler()
 			require.NotNil(t, mux)
@@ -583,9 +589,9 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]string{
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]string{
 						"message": "Connector already exists",
-					})
+					}))
 				}))
 			},
 			wantErr: false,
@@ -606,9 +612,9 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusNotFound)
-					json.NewEncoder(w).Encode(map[string]string{
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]string{
 						"message": "already exists in system",
-					})
+					}))
 				}))
 			},
 			wantErr: false,
@@ -629,9 +635,9 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusUnprocessableEntity)
-					json.NewEncoder(w).Encode([]string{
+					require.NoError(t, json.NewEncoder(w).Encode([]string{
 						"Connector(s) with same kinds already exists: test",
-					})
+					}))
 				}))
 			},
 			wantErr: false,
@@ -652,9 +658,9 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]string{
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]string{
 						"message": "invalid request payload",
-					})
+					}))
 				}))
 			},
 			wantErr:     true,
@@ -676,9 +682,9 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusNotFound)
-					json.NewEncoder(w).Encode(map[string]string{
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]string{
 						"message": "endpoint not found",
-					})
+					}))
 				}))
 			},
 			wantErr:     true,
@@ -700,7 +706,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "text/plain")
 					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte("bad request"))
+					_, _ = w.Write([]byte("bad request"))
 				}))
 			},
 			wantErr:     true,
@@ -722,10 +728,10 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusUnprocessableEntity)
-					json.NewEncoder(w).Encode([]string{
+					require.NoError(t, json.NewEncoder(w).Encode([]string{
 						"validation error 1",
 						"validation error 2",
-					})
+					}))
 				}))
 			},
 			wantErr:     true,
@@ -747,7 +753,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "text/plain")
 					w.WriteHeader(http.StatusUnprocessableEntity)
-					w.Write([]byte("unprocessable"))
+					_, _ = w.Write([]byte("unprocessable"))
 				}))
 			},
 			wantErr:     true,
@@ -782,7 +788,9 @@ func TestServer_RegisterConnector(t *testing.T) {
 			defer mockSrv.Close()
 
 			s := tt.setupServer(t, mockSrv.URL)
-			defer s.db.Close()
+			defer func() {
+				_ = s.db.Close()
+			}()
 
 			err := s.RegisterConnector(ctx)
 
@@ -919,7 +927,7 @@ func TestDecodeRegisterResponse(t *testing.T) {
 			if tt.body != nil {
 				switch v := tt.body.(type) {
 				case string:
-					rec.WriteString(v)
+					_, _ = rec.WriteString(v)
 				default:
 					t.Log("ano, je to json")
 					err := json.NewEncoder(rec).Encode(tt.body)
@@ -928,7 +936,9 @@ func TestDecodeRegisterResponse(t *testing.T) {
 			}
 
 			resp := rec.Result()
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close()
+			}()
 
 			if tt.contentType != "" {
 				resp.Header["Content-Type"] = []string{tt.contentType}
