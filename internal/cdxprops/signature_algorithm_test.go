@@ -117,3 +117,49 @@ func TestGetAlgorithmProperties_NoCzertainly(t *testing.T) {
 		require.NotEqual(t, czertainly.SignatureAlgorithmFamily, p.Name)
 	}
 }
+
+func TestSigAlgRefMap(t *testing.T) {
+	require.Equal(t, cdx.BOMReference("crypto/algorithm/sha-256-rsa@1.2.840.113549.1.1.11"), sigAlgRef[x509.SHA256WithRSA])
+	require.Equal(t, cdx.BOMReference("crypto/algorithm/ed25519@1.3.101.112"), sigAlgRef[x509.PureEd25519])
+}
+
+func TestPqcSigOIDRefMap(t *testing.T) {
+	require.Equal(t, cdx.BOMReference("crypto/algorithm/ml-dsa-44@2.16.840.1.101.3.4.3.17"), pqcSigOIDRef["2.16.840.1.101.3.4.3.17"])
+	require.Equal(t, cdx.BOMReference("crypto/algorithm/xmss-hashsig@1.3.6.1.5.5.7.6.34"), pqcSigOIDRef["1.3.6.1.5.5.7.6.34"])
+}
+
+func TestSpkiOIDRefMap(t *testing.T) {
+	require.Equal(t, cdx.BOMReference("crypto/key/ml-kem-512@2.16.840.1.101.3.4.4.1"), spkiOIDRef["2.16.840.1.101.3.4.4.1"])
+	require.Equal(t, cdx.BOMReference("crypto/key/xmss@1.3.6.1.5.5.7.6.34"), spkiOIDRef["1.3.6.1.5.5.7.6.34"])
+}
+
+func TestCurveInformation2(t *testing.T) {
+	require.Equal(t, "secp256r1", curveInformation(x509.ECDSAWithSHA256))
+	require.Equal(t, "secp384r1", curveInformation(x509.ECDSAWithSHA384))
+	require.Equal(t, "secp521r1", curveInformation(x509.ECDSAWithSHA512))
+	require.Equal(t, "", curveInformation(x509.SHA256WithRSA))
+}
+
+func TestGetAlgorithmProperties(t *testing.T) {
+	cv := Converter{}
+	props, extra, hash := cv.getAlgorithmProperties(x509.SHA256WithRSA)
+	require.Equal(t, cdx.CryptoPrimitiveSignature, props.Primitive)
+	require.Equal(t, "256", props.ParameterSetIdentifier)
+	require.Equal(t, cdx.CryptoPaddingPKCS1v15, props.Padding)
+	require.Equal(t, "SHA-256", hash)
+	require.NotNil(t, props.ClassicalSecurityLevel)
+	require.Equal(t, 112, *props.ClassicalSecurityLevel)
+	require.Empty(t, props.Curve)
+	require.Empty(t, extra)
+
+	props, extra, hash = cv.getAlgorithmProperties(x509.ECDSAWithSHA384)
+	require.Equal(t, "secp384r1", props.Curve)
+	require.Equal(t, "SHA-384", hash)
+	require.NotNil(t, props.ClassicalSecurityLevel)
+	require.Equal(t, 192, *props.ClassicalSecurityLevel)
+
+	props, extra, hash = cv.getAlgorithmProperties(x509.PureEd25519)
+	require.Equal(t, "256", props.ParameterSetIdentifier)
+	require.Equal(t, "SHA-512", hash)
+	require.Equal(t, 128, *props.ClassicalSecurityLevel)
+}

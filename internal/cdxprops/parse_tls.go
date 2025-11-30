@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/CZERTAINLY/Seeker/internal/model"
+
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 

@@ -1,9 +1,8 @@
-package cdxprops_test
+package cdxprops
 
 import (
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops"
 	"github.com/CZERTAINLY/Seeker/internal/cdxprops/czertainly"
 	"github.com/CZERTAINLY/Seeker/internal/model"
 
@@ -15,18 +14,18 @@ import (
 func TestParseTLSVersion(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected cdxprops.TLSInfo
+		expected TLSInfo
 	}{
-		{"TLSv1.3", cdxprops.TLSInfo{"tls", "1.3", "1.3.6.1.5.5.7.6.2"}},
-		{"TLSv1.2", cdxprops.TLSInfo{"tls", "1.2", "1.3.6.1.5.5.7.6.1"}},
-		{"SSLv3", cdxprops.TLSInfo{"ssl", "3.0", "1.3.6.1.4.1.311.10.3.2"}},
-		{"TLS 1.0", cdxprops.TLSInfo{"tls", "1.0", "1.3.6.1.4.1.311.10.3.3"}},
-		{"unknown", cdxprops.TLSInfo{"n/a", "n/a", "n/a"}},
+		{"TLSv1.3", TLSInfo{"tls", "1.3", "1.3.6.1.5.5.7.6.2"}},
+		{"TLSv1.2", TLSInfo{"tls", "1.2", "1.3.6.1.5.5.7.6.1"}},
+		{"SSLv3", TLSInfo{"ssl", "3.0", "1.3.6.1.4.1.311.10.3.2"}},
+		{"TLS 1.0", TLSInfo{"tls", "1.0", "1.3.6.1.4.1.311.10.3.3"}},
+		{"unknown", TLSInfo{"n/a", "n/a", "n/a"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := cdxprops.ParseTLSInfo(tt.input)
+			result := ParseTLSInfo(tt.input)
 			require.Equal(t, tt.expected, result)
 		})
 	}
@@ -41,7 +40,7 @@ func TestParseSSHHostKey(t *testing.T) {
 	}
 
 	t.Run("without czertainly properties", func(t *testing.T) {
-		c := cdxprops.NewConverter().WithCzertainlyExtenstions(false)
+		c := NewConverter().WithCzertainlyExtenstions(false)
 
 		compo := c.ParseSSHHostKey(key)
 		require.Equal(t, "crypto/algorithm/ssh-ed25519@256", compo.BOMRef)
@@ -56,7 +55,7 @@ func TestParseSSHHostKey(t *testing.T) {
 	})
 
 	t.Run("with czertainly properties", func(t *testing.T) {
-		c := cdxprops.NewConverter().WithCzertainlyExtenstions(true)
+		c := NewConverter().WithCzertainlyExtenstions(true)
 
 		compo := c.ParseSSHHostKey(key)
 		require.NotNil(t, compo.Properties)
@@ -77,4 +76,65 @@ func TestParseSSHHostKey(t *testing.T) {
 		require.True(t, foundContent)
 		require.True(t, foundFingerprint)
 	})
+}
+
+func TestParseTLSInfo(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected TLSInfo
+	}{
+		{"TLSv1.3", TLSInfo{Name: "tls", Version: "1.3", OID: "1.3.6.1.5.5.7.6.2"}},
+		{"SSLv3", TLSInfo{Name: "ssl", Version: "3.0", OID: "1.3.6.1.4.1.311.10.3.2"}},
+		{"TLS 1.2", TLSInfo{Name: "tls", Version: "1.2", OID: "1.3.6.1.5.5.7.6.1"}},
+		{"unknown", TLSInfo{Name: "n/a", Version: "n/a", OID: "n/a"}},
+	}
+	for _, tt := range tests {
+		info := ParseTLSInfo(tt.input)
+		require.Equal(t, tt.expected, info)
+	}
+}
+
+func TestPublicKeySizeFromPkeyRef(t *testing.T) {
+	require.Equal(t, "2048", publicKeySizeFromPkeyRef("crypto/algorithm/rsa-2048@sha256:foo"))
+	require.Equal(t, "secp256r1", publicKeySizeFromPkeyRef("crypto/algorithm/ecdsa-secp256r1@sha256:bar"))
+	require.Equal(t, "", publicKeySizeFromPkeyRef("crypto/algorithm/unknown@sha256:baz"))
+	require.Equal(t, "", publicKeySizeFromPkeyRef(""))
+}
+
+func TestParseSSHAlgorithm(t *testing.T) {
+	prop := parseSSHAlgorithm("ecdsa-sha2-nistp256")
+	require.Equal(t, "nistp256@1.2.840.10045.3.1.7", prop.ParameterSetIdentifier)
+	require.Equal(t, cdx.CryptoPrimitiveSignature, prop.Primitive)
+	require.NotNil(t, prop.CryptoFunctions)
+
+	prop = parseSSHAlgorithm("ssh-ed25519")
+	require.Equal(t, "ed25519@1.3.101.112", prop.ParameterSetIdentifier)
+
+	prop = parseSSHAlgorithm("unknown-algo")
+	require.Equal(t, "unknown", prop.ParameterSetIdentifier)
+	require.Equal(t, "", prop.Curve)
+}
+
+func TestParseSSHHostKey2(t *testing.T) {
+	cv := Converter{}
+	key := model.SSHHostKey{Type: "ecdsa-sha2-nistp256", Bits: "256"}
+	compo := cv.ParseSSHHostKey(key)
+	require.Equal(t, "crypto/algorithm/ecdsa-sha2-nistp256@256", compo.BOMRef)
+	require.Equal(t, "ecdsa-sha2-nistp256", compo.Name)
+	require.Equal(t, cdx.ComponentTypeCryptographicAsset, compo.Type)
+	require.NotNil(t, compo.CryptoProperties)
+	require.Equal(t, cdx.CryptoAssetTypeAlgorithm, compo.CryptoProperties.AssetType)
+	require.Equal(t, "nistp256@1.2.840.10045.3.1.7", compo.CryptoProperties.OID)
+}
+
+func TestParseNmapUnsupportedService(t *testing.T) {
+	cv := Converter{}
+	nmap := model.Nmap{
+		Ports: []model.NmapPort{
+			{Service: model.NmapService{Name: "ftp"}},
+		},
+	}
+	_, _, _, err := cv.parseNmap(t.Context(), nmap)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "can't parse unsupported nmap service: ftp")
 }
