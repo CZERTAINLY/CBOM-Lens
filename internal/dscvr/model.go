@@ -54,10 +54,10 @@ type getDiscoveryMetaItem struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 
-	Content     []metaItemContent `json:"content"`
-	Type        string            `json:"type"`
-	ContentType string            `json:"contentType"`
-	Properties  metaProperties    `json:"properties"`
+	Content     []any          `json:"content"`
+	Type        string         `json:"type"`
+	ContentType string         `json:"contentType"`
+	Properties  metaProperties `json:"properties"`
 }
 
 type generalErrMsgResp struct {
@@ -72,8 +72,17 @@ type registerConnectorRequest struct {
 	CustomAttributes []any  `json:"customAttributes"`
 }
 
-type metaItemContent struct {
+type metaItemContentString struct {
 	Data string `json:"data"`
+}
+
+type metaItemContentCodeblock struct {
+	Data metaItemContentCodeblockItem `json:"data"`
+}
+
+type metaItemContentCodeblockItem struct {
+	Language string `json:"language"`
+	Code     string `json:"code"`
 }
 
 type metaProperties struct {

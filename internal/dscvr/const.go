@@ -12,16 +12,12 @@ const (
 	seekerConfigurationAttrContentType = "codeblock"
 
 	// constants related to czertainly core meta attribute for passing upload key
-	seekerResultMetadataUploadKeyAttrUUID = "33081f5a-afcb-4c23-9ba5-5436d41bc847"
+	seekerResultMetadataUploadKeyAttrUUID = "8895b0c5-d16b-4c85-991c-be9156c59e8d"
 	seekerResultMetadataUploadKeyAttrName = "seeker_result_upload_key"
 
 	// constants related to czertainly core meta attribute for passing result
 	seekerResultMetadataFailureReasonAttrUUID = "429d078c-73d1-445a-bf48-606509a3619e"
 	seekerResultMetadataFailureReasonAttrName = "seeker_result_string"
-
-	// constants related to czertainly core meta attribute for cbom repository get url
-	seekerResultMetadataKeyURLAttrUUID = "c000c778-fe69-4622-9269-33f98d8e6dac"
-	seekerResultMetadataKeyURLAttrName = "seeker_result_key_url"
 
 	functionalGroupCode = "discoveryProvider"
 )

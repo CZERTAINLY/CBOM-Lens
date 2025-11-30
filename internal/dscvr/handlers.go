@@ -19,8 +19,6 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-const cbomRepoGetPath = "/api/v1/bom/"
-
 func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
@@ -88,50 +86,30 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 
 		var mp metaProperties
 		var micData string
-		var mil []getDiscoveryMetaItem
+		var mi getDiscoveryMetaItem
 		if *dr.Success {
 			status = "completed"
 			mp = metaProperties{
 				Label:   "Uploaded CBOM-Repository Key",
 				Visible: true,
 			}
-			idx := strings.LastIndex(*dr.UploadKey, "-")
-			// sanity check
-			if idx < 0 {
-				slog.ErrorContext(ctx, "String returned from cbom repo callback has unexpected format.", slog.String("key", *dr.UploadKey))
-				http.Error(w, "Internal server error.", http.StatusInternalServerError)
-				return
-			}
-			keyID := (*dr.UploadKey)[:idx]
-			keyVersion := (*dr.UploadKey)[idx+len("-"):]
 
-			micData = fmt.Sprintf("%s, version: %s", keyID, keyVersion)
-			mil = append(mil, getDiscoveryMetaItem{
+			mi = getDiscoveryMetaItem{
 				Version:     2,
 				UUID:        seekerResultMetadataUploadKeyAttrUUID,
 				Name:        seekerResultMetadataUploadKeyAttrName,
 				Type:        "meta",
-				ContentType: "string",
+				ContentType: "codeblock",
 				Properties:  mp,
-				Content: []metaItemContent{
-					{
-						Data: micData,
+				Content: []any{
+					metaItemContentCodeblock{
+						Data: metaItemContentCodeblockItem{
+							Language: "json",
+							Code:     *dr.UploadKey,
+						},
 					},
 				},
-			}, getDiscoveryMetaItem{
-				Version:     2,
-				UUID:        seekerResultMetadataKeyURLAttrUUID,
-				Name:        seekerResultMetadataKeyURLAttrName,
-				Type:        "meta",
-				ContentType: "string",
-				Properties:  mp,
-				Content: []metaItemContent{
-					{
-						Data: fmt.Sprintf("%s%s%s?version=%s", s.cfg.Repository.URL.String(), cbomRepoGetPath, keyID, keyVersion),
-					},
-				},
-			})
-
+			}
 		} else {
 			status = "failed"
 			mp = metaProperties{
@@ -139,19 +117,19 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 				Visible: true,
 			}
 			micData = *dr.FailureReason
-			mil = append(mil, getDiscoveryMetaItem{
+			mi = getDiscoveryMetaItem{
 				Version:     2,
 				UUID:        seekerResultMetadataFailureReasonAttrUUID,
 				Name:        seekerResultMetadataFailureReasonAttrName,
 				Type:        "meta",
 				ContentType: "string",
 				Properties:  mp,
-				Content: []metaItemContent{
-					{
+				Content: []any{
+					metaItemContentString{
 						Data: micData,
 					},
 				},
-			})
+			}
 		}
 
 		toJson(ctx, w, getDiscoveryResponse{
@@ -159,7 +137,7 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 			Name:            request.Name,
 			Status:          status,
 			CertificateData: []any{},
-			Meta:            mil,
+			Meta:            []getDiscoveryMetaItem{mi},
 		})
 		return
 	}

@@ -22,6 +22,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.39.0
 	github.com/zricethezav/gitleaks/v8 v8.28.0
 	go.uber.org/goleak v1.3.0
+	go.uber.org/mock v0.6.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.3
 	golang.org/x/crypto v0.42.0
 	golang.org/x/sync v0.17.0

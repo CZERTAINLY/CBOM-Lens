@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,16 +17,22 @@ import (
 	"github.com/CZERTAINLY/Seeker/internal/dscvr/store"
 	"github.com/CZERTAINLY/Seeker/internal/log"
 	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/service"
 
 	"github.com/gorilla/mux"
 )
 
 const defaultCallbackStoreTimeout = 10 * time.Second
 
+//go:generate mockgen -destination=./mock/supervisor.go -package=mock github.com/CZERTAINLY/Seeker/internal/dscvr SupervisorContract
+type SupervisorContract interface {
+	ConfigureJob(ctx context.Context, name string, cfg model.Scan)
+	JobConfiguration(ctx context.Context, name string) (model.Scan, error)
+	Start(name string)
+}
+
 type Server struct {
 	cfg model.Service
-	sv  *service.Supervisor
+	sv  SupervisorContract
 
 	kind          string
 	funcGroupCode string
@@ -37,7 +44,7 @@ type Server struct {
 	uuid        string
 }
 
-func New(ctx context.Context, cfg model.Service, sv *service.Supervisor, jobName string) (*Server, error) {
+func New(ctx context.Context, cfg model.Service, sv SupervisorContract, jobName string) (*Server, error) {
 	// config assertions
 	switch {
 	case cfg.Mode != model.ServiceModeDiscovery:
@@ -105,7 +112,7 @@ func (s *Server) startIf(ctx context.Context, dscvrUUID string) (bool, error) {
 	return true, nil
 }
 
-func (s *Server) UploadedCallback(err error, jobName, id string) {
+func (s *Server) UploadedCallback(err error, jobName, resp string) {
 	if jobName != s.jobName {
 		return
 	}
@@ -117,7 +124,7 @@ func (s *Server) UploadedCallback(err error, jobName, id string) {
 	defer cancel()
 
 	if err == nil {
-		if err := store.FinishOK(ctx, s.db, s.uuid, id); err != nil {
+		if err := store.FinishOK(ctx, s.db, s.uuid, base64.StdEncoding.EncodeToString([]byte(resp))); err != nil {
 			slog.Error("`store.FinishOK()` failed", slog.String("error", err.Error()))
 		}
 	} else {

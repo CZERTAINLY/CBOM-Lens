@@ -62,7 +62,7 @@ func TestDecodeUploadResponse(t *testing.T) {
 	testCases := map[string]struct {
 		resp     func() *http.Response
 		wantErr  bool
-		expected BOMCreateResponse
+		expected string
 	}{
 		"201 application/json expected body": {
 			resp: func() *http.Response {
@@ -74,11 +74,8 @@ func TestDecodeUploadResponse(t *testing.T) {
 				resp.Header.Set("Content-Type", "application/json")
 				return resp
 			},
-			wantErr: false,
-			expected: BOMCreateResponse{
-				SerialNumber: "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79",
-				Version:      1,
-			},
+			wantErr:  false,
+			expected: `{"version":1,"serialNumber":"urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79"}`,
 		},
 		"201 application/json unexpected body": {
 			resp: func() *http.Response {
@@ -90,7 +87,8 @@ func TestDecodeUploadResponse(t *testing.T) {
 				resp.Header.Set("Content-Type", "application/json")
 				return resp
 			},
-			wantErr: true,
+			wantErr:  false,
+			expected: `{"return":{"version":1,"serialNumber":"urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79"}}`,
 		},
 		"201 application/json unexpected body #2": {
 			resp: func() *http.Response {
@@ -102,7 +100,8 @@ func TestDecodeUploadResponse(t *testing.T) {
 				resp.Header.Set("Content-Type", "application/json")
 				return resp
 			},
-			wantErr: true,
+			wantErr:  false,
+			expected: `just some string`,
 		},
 		"201 unexpected content type": {
 			resp: func() *http.Response {

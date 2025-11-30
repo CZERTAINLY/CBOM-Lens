@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -69,7 +68,7 @@ func (c *BOMRepoUploader) Upload(ctx context.Context, jobName string, raw []byte
 		_ = resp.Body.Close()
 	}()
 
-	createResp, err := c.decodeUploadResponse(resp)
+	createRespJson, err := c.decodeUploadResponse(resp)
 	if err != nil {
 		if c.uploadCallback != nil {
 			c.uploadCallback(err, jobName, "")
@@ -77,62 +76,51 @@ func (c *BOMRepoUploader) Upload(ctx context.Context, jobName string, raw []byte
 		return err
 	}
 	if c.uploadCallback != nil {
-		c.uploadCallback(nil, jobName, fmt.Sprintf("%s-%d", createResp.SerialNumber, createResp.Version))
+		c.uploadCallback(nil, jobName, createRespJson)
 	}
-	slog.InfoContext(ctx, "BOM uploaded successfully.",
-		slog.String("urn", createResp.SerialNumber),
-		slog.Int("version", createResp.Version))
+	slog.InfoContext(ctx, "BOM uploaded successfully.")
 
 	return nil
 }
 
-type BOMCreateResponse struct {
-	SerialNumber string `json:"serialNumber"`
-	Version      int    `json:"version"`
-}
-
-func (c *BOMRepoUploader) decodeUploadResponse(resp *http.Response) (BOMCreateResponse, error) {
+func (c *BOMRepoUploader) decodeUploadResponse(resp *http.Response) (string, error) {
 	contentType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
-		return BOMCreateResponse{}, fmt.Errorf("failed to parse response content type header: %w", err)
+		return "", fmt.Errorf("failed to parse response content type header: %w", err)
 	}
 
 	switch resp.StatusCode {
 	case http.StatusCreated:
 		if contentType != "application/json" {
-			return BOMCreateResponse{}, fmt.Errorf("expected `application/json` content type, got: %s", contentType)
+			return "", fmt.Errorf("expected `application/json` content type, got: %s", contentType)
 		}
-		var bc BOMCreateResponse
-		if err := json.NewDecoder(resp.Body).Decode(&bc); err != nil {
-			return BOMCreateResponse{}, fmt.Errorf("decoding json response failed: %w", err)
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("`io.ReadAll()` failed: %w", err)
 		}
-		if bc.SerialNumber == "" || bc.Version == 0 {
-			return BOMCreateResponse{}, errors.New("received unexpected body")
-		}
-		return bc, nil
 
-	// for now this is good enough, maybe later we'll decode the problem+json manually
-	// for extra additional fields
+		return string(b), nil
+
 	case http.StatusBadRequest:
 		fallthrough
 	case http.StatusConflict:
 		fallthrough
 	case http.StatusUnsupportedMediaType:
 		if contentType != "application/problem+json" {
-			return BOMCreateResponse{}, fmt.Errorf("expected `application/problem+json` content type, got: %s", contentType)
+			return "", fmt.Errorf("expected `application/problem+json` content type, got: %s", contentType)
 		}
 		var problemDetail struct {
 			Detail string `json:"detail"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&problemDetail); err != nil {
-			return BOMCreateResponse{}, fmt.Errorf("decoding json response failed: %w", err)
+			return "", fmt.Errorf("decoding json response failed: %w", err)
 		}
-		return BOMCreateResponse{}, fmt.Errorf("status code: %d, detail: %s", resp.StatusCode, problemDetail.Detail)
+		return "", fmt.Errorf("status code: %d, detail: %s", resp.StatusCode, problemDetail.Detail)
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return BOMCreateResponse{}, err
+		return "", err
 	}
-	return BOMCreateResponse{}, fmt.Errorf("unknown error, status: %d, body: %s", resp.StatusCode, string(respBody))
+	return "", fmt.Errorf("unknown error, status: %d, body: %s", resp.StatusCode, string(respBody))
 }
