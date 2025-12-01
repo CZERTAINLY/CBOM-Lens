@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/bom"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
 )
@@ -233,7 +233,7 @@ func TestBuilder_BOM(t *testing.T) {
 	require.NotEmpty(t, result.Metadata.Timestamp)
 	require.NotNil(t, result.Metadata.Component)
 	require.Equal(t, "application", string(result.Metadata.Component.Type))
-	require.Equal(t, "Seeker", result.Metadata.Component.Name)
+	require.Equal(t, "CBOM-Lens", result.Metadata.Component.Name)
 
 	// Components check
 	require.NotNil(t, result.Components)

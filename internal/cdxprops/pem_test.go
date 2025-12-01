@@ -7,9 +7,9 @@ import (
 	"crypto/x509"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops"
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 )

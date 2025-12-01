@@ -8,9 +8,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	scan "github.com/CZERTAINLY/Seeker/internal/service"
-	"github.com/CZERTAINLY/Seeker/internal/walk"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	scan "github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"

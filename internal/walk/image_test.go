@@ -3,8 +3,8 @@ package walk_test
 import (
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/walk"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"github.com/stretchr/testify/require"
 )

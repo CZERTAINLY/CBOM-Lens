@@ -2,7 +2,7 @@ package config
 // SCHEMA DEFINITION
 #Config
 
-// Seeker top-level configuration object.
+// CBOM-Lens top-level configuration object.
 #Config: {
 version: 0
 filesystem?: #Filesystem
@@ -67,7 +67,7 @@ service?: #ServiceFields
   { cron?:  #CronExpr } |
   { duration?: #ISODuration }
 
-// Seeker service configuration.
+// CBOM-Lens service configuration.
 #Service: {
   #ServiceFields
   mode: *"manual" | "timer" | "discovery"
@@ -75,10 +75,10 @@ service?: #ServiceFields
   if mode == "timer" { schedule: #Schedule }
   dir?: string
   repository?: #Repository
-  seeker?: null | #SeekerServer
+  server?: null | #LensServer
   core?: null | #Core
   if mode == "discovery" { 
-    seeker: #SeekerServer
+    server: #LensServer
     core: #Core
   }
 }
@@ -97,10 +97,10 @@ service?: #ServiceFields
   base_url: #URL
 }
 
-#SeekerServer: {
+#LensServer: {
   addr: string
   base_url: #URL
-  state_file: string | *"./seeker-state-file"
+  state_file: string | *"./cbom-lens-state-file"
 }
 
 #Core: {

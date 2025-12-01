@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/dscvr/store"
+	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
 
 	"github.com/stretchr/testify/require"
 )

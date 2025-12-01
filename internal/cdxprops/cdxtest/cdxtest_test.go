@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
 	"golang.org/x/crypto/ssh"
 	"software.sslmate.com/src/go-pkcs12"
 

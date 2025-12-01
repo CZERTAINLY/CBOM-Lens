@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/dscvr/mock"
-	"github.com/CZERTAINLY/Seeker/internal/dscvr/store"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/mock"
+	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
@@ -128,8 +128,8 @@ func TestServer_listAttributeDefinitions(t *testing.T) {
 	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
-	require.Equal(t, seekerConfigurationAttrUUID, result[0].UUID)
-	require.Equal(t, seekerConfigurationAttrName, result[0].Name)
+	require.Equal(t, lensConfigurationAttrUUID, result[0].UUID)
+	require.Equal(t, lensConfigurationAttrName, result[0].Name)
 }
 
 func TestServer_listAttributeDefinitions_ConfigError(t *testing.T) {
@@ -168,9 +168,9 @@ func TestServer_validateAttributes(t *testing.T) {
 
 	attrs := []attrCodeblock{
 		{
-			UUID:        seekerConfigurationAttrUUID,
-			Name:        seekerConfigurationAttrName,
-			ContentType: ptrString(seekerConfigurationAttrContentType),
+			UUID:        lensConfigurationAttrUUID,
+			Name:        lensConfigurationAttrName,
+			ContentType: ptrString(lensConfigurationAttrContentType),
 			Content: []attrCodeblockContent{
 				{
 					Data: attrCodeblockContentData{
@@ -292,9 +292,9 @@ func TestServer_discoverCertificate_WithAttributes(t *testing.T) {
 		Kind: s.kind,
 		Attributes: []attrCodeblock{
 			{
-				UUID:        seekerConfigurationAttrUUID,
-				Name:        seekerConfigurationAttrName,
-				ContentType: ptrString(seekerConfigurationAttrContentType),
+				UUID:        lensConfigurationAttrUUID,
+				Name:        lensConfigurationAttrName,
+				ContentType: ptrString(lensConfigurationAttrContentType),
 				Content: []attrCodeblockContent{
 					{
 						Data: attrCodeblockContentData{
@@ -345,7 +345,7 @@ func TestServer_discoverCertificate_EmptyContent(t *testing.T) {
 		Kind: s.kind,
 		Attributes: []attrCodeblock{
 			{
-				UUID:    seekerConfigurationAttrUUID,
+				UUID:    lensConfigurationAttrUUID,
 				Content: []attrCodeblockContent{},
 			},
 		},
@@ -374,7 +374,7 @@ func TestServer_discoverCertificate_InvalidBase64(t *testing.T) {
 		Kind: s.kind,
 		Attributes: []attrCodeblock{
 			{
-				UUID: seekerConfigurationAttrUUID,
+				UUID: lensConfigurationAttrUUID,
 				Content: []attrCodeblockContent{
 					{
 						Data: attrCodeblockContentData{
@@ -409,7 +409,7 @@ func TestServer_discoverCertificate_InvalidYAML(t *testing.T) {
 		Kind: s.kind,
 		Attributes: []attrCodeblock{
 			{
-				UUID: seekerConfigurationAttrUUID,
+				UUID: lensConfigurationAttrUUID,
 				Content: []attrCodeblockContent{
 					{
 						Data: attrCodeblockContentData{
@@ -540,7 +540,7 @@ func TestServer_getDiscovery_Completed(t *testing.T) {
 	require.Equal(t, uuid, result.UUID)
 	require.Equal(t, "completed", result.Status)
 	require.Len(t, result.Meta, 1)
-	require.Equal(t, seekerResultMetadataUploadKeyAttrUUID, result.Meta[0].UUID)
+	require.Equal(t, lensResultMetadataUploadKeyAttrUUID, result.Meta[0].UUID)
 }
 
 func TestServer_getDiscovery_Failed(t *testing.T) {
@@ -582,7 +582,7 @@ func TestServer_getDiscovery_Failed(t *testing.T) {
 	require.Equal(t, uuid, result.UUID)
 	require.Equal(t, "failed", result.Status)
 	require.Len(t, result.Meta, 1)
-	require.Equal(t, seekerResultMetadataFailureReasonAttrUUID, result.Meta[0].UUID)
+	require.Equal(t, lensResultMetadataFailureReasonAttrUUID, result.Meta[0].UUID)
 }
 
 func TestServer_getDiscovery_MissingUUID(t *testing.T) {
@@ -774,7 +774,7 @@ func setupTestServer(t *testing.T, ctrl *gomock.Controller) *Server {
 }
 
 func setupTestServerWithSupervisor(t *testing.T, mockSv *mock.MockSupervisorContract) *Server {
-	seekerURL, err := url.Parse("http://localhost:8080")
+	lensURL, err := url.Parse("http://localhost:8080")
 	require.NoError(t, err)
 
 	coreURL, err := url.Parse("http://localhost:8081")
@@ -793,8 +793,8 @@ func setupTestServerWithSupervisor(t *testing.T, mockSv *mock.MockSupervisorCont
 		Repository: &model.Repository{
 			URL: model.URL{URL: repoURL},
 		},
-		Seeker: &model.SeekerServer{
-			BaseURL:   model.URL{URL: seekerURL},
+		Server: &model.LensServer{
+			BaseURL:   model.URL{URL: lensURL},
 			StateFile: ":memory:",
 		},
 		Core: &model.Core{

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"crypto/x509"
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/czertainly"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
 )

@@ -12,9 +12,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/CZERTAINLY/Seeker/internal/dscvr/store"
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/service"
 
 	_ "modernc.org/sqlite"
 )
@@ -35,7 +35,7 @@ func TestNew(t *testing.T) {
 				Repository: &model.Repository{
 					URL: mustParseURL(t, "http://example.com"),
 				},
-				Seeker: &model.SeekerServer{
+				Server: &model.LensServer{
 					Addr:      model.TCPAddr{},
 					BaseURL:   mustParseURL(t, "http://localhost:8080/api"),
 					StateFile: ":memory:",
@@ -70,18 +70,18 @@ func TestNew(t *testing.T) {
 			errContains: "configuration section 'repository' is required",
 		},
 		{
-			name: "missing seeker",
+			name: "missing server",
 			cfg: model.Service{
 				Mode: model.ServiceModeDiscovery,
 				Repository: &model.Repository{
 					URL: mustParseURL(t, "http://example.com"),
 				},
-				Seeker: nil,
+				Server: nil,
 			},
 			setupSv:     true,
 			jobName:     "test-job",
 			wantErr:     true,
-			errContains: "configuration section 'seeker' is required",
+			errContains: "configuration section 'server' is required",
 		},
 		{
 			name: "missing core",
@@ -90,7 +90,7 @@ func TestNew(t *testing.T) {
 				Repository: &model.Repository{
 					URL: mustParseURL(t, "http://example.com"),
 				},
-				Seeker: &model.SeekerServer{
+				Server: &model.LensServer{
 					BaseURL:   mustParseURL(t, "http://localhost:8080"),
 					StateFile: ":memory:",
 				},
@@ -108,7 +108,7 @@ func TestNew(t *testing.T) {
 				Repository: &model.Repository{
 					URL: mustParseURL(t, "http://example.com"),
 				},
-				Seeker: &model.SeekerServer{
+				Server: &model.LensServer{
 					BaseURL:   mustParseURL(t, "http://localhost:8080/api/"),
 					StateFile: ":memory:",
 				},
@@ -127,7 +127,7 @@ func TestNew(t *testing.T) {
 				Repository: &model.Repository{
 					URL: mustParseURL(t, "http://example.com"),
 				},
-				Seeker: &model.SeekerServer{
+				Server: &model.LensServer{
 					BaseURL:   mustParseURL(t, "http://localhost"),
 					StateFile: ":memory:",
 				},
@@ -146,7 +146,7 @@ func TestNew(t *testing.T) {
 				Repository: &model.Repository{
 					URL: mustParseURL(t, "http://example.com"),
 				},
-				Seeker: &model.SeekerServer{
+				Server: &model.LensServer{
 					BaseURL:   mustParseURL(t, "http://localhost:9090"),
 					StateFile: ":memory:",
 				},
@@ -190,7 +190,7 @@ func TestNew(t *testing.T) {
 				require.Empty(t, server.uuid)
 
 				// Verify path trimming
-				require.False(t, strings.HasSuffix(server.cfg.Seeker.BaseURL.Path, "/"))
+				require.False(t, strings.HasSuffix(server.cfg.Server.BaseURL.Path, "/"))
 				require.False(t, strings.HasSuffix(server.cfg.Core.BaseURL.Path, "/"))
 
 				// Cleanup
@@ -502,7 +502,7 @@ func TestServer_Handler(t *testing.T) {
 			name: "handler with custom base path",
 			setupServer: func(t *testing.T) *Server {
 				s := createTestServer(t, false, "")
-				s.cfg.Seeker.BaseURL.Path = "/custom/path"
+				s.cfg.Server.BaseURL.Path = "/custom/path"
 				return s
 			},
 			checkEndpoints: true,
@@ -558,7 +558,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -580,7 +580,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -603,7 +603,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -626,7 +626,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -649,7 +649,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -673,7 +673,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -697,7 +697,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -719,7 +719,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -744,7 +744,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -766,7 +766,7 @@ func TestServer_RegisterConnector(t *testing.T) {
 				coreURL, err := url.Parse(serverURL)
 				require.NoError(t, err)
 				s.cfg.Core = &model.Core{BaseURL: model.URL{URL: coreURL}}
-				s.cfg.Seeker = &model.SeekerServer{
+				s.cfg.Server = &model.LensServer{
 					BaseURL: mustParseURL(t, "http://localhost:8080"),
 				}
 				return s
@@ -973,7 +973,7 @@ func createTestServer(t *testing.T, running bool, uuid string) *Server {
 	s := &Server{
 		cfg: model.Service{
 			Mode: model.ServiceModeDiscovery,
-			Seeker: &model.SeekerServer{
+			Server: &model.LensServer{
 				BaseURL:   mustParseURL(t, "http://localhost:8080"),
 				StateFile: ":memory:",
 			},

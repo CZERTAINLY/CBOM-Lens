@@ -9,21 +9,21 @@ import (
 	"net/netip"
 	"os"
 
-	"github.com/CZERTAINLY/Seeker/internal/bom"
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops"
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/nmap"
-	"github.com/CZERTAINLY/Seeker/internal/scanner/gitleaks"
-	"github.com/CZERTAINLY/Seeker/internal/scanner/pem"
-	"github.com/CZERTAINLY/Seeker/internal/scanner/x509"
-	"github.com/CZERTAINLY/Seeker/internal/service"
-	"github.com/CZERTAINLY/Seeker/internal/walk"
+	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/nmap"
+	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/gitleaks"
+	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
+	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/x509"
+	"github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"golang.org/x/sync/errgroup"
 )
 
-// Seeker is a component, which encapsulates the scan functionality and executes it.
-type Seeker struct {
+// Lens is a component, which encapsulates the scan functionality and executes it.
+type Lens struct {
 	detectors   []service.Detector
 	filesystems iter.Seq2[walk.Entry, error]
 	containers  iter.Seq2[walk.Entry, error]
@@ -32,12 +32,12 @@ type Seeker struct {
 	converter   cdxprops.Converter
 }
 
-func NewSeeker(ctx context.Context, config model.Scan) (Seeker, error) {
+func NewLens(ctx context.Context, config model.Scan) (Lens, error) {
 	if config.Version != 0 {
-		return Seeker{}, fmt.Errorf("config version %d is not supported, expected 0", config.Version)
+		return Lens{}, fmt.Errorf("config version %d is not supported, expected 0", config.Version)
 	}
 
-	// initialize inputs (filesystem, containers) for the seeker
+	// initialize inputs (filesystem, containers)
 	filesystems, err := filesystems(ctx, config.Filesystem)
 	if err != nil {
 		slog.WarnContext(ctx, "initializing filesytem scan failed", "error", err)
@@ -54,7 +54,7 @@ func NewSeeker(ctx context.Context, config model.Scan) (Seeker, error) {
 	pemScanner := pem.Scanner{}
 	leaksScanner, err := gitleaks.NewScanner()
 	if err != nil {
-		return Seeker{}, fmt.Errorf("can't create gitleaks scanner: %w", err)
+		return Lens{}, fmt.Errorf("can't create gitleaks scanner: %w", err)
 	}
 
 	// scan result to cyclonedx-go converter
@@ -81,7 +81,7 @@ func NewSeeker(ctx context.Context, config model.Scan) (Seeker, error) {
 			})
 	}
 
-	return Seeker{
+	return Lens{
 		detectors:   detectors,
 		filesystems: filesystems,
 		containers:  containers,
@@ -91,7 +91,7 @@ func NewSeeker(ctx context.Context, config model.Scan) (Seeker, error) {
 	}, nil
 }
 
-func (s Seeker) Do(ctx context.Context, out io.Writer) error {
+func (s Lens) Do(ctx context.Context, out io.Writer) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	b := bom.NewBuilder()

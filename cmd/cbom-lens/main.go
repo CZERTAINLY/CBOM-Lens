@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/dscvr"
-	"github.com/CZERTAINLY/Seeker/internal/log"
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr"
+	"github.com/CZERTAINLY/CBOM-lens/internal/log"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/service"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -24,7 +24,7 @@ import (
 const defaultHttpServerGracefulPeriod = 5 * time.Second
 
 var (
-	userConfigPath string // /default/config/path/seeker on given OS
+	userConfigPath string // /default/config/path/cbom-lens on given OS
 	configPath     string // actual config file used (if loaded)
 
 	flagConfigFilePath string // value of --config flag
@@ -32,7 +32,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "seeker",
+	Use:          "cbom-lens",
 	Short:        "Tool detecting secrets and providing BOM",
 	SilenceUsage: true,
 }
@@ -52,7 +52,7 @@ var scanCmd = &cobra.Command{
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "version provide version of a seeker",
+	Short: "version provides a version of CBOM-Lens",
 	RunE:  doVersion,
 }
 
@@ -62,12 +62,12 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	userConfigPath = filepath.Join(d, "seeker")
+	userConfigPath = filepath.Join(d, "cbom-lens")
 }
 
 func main() {
 	// root flags
-	rootCmd.PersistentFlags().StringVar(&flagConfigFilePath, "config", "", "Config file to load - default is seeker.yaml in current directory or in "+userConfigPath)
+	rootCmd.PersistentFlags().StringVar(&flagConfigFilePath, "config", "", "Config file to load - default is cbom-lens.yaml in current directory or in "+userConfigPath)
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "verbose logging")
 
 	// never print messages and usage
@@ -79,7 +79,7 @@ func main() {
 	rootCmd.AddCommand(versionCmd)
 
 	if cmd, err := rootCmd.ExecuteC(); err != nil {
-		slog.Error("seeker failed", "err", err)
+		slog.Error("cbom-lens failed", "err", err)
 		if strings.HasPrefix(err.Error(), "unknown command") {
 			_ = rootCmd.Help() // ./cmd bflmp
 		} else {
@@ -92,13 +92,13 @@ func main() {
 func doVersion(cmd *cobra.Command, args []string) error {
 	info, ok := debug.ReadBuildInfo()
 	if !ok || info == nil {
-		return fmt.Errorf("seeker: version info not available")
+		return fmt.Errorf("cbom-lens: version info not available")
 	}
 
 	if configPath != "" {
 		fmt.Printf("config: %s\n", configPath)
 	}
-	fmt.Printf("seeker: %s\n", info.Main.Version)
+	fmt.Printf("cbom-lens: %s\n", info.Main.Version)
 	fmt.Printf("go:     %s\n", info.GoVersion)
 	for _, s := range info.Settings {
 		switch s.Key {
@@ -131,7 +131,7 @@ func doScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		// fallback to the service config - if config does not come from stdin
 		// this allows one to debug the scanning part directly while using the same
-		// seeker.yaml as with the supervisor.
+		// com-lens.yaml as with the supervisor.
 		if configPath != "-" {
 			serviceConfig, fallbackErr := model.LoadConfigFromPath(configPath)
 			if fallbackErr != nil {
@@ -159,16 +159,16 @@ func doScan(cmd *cobra.Command, args []string) error {
 	slog.DebugContext(ctx, "_scan", "configPath", configPath)
 	slog.DebugContext(ctx, "_scan", "config", config)
 
-	seeker, err := NewSeeker(ctx, config)
+	lens, err := NewLens(ctx, config)
 	if err != nil {
 		return err
 	}
-	return seeker.Do(ctx, os.Stdout)
+	return lens.Do(ctx, os.Stdout)
 }
 
 func initDoScanLog(ctx context.Context, verbose bool) context.Context {
 	slog.SetDefault(log.New(verbose))
-	attrs := slog.Group("seeker",
+	attrs := slog.Group("cbom-lens",
 		slog.String("cmd", "_scan"),
 		slog.Int("pid", os.Getpid()),
 	)
@@ -186,7 +186,7 @@ func doRun(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	attrs := slog.Group("seeker",
+	attrs := slog.Group("cbom-lens",
 		slog.String("cmd", "run"),
 		slog.Int("pid", os.Getpid()),
 	)
@@ -244,12 +244,12 @@ func doRun(cmd *cobra.Command, args []string) error {
 
 		supervisor = supervisor.WithUploaders(ctx, uploaders...)
 		discoveryHttp = &http.Server{
-			Addr:    config.Service.Seeker.Addr.String(),
+			Addr:    config.Service.Server.Addr.String(),
 			Handler: dscvrSrv.Handler(),
 		}
 
 		go func() {
-			slog.InfoContext(ctx, "Starting http server.", slog.String("addr", config.Service.Seeker.Addr.String()))
+			slog.InfoContext(ctx, "Starting http server.", slog.String("addr", config.Service.Server.Addr.String()))
 			if err := discoveryHttp.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("`ListenAndServe()` failed.", slog.String("error", err.Error()))
 			}
@@ -279,13 +279,13 @@ func doRun(cmd *cobra.Command, args []string) error {
 }
 
 func loadConfig(_ *cobra.Command, _ []string) (model.Config, error) {
-	if envConfig, ok := os.LookupEnv("SEEKERCONFIG"); ok {
+	if envConfig, ok := os.LookupEnv("CBOMLENSCONFIG"); ok {
 		configPath = envConfig
 	} else if flagConfigFilePath != "" {
 		configPath = flagConfigFilePath
 	} else {
 		for _, d := range []string{userConfigPath, "."} {
-			path := filepath.Join(d, "seeker.yaml")
+			path := filepath.Join(d, "cbom-lens.yaml")
 			if exists(path) {
 				configPath = path
 				break
@@ -298,7 +298,7 @@ func loadConfig(_ *cobra.Command, _ []string) (model.Config, error) {
 	// store default configuration
 	if configPath == "" {
 		config = model.DefaultConfig(context.Background())
-		configPath = filepath.Join(userConfigPath, "seeker.yaml")
+		configPath = filepath.Join(userConfigPath, "cbom-lens.yaml")
 		err := os.MkdirAll(filepath.Dir(configPath), 0755)
 		if err != nil {
 			return config, fmt.Errorf("creating directory %s: %w", filepath.Dir(configPath), err)
@@ -332,8 +332,8 @@ func loadConfig(_ *cobra.Command, _ []string) (model.Config, error) {
 	// initialize logging
 	slog.SetDefault(log.New(config.Service.Verbose))
 
-	slog.Debug("seeker run", "configPath", configPath)
-	slog.Debug("seeker run", "config", config)
+	slog.Debug("cbom-lens run", "configPath", configPath)
+	slog.Debug("cbom-lens run", "config", config)
 	return config, nil
 }
 

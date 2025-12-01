@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	pd "github.com/kodeart/go-problem/v2"
 	"github.com/stretchr/testify/require"
@@ -311,7 +311,7 @@ func TestBOMRepoUploadNetworkError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
-	err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
+	err = u.Upload(context.Background(), "cbom-lens.yaml", []byte(`abcd`))
 	require.Error(t, err)
 }
 
@@ -510,7 +510,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, u)
 
-			err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
+			err = u.Upload(context.Background(), "cbom-lens.yaml", []byte(`abcd`))
 			if tc.wantErr {
 				require.Error(t, err)
 				t.Log(err)
@@ -545,7 +545,7 @@ func TestBOMRepoUploadFuncWithCallbackSuccess(t *testing.T) {
 
 	x := &helper{count: 0}
 	u = u.WithUploadCallback(x.C)
-	err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
+	err = u.Upload(context.Background(), "cbom-lens.yaml", []byte(`abcd`))
 	require.NoError(t, err)
 	require.Equal(t, 1, x.count)
 }
@@ -566,7 +566,7 @@ func TestBOMRepoUploadFuncWithCallbackFail(t *testing.T) {
 
 	x := &helper{count: 0}
 	u = u.WithUploadCallback(x.C)
-	err = u.Upload(context.Background(), "seeker.yaml", []byte(`abcd`))
+	err = u.Upload(context.Background(), "cbom-lens.yaml", []byte(`abcd`))
 	require.Error(t, err)
 	require.Equal(t, 1, x.count)
 }

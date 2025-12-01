@@ -6,14 +6,14 @@ import (
 	"encoding/pem"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
-	czX509 "github.com/CZERTAINLY/Seeker/internal/scanner/x509"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	czX509 "github.com/CZERTAINLY/CBOM-lens/internal/scanner/x509"
 
 	"github.com/stretchr/testify/require"
 )
 
 func Test_ZIP_META_INF_Detection(t *testing.T) {
-	t.Skip("https://github.com/CZERTAINLY/Seeker/issues/72")
+	t.Skip("https://github.com/CZERTAINLY/CBOM-lens/issues/72")
 	selfSigned, err := cdxtest.GenSelfSignedCert()
 	require.NoError(t, err)
 	der := selfSigned.Der
@@ -126,7 +126,7 @@ func Test_ZIP_InvalidCertInMetaINF(t *testing.T) {
 }
 
 func Test_ZIP_MultipleFiles(t *testing.T) {
-	t.Skip("https://github.com/CZERTAINLY/Seeker/issues/72")
+	t.Skip("https://github.com/CZERTAINLY/CBOM-lens/issues/72")
 	t.Parallel()
 
 	selfSigned, err := cdxtest.GenSelfSignedCert()

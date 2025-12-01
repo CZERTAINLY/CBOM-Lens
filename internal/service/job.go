@@ -9,8 +9,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/CZERTAINLY/Seeker/internal/log"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/log"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,7 +28,7 @@ type Job struct {
 }
 
 func NewJob(name string, oneshot bool, config model.Scan, results chan<- Result) (*Job, error) {
-	seeker, err := os.Executable()
+	lens, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("cannot determine path to executable: %w", err)
 	}
@@ -44,7 +44,7 @@ func NewJob(name string, oneshot bool, config model.Scan, results chan<- Result)
 
 	cmd := Command{
 		JobName: name,
-		Path:    seeker,
+		Path:    lens,
 		Args:    args,
 		Env: append(
 			os.Environ(),
@@ -68,12 +68,12 @@ func NewJob(name string, oneshot bool, config model.Scan, results chan<- Result)
 func (j *Job) WithTestData(stdout, stderr string) {
 	if stdout != "" {
 		j.cmd.Env = append(j.cmd.Env,
-			"_SEEKER_PRINT_STDOUT="+stdout,
+			"_LENS_PRINT_STDOUT="+stdout,
 		)
 	}
 	if stderr != "" {
 		j.cmd.Env = append(j.cmd.Env,
-			"_SEEKER_PRINT_STDERR="+stderr,
+			"_LENS_PRINT_STDERR="+stderr,
 		)
 	}
 }

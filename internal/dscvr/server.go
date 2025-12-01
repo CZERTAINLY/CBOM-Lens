@@ -14,16 +14,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/dscvr/store"
-	"github.com/CZERTAINLY/Seeker/internal/log"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
+	"github.com/CZERTAINLY/CBOM-lens/internal/log"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"github.com/gorilla/mux"
 )
 
 const defaultCallbackStoreTimeout = 10 * time.Second
 
-//go:generate mockgen -destination=./mock/supervisor.go -package=mock github.com/CZERTAINLY/Seeker/internal/dscvr SupervisorContract
+//go:generate mockgen -destination=./mock/supervisor.go -package=mock github.com/CZERTAINLY/CBOM-lens/internal/dscvr SupervisorContract
 type SupervisorContract interface {
 	ConfigureJob(ctx context.Context, name string, cfg model.Scan)
 	JobConfiguration(ctx context.Context, name string) (model.Scan, error)
@@ -55,26 +55,26 @@ func New(ctx context.Context, cfg model.Service, sv SupervisorContract, jobName 
 	case cfg.Repository == nil:
 		return nil, fmt.Errorf("configuration section 'repository' is required with mode %q", model.ServiceModeDiscovery)
 
-	case cfg.Seeker == nil:
-		return nil, fmt.Errorf("configuration section 'seeker' is required with mode %q", model.ServiceModeDiscovery)
+	case cfg.Server == nil:
+		return nil, fmt.Errorf("configuration section 'server' is required with mode %q", model.ServiceModeDiscovery)
 
 	case cfg.Core == nil:
 		return nil, fmt.Errorf("configuration section 'core' is required with mode %q", model.ServiceModeDiscovery)
 	}
 
-	cfg.Seeker.BaseURL.Path = strings.TrimSuffix(cfg.Seeker.BaseURL.Path, "/")
+	cfg.Server.BaseURL.Path = strings.TrimSuffix(cfg.Server.BaseURL.Path, "/")
 	cfg.Core.BaseURL.Path = strings.TrimSuffix(cfg.Core.BaseURL.Path, "/")
 	cfg.Repository.URL.Path = strings.TrimRight(cfg.Repository.URL.Path, "/")
 
 	var kind string
-	if cfg.Seeker.BaseURL.Port() == "" {
-		kind = fmt.Sprintf("%s-%s", cfg.Seeker.BaseURL.Hostname(), "default")
+	if cfg.Server.BaseURL.Port() == "" {
+		kind = fmt.Sprintf("%s-%s", cfg.Server.BaseURL.Hostname(), "default")
 	} else {
-		kind = fmt.Sprintf("%s-%s", cfg.Seeker.BaseURL.Hostname(), cfg.Seeker.BaseURL.Port())
+		kind = fmt.Sprintf("%s-%s", cfg.Server.BaseURL.Hostname(), cfg.Server.BaseURL.Port())
 	}
 
 	// init new or read-in the existing sqlite state file
-	db, err := store.InitDB(ctx, cfg.Seeker.StateFile)
+	db, err := store.InitDB(ctx, cfg.Server.StateFile)
 	if err != nil {
 		return nil, fmt.Errorf("failure initializing sqlite database: %w", err)
 	}
@@ -177,7 +177,7 @@ func (s *Server) Handler() *mux.Router {
 		path := strings.Replace(v.Path, "{functionalGroup}", s.funcGroupCode, 1)
 		path = strings.Replace(path, "{kind}", s.kind, 1)
 
-		r.HandleFunc(fmt.Sprintf("%s%s", s.cfg.Seeker.BaseURL.Path, path), handler).Methods(v.Method)
+		r.HandleFunc(fmt.Sprintf("%s%s", s.cfg.Server.BaseURL.Path, path), handler).Methods(v.Method)
 	}
 
 	return r
@@ -203,8 +203,8 @@ func (s *Server) RegisterConnector(ctx context.Context) error {
 
 	reqUrl := fmt.Sprintf("%s%s", s.cfg.Core.BaseURL, endpoint.Path)
 	reqBody := registerConnectorRequest{
-		Name:     fmt.Sprintf("seeker-%s", s.cfg.Seeker.BaseURL),
-		Url:      s.cfg.Seeker.BaseURL.String(),
+		Name:     fmt.Sprintf("cbom-lens-%s", s.cfg.Server.BaseURL),
+		Url:      s.cfg.Server.BaseURL.String(),
 		AuthType: "none",
 	}
 

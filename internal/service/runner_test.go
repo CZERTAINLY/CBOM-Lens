@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +26,7 @@ func TestRunner(t *testing.T) {
 	})
 
 	cmd := service.Command{
-		JobName: "seeker.yaml",
+		JobName: "cbom-lens.yaml",
 		Path:    yes,
 		Args:    []string{"golang"},
 		Env:     []string{"LC_ALL=C"},
@@ -39,7 +39,7 @@ func TestRunner(t *testing.T) {
 		require.NoError(t, err)
 		res := runner.LastResult()
 		require.NoError(t, res.Err)
-		require.Equal(t, "seeker.yaml", res.JobName)
+		require.Equal(t, "cbom-lens.yaml", res.JobName)
 	})
 	t.Run("in progress", func(t *testing.T) {
 		err = runner.Start(ctx, cmd)
@@ -52,7 +52,7 @@ func TestRunner(t *testing.T) {
 		require.Equal(t, []string{"golang"}, res.Args)
 		require.NotZero(t, res.Started)
 		require.NotZero(t, res.Stopped)
-		require.Equal(t, "seeker.yaml", res.JobName)
+		require.Equal(t, "cbom-lens.yaml", res.JobName)
 		// on GHA command `yes` finishes up earlier with
 		// ERROR processing stderr error="read |0: file already closed"
 		// lets not make this a fatal error
@@ -69,7 +69,7 @@ func TestRunner(t *testing.T) {
 	})
 	t.Run("exec error", func(t *testing.T) {
 		noCmd := service.Command{
-			JobName: "seeker.yaml",
+			JobName: "cbom-lens.yaml",
 			Path:    "does not exist",
 		}
 		err := runner.Start(ctx, noCmd)

@@ -7,7 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/parallel"
+	"github.com/CZERTAINLY/CBOM-lens/internal/parallel"
 	"github.com/stretchr/testify/require"
 )
 

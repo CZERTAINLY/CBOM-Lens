@@ -1,4 +1,4 @@
-module github.com/CZERTAINLY/Seeker
+module github.com/CZERTAINLY/CBOM-lens
 
 go 1.25
 

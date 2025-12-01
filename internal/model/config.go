@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/log"
+	"github.com/CZERTAINLY/CBOM-lens/internal/log"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -103,7 +103,7 @@ type Service struct {
 	Dir        string         `json:"dir,omitempty"`                                    // output directory
 	Repository *Repository    `json:"repository,omitempty" yaml:"repository,omitempty"` // remote publication
 	Schedule   *TimerSchedule `json:"schedule,omitempty"`                               // only for mode timer
-	Seeker     *SeekerServer  `json:"seeker,omitempty"`
+	Server     *LensServer    `json:"server,omitempty"`
 	Core       *Core          `json:"core,omitempty"`
 }
 
@@ -118,8 +118,8 @@ type Repository struct {
 	URL URL `json:"base_url"`
 }
 
-// SeekerServer is configuration for the discovery mode server.
-type SeekerServer struct {
+// LensServer is configuration for the discovery mode server.
+type LensServer struct {
 	Addr      TCPAddr `json:"addr"` // :port or ip:port
 	BaseURL   URL     `json:"base_url"`
 	StateFile string  `json:"state_file"`
@@ -420,7 +420,7 @@ func (e CueError) Details() []CueErrorDetail {
 	return humanize(e.cuerr, e.config, e.schema)
 }
 
-// DefaultConfig returns a default configuration for seeker
+// DefaultConfig returns a default configuration for cbom-lens
 // It tries to discover and ping docker/podman sockets, so those
 // scans can be added to the list
 // NOT SAFE for multiple goroutines

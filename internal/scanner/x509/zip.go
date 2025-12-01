@@ -44,7 +44,7 @@ func scanZIPForCerts(ctx context.Context, b []byte) []certHit {
 			continue
 		}
 		// Typical: CERT.RSA, *.RSA, *.DSA, *.EC, *.PK7
-		//nolint:staticcheck // seeker is going to recognize even obsoleted crypto
+		//nolint:staticcheck // cbom-lens is going to recognize even obsoleted crypto
 		if !(strings.HasSuffix(name, ".RSA") || strings.HasSuffix(name, ".DSA") ||
 			strings.HasSuffix(name, ".EC") || strings.HasSuffix(name, ".PK7") ||
 			name == "META-INF/CERT.RSA") {

@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/log"
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/scanner/pem"
+	"github.com/CZERTAINLY/CBOM-lens/internal/log"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
 	"github.com/Ullaakut/nmap/v3"
 )

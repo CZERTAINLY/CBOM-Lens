@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -70,9 +70,9 @@ service:
   log: stderr
   repository:
     base_url: https://example.com/repo
-  seeker:
+  server:
     addr: :8080
-    base_url: https://seeker.example.net/api
+    base_url: https://cbom-lens.example.net/api
   core:
     base_url: https://core-demo.example.net/api
 `,
@@ -84,10 +84,10 @@ service:
 					"repository": {
 						"base_url": "https://example.com/repo"
 					},
-					"seeker": {
+					"server": {
 						"addr": ":8080",
-						"base_url": "https://seeker.example.net/api",
-						"state_file": "./seeker-state-file"
+						"base_url": "https://cbom-lens.example.net/api",
+						"state_file": "./cbom-lens-state-file"
 					},
 					"core": {
 						"base_url": "https://core-demo.example.net/api"
@@ -116,10 +116,10 @@ service:
   log: stderr
   repository:
     base_url: https://example.com/repo
-  seeker:
+  server:
     addr: :8080
-    base_url: https://seeker.example.net/api
-    state_file: /tmp/some/path/seeker-sqlite
+    base_url: https://cbom-lens.example.net/api
+    state_file: /tmp/some/path/cbom-lens-sqlite
   core:
     base_url: https://core-demo.example.net/api
 `,
@@ -131,10 +131,10 @@ service:
 					"repository": {
 						"base_url": "https://example.com/repo"
 					},
-					"seeker": {
+					"server": {
 						"addr": ":8080",
-						"base_url": "https://seeker.example.net/api",
-						"state_file": "/tmp/some/path/seeker-sqlite"
+						"base_url": "https://cbom-lens.example.net/api",
+						"state_file": "/tmp/some/path/cbom-lens-sqlite"
 					},
 					"core": {
 						"base_url": "https://core-demo.example.net/api"

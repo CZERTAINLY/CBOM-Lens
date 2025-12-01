@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/service"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -19,15 +19,15 @@ import (
 
 func TestMain(m *testing.M) {
 	// Hidden service code unit testing protocol.
-	// If _SEEKER_PRINT_STDOUT or _SEEKER_PRINT_STDERR are set, emit their values to the
+	// If _LENS_PRINT_STDOUT or _LENS_PRINT_STDERR are set, emit their values to the
 	// respective stream and return immediately.
 	// Used by test harnesses to exercise process spawning, stdout/stderr capture
 	var testingCode bool
-	if x := os.Getenv("_SEEKER_PRINT_STDOUT"); x != "" {
+	if x := os.Getenv("_LENS_PRINT_STDOUT"); x != "" {
 		fmt.Println(x)
 		testingCode = true
 	}
-	if x := os.Getenv("_SEEKER_PRINT_STDERR"); x != "" {
+	if x := os.Getenv("_LENS_PRINT_STDERR"); x != "" {
 		fmt.Fprintln(os.Stderr, x)
 		testingCode = true
 	}
@@ -161,6 +161,6 @@ func TestOSRootUploader(t *testing.T) {
 	dir := t.TempDir()
 	u, err := service.NewOSRootUploader(dir)
 	require.NoError(t, err)
-	err = u.Upload(t.Context(), "seeker.yaml", []byte("raw"))
+	err = u.Upload(t.Context(), "cbom-lens.yaml", []byte("raw"))
 	require.NoError(t, err)
 }

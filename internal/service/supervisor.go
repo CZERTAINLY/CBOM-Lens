@@ -13,7 +13,7 @@ import (
 
 	gocron "github.com/go-co-op/gocron/v2"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 )
 
 type Supervisor struct {
@@ -392,19 +392,19 @@ func (u *OSRootUploader) Upload(ctx context.Context, _ string, b []byte) error {
 		return errors.New("root already closed")
 	}
 
-	path := "seeker-" + time.Now().Format("2006-01-02-15-04-05") + ".json"
+	path := "cbom-lens-" + time.Now().Format("2006-01-02-15-04-05") + ".json"
 
 	f, err := u.root.Create(path)
 	if err != nil {
-		return fmt.Errorf("creating seeker results: %w", err)
+		return fmt.Errorf("creating cbom-lens results: %w", err)
 	}
 	_, err = f.Write(b)
 	if err != nil {
-		return fmt.Errorf("saving seeker results: %w", err)
+		return fmt.Errorf("saving cbom-lens results: %w", err)
 	}
 	err = f.Close()
 	if err != nil {
-		return fmt.Errorf("closing seeker result: %w", err)
+		return fmt.Errorf("closing cbom-lens result: %w", err)
 	}
 	slog.InfoContext(ctx, "bom saved", "path", path)
 	return nil

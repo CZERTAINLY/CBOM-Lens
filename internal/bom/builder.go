@@ -9,7 +9,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/google/uuid"
 )
@@ -112,7 +112,7 @@ func (b *Builder) BOM() cdx.BOM {
 			// json: error calling MarshalJSON for type *cyclonedx.ToolsChoice: unexpected end of JSON input
 			Component: &cdx.Component{
 				Type:    "application",
-				Name:    "Seeker",
+				Name:    "CBOM-Lens",
 				Version: version,
 				Manufacturer: &cdx.OrganizationalEntity{
 					Name:    "CZERTAINLY",

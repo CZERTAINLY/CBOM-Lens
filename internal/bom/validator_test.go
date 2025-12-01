@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/bom"
+	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"

@@ -3,9 +3,9 @@ package cdxprops_test
 import (
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops"
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/Seeker/internal/scanner/pem"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
 	"github.com/stretchr/testify/require"
 )

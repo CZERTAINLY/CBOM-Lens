@@ -2,7 +2,7 @@ package cdxprops
 
 import (
 	"context"
-	"crypto/dsa" //nolint:staticcheck // seeker is going to recognize even obsoleted crypto
+	"crypto/dsa" //nolint:staticcheck // cbom-lens is going to recognize even obsoleted crypto
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/czertainly"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 

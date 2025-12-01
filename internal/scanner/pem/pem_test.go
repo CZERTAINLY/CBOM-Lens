@@ -8,9 +8,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	czpem "github.com/CZERTAINLY/Seeker/internal/scanner/pem"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	czpem "github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
 	"github.com/stretchr/testify/require"
 )

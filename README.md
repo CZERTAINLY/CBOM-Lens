@@ -1,9 +1,10 @@
-# Seeker
+# CBOM-Lens
 
 CLI tool, which scans a filesystem, containers and open ports and detects
 
  * certificates
  * secrets
+ * opened ports
 
 Generates BOM in CycloneDX 1.6 JSON format.
 
@@ -36,14 +37,14 @@ This configuration snippet searches for certificates and secrets inside local di
 
 
 ```sh
-$ ./seeker run --config seeker.yaml
-{"time":"2025-10-10T14:14:04.632066182+02:00","level":"WARN","msg":"command has no timeout","path":"usr/bin/seeker","seeker":{"cmd":"run","pid":2488398}}
-{"time":"2025-10-10T14:14:05.410539638+02:00","level":"INFO","msg":"bom saved","path":"seeker-2025-10-10-02:14:05.json","seeker":{"cmd":"run","pid":2488398}}
+$ ./cbom-lens run --config cbom-lens.yaml
+{"time":"2025-10-10T14:14:04.632066182+02:00","level":"WARN","msg":"command has no timeout","path":"usr/bin/cbom-lens","cbom-lens":{"cmd":"run","pid":2488398}}
+{"time":"2025-10-10T14:14:05.410539638+02:00","level":"INFO","msg":"bom saved","path":"cbom-lens-2025-10-10-02:14:05.json","cbom-lens":{"cmd":"run","pid":2488398}}
 ```
 
 # Container scan
 
-Seeker can scan images stored inside Docker(podman). Those searches for
+cbom-lens can scan images stored inside Docker(podman). Those searches for
 certificates and secrets exactly like filesystem scan do. Docker host can be
 specified via environment variable.
 
@@ -68,9 +69,9 @@ containers:
 ```
 
 ```sh
-$ time ./seeker run --config seeker.yaml
-{"time":"2025-10-11T11:38:54.207199641+02:00","level":"WARN","msg":"command has no timeout","path":"usr/bin/seeker","seeker":{"cmd":"run","pid":2610219}}
-{"time":"2025-10-11T11:39:41.257456265+02:00","level":"INFO","msg":"bom saved","path":"seeker-2025-10-11-11-39-41.json","seeker":{"cmd":"run","pid":2610219}}
+$ time ./cbom-lens run --config cbom-lens.yaml
+{"time":"2025-10-11T11:38:54.207199641+02:00","level":"WARN","msg":"command has no timeout","path":"usr/bin/cbom-lens","cbom-lens":{"cmd":"run","pid":2610219}}
+{"time":"2025-10-11T11:39:41.257456265+02:00","level":"INFO","msg":"bom saved","path":"cbom-lens-2025-10-11-11-39-41.json","cbom-lens":{"cmd":"run","pid":2610219}}
 
 real    0m47.083s
 user    1m33.919s
@@ -90,9 +91,9 @@ ports:
 ```
 
 ```sh
-$ time ./seeker run --config seeker.yaml
-{"time":"2025-10-11T11:46:39.889049897+02:00","level":"WARN","msg":"command has no timeout","path":"usr/bin/seeker","seeker":{"cmd":"run","pid":2614823}}
-{"time":"2025-10-11T11:46:57.244593739+02:00","level":"INFO","msg":"bom saved","path":"seeker-2025-10-11-11-46-57.json","seeker":{"cmd":"run","pid":2614823}}
+$ time ./cbom-lens run --config cbom-lens.yaml
+{"time":"2025-10-11T11:46:39.889049897+02:00","level":"WARN","msg":"command has no timeout","path":"usr/bin/cbom-lens","cbom-lens":{"cmd":"run","pid":2614823}}
+{"time":"2025-10-11T11:46:57.244593739+02:00","level":"INFO","msg":"bom saved","path":"cbom-lens-2025-10-11-11-46-57.json","cbom-lens":{"cmd":"run","pid":2614823}}
 
 real    0m17.389s
 user    0m0.838s
@@ -101,8 +102,8 @@ sys     0m2.538s
 
 # Save and upload the result
 
-By default, seeker prints the BOM to standard output. The `dir` directive
-changes this behavior, saving the files as `seeker-$date.json` in the specified
+By default, cbom-lens prints the BOM to standard output. The `dir` directive
+changes this behavior, saving the files as `cbom-lens-$date.json` in the specified
 directory. The `.` means the current working directory.
 
 ```yaml
@@ -121,7 +122,7 @@ service:
 ```
 
 Both the `dir` and the `repository` can be combined in a single configuration
-file. Seeker will attempt both methods and log an error if either one fails.
+file. cbom-lens will attempt both methods and log an error if either one fails.
 
 ```yaml
 service:
@@ -135,7 +136,7 @@ service:
 
 ## Manual
 
-This particular mode is the simplest one. Simply run `seeker run` and the
+This particular mode is the simplest one. Simply run `cbom-lens run` and the
 command will run the scan, upload results and finish. Use it in case
 scans are going to be orchestrated by other system.
 
@@ -258,27 +259,24 @@ service:
 
 ## CZERTAINLY discovery
 
-> [!WARNING]
-> CZERTAINLY core integration is in development at the moment. This part describes the configuration, of which only one part implemented.
-
 ```yaml
 version: 0
 service:
     mode: "discovery"
     repository:
         base_url: https://example.com/repo
-    seeker:
-        # where should seeker bind to - can be ip:port
+    server:
+        # where should cbom-lens bind to - can be ip:port
         addr: :8080
-        # public address from which is seeker accessible
+        # public address from which is cbom-lens accessible
         # to CZERTAINLY
-        base_url: https://seeker.example.net/api
+        base_url: https://cbom-lens.example.net/api
     core:
         # base address of CZERTAINLY Core API
         base_url: https://core-demo.example.net/api
 ```
 
-In this mode Seeker is fully managed by CZERTAINLY via discovery
+In this mode cbom-lens is fully managed by CZERTAINLY via discovery
 protocol. In this mode using a `repository` is more than recommended, as CZERTAINLY Core is expected to pull BOMs from there.
 
 # Developers
@@ -287,16 +285,16 @@ Following section is intended for developers
 
 ## Architecture
 
-`seeker` is a single binary with two cooperating modes triggered by `run`.
+`cbom-lens` is a single binary with two cooperating modes triggered by `run`.
 
-Supervisor (default when running `seeker run`):
+Supervisor (default when running `cbom-lens run`):
 1. Parses the `service:` configuration and initializes runtime (logging, repository, mode).
 2. Sets up resources per selected mode.
-3. Spawns a scan as a separate subprocess (`seeker _scan`).
+3. Spawns a scan as a separate subprocess (`cbom-lens _scan`).
 4. Enforces single-scan execution (queues/rejects concurrent scans) and waits for completion.
 5. Collects results and outputs them (print/store/upload) per configuration.
 
-Scan (invoked internally as `seeker _scan`):
+Scan (invoked internally as `cbom-lens _scan`):
 - Performs the actual scanning work.
 - Uses the same base configuration, focusing on scan-related fields.
 - Returns detections/results to the supervisor for further handling.
@@ -321,17 +319,17 @@ type Detector interface {
 }
 ```
 
-Existing detectors (gitleaks and x509) are initialized in `main.go` and passed down to the seeker in `_scan` subcommand
+Existing detectors (gitleaks and x509) are initialized in `main.go` and passed down to the cbom-lens in `_scan` subcommand
 
 ```go
-// cmd/seeker/main.go
+// cmd/cbom-lens/main.go
 func init() {
 	// user configuration
 	d, err := os.UserConfigDir()
 	if err != nil {
 		panic(err)
 	}
-	userConfigPath = filepath.Join(d, "seeker")
+	userConfigPath = filepath.Join(d, "cbom-lens")
 
 	// configure default detectors
 	// secrets:
@@ -347,7 +345,7 @@ func init() {
 	}
 }
 // func do Scan
-	seeker, err := NewSeeker(ctx, detectors, config)
+	lens, err := NewLens(ctx, detectors, config)
 ```
 
 ## Config file format specification
@@ -372,13 +370,13 @@ Some tests (e.g. nmap scans or walk.Images enumerating all Docker images) can ru
 
 ## Integration tests
 
-Are placed in a `seeker_test.go` in a project root. It is a normal Go test, which starts the `seeker-ci` binary in a specified directory. It expects the binary is built via
+Are placed in a `cbom-lens_test.go` in a project root. It is a normal Go test, which starts the `cbom-lens-ci` binary in a specified directory. It expects the binary is built via
 
 ```sh
-go build -race -cover -covermode=atomic -o seeker-ci ./cmd/seeker/
+go build -race -cover -covermode=atomic -o cbom-lens-ci ./cmd/cbom-lens/
 ```
 
-Data for the seeker under the test are stored in a temporary directory, which is deleted after test ends. In order to keep the content for further examination, the `test.keepdir` can be used. This will keep the temporary directory on disk.
+Data for the cbom-lens under the test are stored in a temporary directory, which is deleted after test ends. In order to keep the content for further examination, the `test.keepdir` can be used. This will keep the temporary directory on disk.
 
 ```sh
 go test -v -test.keepdir
@@ -386,7 +384,7 @@ go test -v -test.keepdir
 
 # Cryptographic Bill Of Materials (CBOM)
 
-The produced CBOM file conforms [CycloneDX BOM 1.6](https://cyclonedx.org/schema/bom-1.6.schema.json). Seeker can identify and correlate identical cryptographic materials across multiple sources and by generating a stable `bom-ref` for each component. This identifier is derived by hashing the component’s content (SHA-256 by default).
+The produced CBOM file conforms [CycloneDX BOM 1.6](https://cyclonedx.org/schema/bom-1.6.schema.json). cbom-lens can identify and correlate identical cryptographic materials across multiple sources and by generating a stable `bom-ref` for each component. This identifier is derived by hashing the component’s content (SHA-256 by default).
 
 There are two exceptions
 
@@ -404,9 +402,9 @@ The generated CBOM file conforms to the CycloneDX BOM 1.6
 
 2. **Algorithms** - the algorithm (SHA-256, RSA-4096, ...) component itself does not have "inherent" content to hash. So hash of a its CycloneDX JSON representation is used, ensuring the different algorithms or same algorithm with different BOM properties will receive unique reference.
 
-When computing this hash, Seeker excludes the bom-ref and evidence fields to avoid circular dependencies.
+When computing this hash, cbom-lens excludes the bom-ref and evidence fields to avoid circular dependencies.
 
-A stable, content-based `bom-ref` enables seeker to reliably identify the same cryptographic materials across diverse sources, providing a complete and unified view of an organization’s cryptographic assets.
+A stable, content-based `bom-ref` enables cbom-lens to reliably identify the same cryptographic materials across diverse sources, providing a complete and unified view of an organization’s cryptographic assets.
 
 ```json
 {
@@ -428,9 +426,12 @@ A stable, content-based `bom-ref` enables seeker to reliably identify the same c
 
 # Post Quantum Cryptography
 
-Seeker, as any tool written in Go, supports only algorithms, which are present in a standard library, which PQC are, as of Go 1.25, not. There is however a support for detecting such algorithms in place and `ml-ds` family can be detected.
+cbom-lens, as any tool written in Go, supports only algorithms, which are
+present in a standard library, which PQC are, as of Go 1.25, not. There is
+however a support for detecting such algorithms in place and `ml-ds` family can
+be detected.
 
-However a better support is needed.
+A better support is needed.
 
 ```json
     {

@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/CZERTAINLY/Seeker/internal/dscvr/store"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	uuidpkg "github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -96,8 +96,8 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 
 			mi = getDiscoveryMetaItem{
 				Version:     2,
-				UUID:        seekerResultMetadataUploadKeyAttrUUID,
-				Name:        seekerResultMetadataUploadKeyAttrName,
+				UUID:        lensResultMetadataUploadKeyAttrUUID,
+				Name:        lensResultMetadataUploadKeyAttrName,
 				Type:        "meta",
 				ContentType: "codeblock",
 				Properties:  mp,
@@ -119,8 +119,8 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 			micData = *dr.FailureReason
 			mi = getDiscoveryMetaItem{
 				Version:     2,
-				UUID:        seekerResultMetadataFailureReasonAttrUUID,
-				Name:        seekerResultMetadataFailureReasonAttrName,
+				UUID:        lensResultMetadataFailureReasonAttrUUID,
+				Name:        lensResultMetadataFailureReasonAttrName,
 				Type:        "meta",
 				ContentType: "string",
 				Properties:  mp,
@@ -204,7 +204,7 @@ func (s *Server) discoverCertificate(w http.ResponseWriter, r *http.Request) {
 
 	toJson(r.Context(), w, discoverCertificateResponse{
 		UUID:            uuid,
-		Name:            "Seeker Scan",
+		Name:            "CBOM-Lens Scan",
 		Status:          "inProgress",
 		CertificateData: []any{},
 		Meta:            []any{},
@@ -283,13 +283,13 @@ func (s *Server) listAttributeDefinitions(w http.ResponseWriter, r *http.Request
 	var resp listAttributeDefinitionsResponse
 	resp = append(resp, attrCodeblock{
 		Version:     ptrInt(2),
-		UUID:        seekerConfigurationAttrUUID,
-		Name:        seekerConfigurationAttrName,
+		UUID:        lensConfigurationAttrUUID,
+		Name:        lensConfigurationAttrName,
 		Description: ptrString("Configuration options for scanning."),
-		Type:        ptrString(seekerConfigurationAttrType),
-		ContentType: ptrString(seekerConfigurationAttrContentType),
+		Type:        ptrString(lensConfigurationAttrType),
+		ContentType: ptrString(lensConfigurationAttrContentType),
 		Properties: &attrProperties{
-			Label:   "Seeker scan configuration options.",
+			Label:   "CBOM-Lens scan configuration options.",
 			Visible: true,
 		},
 		Content: []attrCodeblockContent{

@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v4"
 )
@@ -43,9 +43,9 @@ func TestValidateAttr(t *testing.T) {
 			name: "valid attribute",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{
@@ -62,8 +62,8 @@ func TestValidateAttr(t *testing.T) {
 			name: "missing ContentType",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
 					ContentType: nil,
 					Content: []attrCodeblockContent{
 						{
@@ -82,8 +82,8 @@ func TestValidateAttr(t *testing.T) {
 			name: "wrong ContentType value",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
 					ContentType: ptrString("json"),
 					Content: []attrCodeblockContent{
 						{
@@ -102,9 +102,9 @@ func TestValidateAttr(t *testing.T) {
 			name: "empty Content array",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content:     []attrCodeblockContent{},
 				},
 			},
@@ -115,9 +115,9 @@ func TestValidateAttr(t *testing.T) {
 			name: "multiple Content items",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{
@@ -141,9 +141,9 @@ func TestValidateAttr(t *testing.T) {
 			name: "wrong language",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{
@@ -161,9 +161,9 @@ func TestValidateAttr(t *testing.T) {
 			name: "invalid base64 encoding",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{
@@ -181,9 +181,9 @@ func TestValidateAttr(t *testing.T) {
 			name: "invalid YAML structure",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{
@@ -195,7 +195,7 @@ func TestValidateAttr(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "is not a valid yaml seeker scan configuration",
+			errMsg:  "is not a valid yaml cbom-lens scan configuration",
 		},
 		{
 			name: "unknown UUID",
@@ -203,7 +203,7 @@ func TestValidateAttr(t *testing.T) {
 				{
 					UUID:        "unknown-uuid-1234",
 					Name:        "unknown-attr",
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{
@@ -226,9 +226,9 @@ func TestValidateAttr(t *testing.T) {
 			name: "multiple valid attributes",
 			attrs: []attrCodeblock{
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{
@@ -239,9 +239,9 @@ func TestValidateAttr(t *testing.T) {
 					},
 				},
 				{
-					UUID:        seekerConfigurationAttrUUID,
-					Name:        seekerConfigurationAttrName,
-					ContentType: ptrString(seekerConfigurationAttrContentType),
+					UUID:        lensConfigurationAttrUUID,
+					Name:        lensConfigurationAttrName,
+					ContentType: ptrString(lensConfigurationAttrContentType),
 					Content: []attrCodeblockContent{
 						{
 							Data: attrCodeblockContentData{

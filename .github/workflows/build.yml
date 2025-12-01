@@ -14,7 +14,7 @@ permissions:
 
 env:
   # Change this to your binary name
-  APP_NAME: seeker
+  APP_NAME: cbom-lens
   # Common build flags
   GOFLAGS: -trimpath
   LDFLAGS: -s -w -X "main.version=${{ github.sha }}"
@@ -72,7 +72,7 @@ jobs:
           NAME="${APP_NAME}-${GOOS}-${GOARCH}"
           BIN="dist/${NAME}${{ matrix.ext }}"
           echo "Building -> ${BIN}"
-          go build $GOFLAGS -ldflags "$LDFLAGS" -o "$BIN" ./cmd/seeker
+          go build $GOFLAGS -ldflags "$LDFLAGS" -o "$BIN" ./cmd/cbom-lens
           # Ensure executable bit on unix-like targets (Windows ignores it)
           chmod +x "$BIN" || true
           ls -lh "$BIN"

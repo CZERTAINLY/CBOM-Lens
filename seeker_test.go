@@ -1,4 +1,4 @@
-package seeker_test
+package lens_test
 
 import (
 	"bytes"
@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/bom"
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
+	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
@@ -25,7 +25,7 @@ import (
 var (
 	//go:embed testing/*
 	testingFS    embed.FS
-	seekerPath   string
+	lensPath     string
 	privKeyBytes []byte
 	certDER      []byte
 	validator    bom.Validator
@@ -63,25 +63,25 @@ func TestMain(m *testing.M) {
 		}
 	}
 
-	if !isExecutable("seeker-ci") {
-		slog.Error("cannot locate seeker-ci binary: run go build -race -cover -covermode=atomic -o seeker-ci ./cmd/seeker/ first")
+	if !isExecutable("cbom-lens-ci") {
+		slog.Error("cannot locate cbom-lens-ci binary: run go build -race -cover -covermode=atomic -o cbom-lens-ci ./cmd/cbom-lens/ first")
 		os.Exit(1)
 	}
 
 	var err error
-	seekerPath, err = filepath.Abs("seeker-ci")
+	lensPath, err = filepath.Abs("cbom-lens-ci")
 	if err != nil {
-		slog.Error("can't get abspath for seeker-ci", "error", err)
+		slog.Error("can't get abspath for cbom-lens-ci", "error", err)
 		os.Exit(1)
 	}
 	coverDir, err := filepath.Abs("coverage")
 	if err != nil {
-		slog.Error("can't get value for GOCOVERDIR for seeker-ci", "error", err)
+		slog.Error("can't get value for GOCOVERDIR for cbom-lens-ci", "error", err)
 		os.Exit(1)
 	}
 	err = rmRfMkdirp(coverDir)
 	if err != nil {
-		slog.Error("can't reset GOCOVERDIR for seeker-ci", "error", err, "coverdir", coverDir)
+		slog.Error("can't reset GOCOVERDIR for cbom-lens-ci", "error", err, "coverdir", coverDir)
 		os.Exit(1)
 	}
 
@@ -106,7 +106,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestSeekerManual(t *testing.T) {
+func TestManual(t *testing.T) {
 	_ = chDir(t)
 
 	const config = `
@@ -119,7 +119,7 @@ service:
     mode: "manual"
     verbose: false
 `
-	creat(t, "seeker.yaml", []byte(config))
+	creat(t, "cbom-lens.yaml", []byte(config))
 	fixture(t, "testing/leaks/aws_token.py")
 	creat(t, "priv.key", privKeyBytes)
 	creat(t, "pem.cert", certDER)
@@ -127,10 +127,10 @@ service:
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(cancel)
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, seekerPath, "run", "--config", "seeker.yaml")
+	cmd := exec.CommandContext(ctx, lensPath, "run", "--config", "cbom-lens.yaml")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	t.Logf("./seeker-ci run: %#+v", cmd)
+	t.Logf("./cbom-lens-ci run: %#+v", cmd)
 	err := cmd.Run()
 	if err != nil {
 		t.Logf("%s", stderr.String())
@@ -151,7 +151,7 @@ service:
 	require.True(t, len(*bom.Components) >= 7)
 }
 
-func TestSeekerTimer(t *testing.T) {
+func TestTimer(t *testing.T) {
 	_ = chDir(t)
 
 	const config = `
@@ -167,17 +167,17 @@ service:
     dir: .
     verbose: false
 `
-	creat(t, "seeker.yaml", []byte(config))
+	creat(t, "cbom-lens.yaml", []byte(config))
 	fixture(t, "testing/leaks/aws_token.py")
 	creat(t, "priv.key", privKeyBytes)
 	creat(t, "pem.cert", certDER)
-	err := rmrf("seeker*json")
+	err := rmrf("cbom-lens*json")
 	require.NoError(t, err)
 
 	runCtx, cancelRun := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(cancelRun)
 	// wait on new scan file to appear and cancel the context
-	// which kills the seeker - this will speedup the test
+	// which kills the cbom-lens - this will speedup the test
 	go func(ctx context.Context, cancel context.CancelFunc) {
 		t := time.NewTicker(5 * time.Second)
 		for {
@@ -185,7 +185,7 @@ service:
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				results, _ := filepath.Glob("seeker*.json")
+				results, _ := filepath.Glob("cbom-lens*.json")
 				if len(results) >= 1 {
 					cancel()
 				}
@@ -195,10 +195,10 @@ service:
 	}(runCtx, cancelRun)
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(runCtx, seekerPath, "run", "--config", "seeker.yaml")
+	cmd := exec.CommandContext(runCtx, lensPath, "run", "--config", "cbom-lens.yaml")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	t.Logf("./seeker-ci run: %#+v", cmd)
+	t.Logf("./cbom-lens-ci run: %#+v", cmd)
 	err = cmd.Run()
 	if err != nil {
 		t.Logf("%s", stderr.String())
@@ -208,7 +208,7 @@ service:
 		}
 	}
 
-	results, err := filepath.Glob("seeker*.json")
+	results, err := filepath.Glob("cbom-lens*.json")
 	require.NoError(t, err)
 	require.True(t, len(results) > 0)
 	f, err := os.Open(results[0])

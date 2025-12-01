@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"github.com/zricethezav/gitleaks/v8/detect"
 )

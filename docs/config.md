@@ -1,4 +1,4 @@
-# Seeker Configuration Schema
+# CBOM-Lens Configuration Schema
 
 Note the [config.cue](config.cue) enables slightly more options, however those are those, which are supported now.
 
@@ -52,11 +52,50 @@ This section configures a Docker and other compatible container engine scan.
 - `ipv4` (bool, optional, default true) Scan IPv4.
 - `ipv6` (bool, optional, default true) Scan IPv6.
 
+## Service
+
+- `verbose` (bool, optional) - produce debug logs or not
+- `mode` (string, optional), mode of a service. Can be `manual`, `timer` or `discovery`
+
+### Manual mode
+- Description: No automatic scheduling or discovery; actions are performed manually.
+- Optional fields that may still be present:
+  - `dir` (string) — where to store the CBOM.
+  - `repository` (#Repository) — CBOM-Repository configuration associated with the service.
+
+### Timer mode
+- Description: Service runs on a schedule.
+- Required when `mode` is `timer`:
+  - `schedule` (type: #Schedule) — schedule specification for running the service.
+- `schedule.cron` expects the configuration in 5 fields cron format, however
+  macros like @daily, @weekly or @every Go time.Duration are allowed too.
+- `schedule.duration` expects data as ISO-8601 format
+- Optional fields that may still be present:
+  - `dir` (string) — where to store the CBOM.
+  - `repository` (#Repository) — CBOM-Repository configuration associated with the service.
+
+### Discovery mode
+- Description: Service is created via discovery and must include runtime server configurations.
+- Required when `mode` is `discovery`:
+  - `server` (#Server) — cbom-lens server configuration (required, not null).
+  - `core` (#Core) — CZERTAINLY core configuration (required, not null).
+  - `repository` (#Repository)
+- Optional fields that may still be present:
+  - `dir` (string)
+
+
+### Repository
+- Type: object (#Repository)
+- Description: Configuration for an external repository used by the service.
+- Fields:
+  - `base_url` (required, type: #URL) — the repository's base URL. This is the canonical location used to fetch artifacts/configuration. See the #URL definition for allowed formats and validation rules.
+
 ## Environment variables
 
-Following values can contain environment variable name, which is expanded.
+Every string item can contain the environment variable, which will be expanded.
+So this is legal configuration.
 
- * filesystem.paths
- * containers.config name, host and images
- * ports.binary
- * service.dir
+```yaml
+repository:
+  base_url: ${CBOM_REPOSITORY_BASE_URL}
+```

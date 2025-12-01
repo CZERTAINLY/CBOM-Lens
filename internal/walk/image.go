@@ -8,8 +8,8 @@ import (
 	"iter"
 	"log/slog"
 
-	"github.com/CZERTAINLY/Seeker/internal/log"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/log"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"github.com/anchore/stereoscope"
 	"github.com/anchore/stereoscope/pkg/file"

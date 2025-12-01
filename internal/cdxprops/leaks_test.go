@@ -8,9 +8,9 @@ import (
 	"encoding/pem"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops"
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
 	"github.com/zricethezav/gitleaks/v8/report"

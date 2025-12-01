@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 

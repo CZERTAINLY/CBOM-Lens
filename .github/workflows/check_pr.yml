@@ -33,11 +33,11 @@ jobs:
         run: go build -v ./...
       - name: Run go vet
         run: go vet ./...
-      - name: Build seeker-ci
-        run: go build -race -cover -covermode=atomic -o seeker-ci github.com/CZERTAINLY/Seeker/cmd/seeker
+      - name: Build cbom-lens-ci
+        run: go build -race -cover -covermode=atomic -o cbom-lens-ci github.com/CZERTAINLY/cbom-lens/cmd/cbom-lens
       - name: Run tests
         run: go test -v -race -vet=off -coverprofile=coverage.unit.out ./...
-      - name: Convert seeker-ci coverage
+      - name: Convert cbom-lens-ci coverage
         run: go tool covdata textfmt -i=coverage/ -o coverage.integration.out
 
       # Package up PR context for downstream workflow_run

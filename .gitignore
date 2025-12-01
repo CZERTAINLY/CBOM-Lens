@@ -41,8 +41,9 @@ setenv.sh
 *.out
 coverage.html
 
-# Binary
-/seeker
+# Binaries
+/cbom-lens
+/cbom-lens-ci
 
 # Linter reports
 golangci-lint-report.xml

@@ -8,8 +8,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/czertainly"
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"

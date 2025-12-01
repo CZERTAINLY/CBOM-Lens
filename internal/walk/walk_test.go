@@ -13,9 +13,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/log"
-	"github.com/CZERTAINLY/Seeker/internal/model"
-	"github.com/CZERTAINLY/Seeker/internal/walk"
+	"github.com/CZERTAINLY/CBOM-lens/internal/log"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"github.com/anchore/stereoscope"
 	"github.com/anchore/stereoscope/pkg/image"
@@ -128,7 +128,7 @@ func TestImage(t *testing.T) {
 	require.NoError(t, err)
 
 	// /a/c/c.txt has a different content in new layer
-	// seeker deals with squashed layers, because that's what is
+	// cbom-lens deals with squashed layers, because that's what is
 	// visible when container is running
 	dockerfile := []byte(`
 FROM busybox:latest

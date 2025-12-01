@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/CZERTAINLY/Seeker/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -133,13 +133,13 @@ type attrProperties struct {
 func validateAttr(attrs []attrCodeblock) error {
 	for _, cpy := range attrs {
 		switch cpy.UUID {
-		case seekerConfigurationAttrUUID:
+		case lensConfigurationAttrUUID:
 			if cpy.ContentType == nil {
 				return fmt.Errorf("attribute uuid: %q, name: %q does not have 'ContentType' property defined", cpy.UUID, cpy.Name)
 			}
-			if *cpy.ContentType != seekerConfigurationAttrContentType {
+			if *cpy.ContentType != lensConfigurationAttrContentType {
 				return fmt.Errorf("attribute uuid: %q, name: %q does not have expected 'ContentType' property defined, expected: %q, actual, %q",
-					cpy.UUID, cpy.Name, seekerConfigurationAttrContentType, *cpy.ContentType)
+					cpy.UUID, cpy.Name, lensConfigurationAttrContentType, *cpy.ContentType)
 			}
 			if len(cpy.Content) != 1 {
 				return fmt.Errorf("attribute uuid: %q, name: %q has unexpected number of items in `Content` array, expected: 1, actual: %d",
@@ -155,7 +155,7 @@ func validateAttr(attrs []attrCodeblock) error {
 			var m model.Scan
 			err = yaml.Unmarshal(dd, &m)
 			if err != nil {
-				return fmt.Errorf("attribute uuid: %q, name: %q is not a valid yaml seeker scan configuration: %s", cpy.UUID, cpy.Name, err)
+				return fmt.Errorf("attribute uuid: %q, name: %q is not a valid yaml cbom-lens scan configuration: %s", cpy.UUID, cpy.Name, err)
 			}
 
 		default:

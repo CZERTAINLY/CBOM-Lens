@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/Seeker/internal/cdxprops/cdxtest"
-	czX509 "github.com/CZERTAINLY/Seeker/internal/scanner/x509"
+	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	czX509 "github.com/CZERTAINLY/CBOM-lens/internal/scanner/x509"
 	keystore "github.com/pavlo-v-chernykh/keystore-go/v4"
 
 	"github.com/stretchr/testify/require"
