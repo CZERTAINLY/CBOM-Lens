@@ -34,7 +34,7 @@ jobs:
       - name: Run go vet
         run: go vet ./...
       - name: Build cbom-lens-ci
-        run: go build -race -cover -covermode=atomic -o cbom-lens-ci github.com/CZERTAINLY/cbom-lens/cmd/cbom-lens
+        run: go build -race -cover -covermode=atomic -o cbom-lens-ci ./cmd/cbom-lens
       - name: Run tests
         run: go test -v -race -vet=off -coverprofile=coverage.unit.out ./...
       - name: Convert cbom-lens-ci coverage
