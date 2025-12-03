@@ -1,6 +1,6 @@
 module github.com/CZERTAINLY/CBOM-lens
 
-go 1.25
+go 1.25.4
 
 require (
 	cuelang.org/go v0.14.1
@@ -20,7 +20,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.39.0
-	github.com/zricethezav/gitleaks/v8 v8.28.0
+	github.com/zricethezav/gitleaks/v8 v8.30.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.3
@@ -103,6 +103,7 @@ require (
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
