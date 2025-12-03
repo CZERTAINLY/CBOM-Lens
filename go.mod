@@ -9,7 +9,7 @@ require (
 	github.com/anchore/stereoscope v0.1.10
 	github.com/docker/docker v28.4.0+incompatible
 	github.com/gliderlabs/ssh v0.3.8
-	github.com/go-co-op/gocron/v2 v2.17.0
+	github.com/go-co-op/gocron/v2 v2.18.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/kaptinlin/jsonschema v0.5.2
