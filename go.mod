@@ -3,7 +3,7 @@ module github.com/CZERTAINLY/CBOM-lens
 go 1.25
 
 require (
-	cuelang.org/go v0.14.1
+	cuelang.org/go v0.15.1
 	github.com/CycloneDX/cyclonedx-go v0.9.3
 	github.com/Ullaakut/nmap/v3 v3.0.6
 	github.com/anchore/stereoscope v0.1.10
@@ -148,7 +148,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/protocolbuffers/txtpbfmt v0.0.0-20250627152318-f293424e46b5 // indirect
+	github.com/protocolbuffers/txtpbfmt v0.0.0-20251016062345-16587c79cd91 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect
