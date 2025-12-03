@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 ########################
 # Run Stage
 ########################
-FROM alpine:3.22
+FROM alpine:3.23
 
 LABEL org.opencontainers.image.authors="CZERTAINLY <support@czertainly.com>"
 
