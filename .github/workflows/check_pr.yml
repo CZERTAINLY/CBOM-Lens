@@ -24,7 +24,7 @@ jobs:
         with:
           go-version: stable
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@1e7e51e
+        uses: golangci/golangci-lint-action@1e7e51e # @v9
         with:
           version: latest
       - name: Verify dependencies
