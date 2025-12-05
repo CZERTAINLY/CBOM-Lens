@@ -1,6 +1,7 @@
 package cdxprops_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
@@ -10,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMLMKEMPrivateKey(t *testing.T) {
+func TestMLDSAPrivateKey(t *testing.T) {
 	pk, err := cdxtest.TestData(cdxtest.MLDSA65PrivateKey)
 	require.NoError(t, err)
 
@@ -21,6 +22,15 @@ func TestMLMKEMPrivateKey(t *testing.T) {
 	detection := c.PEMBundle(t.Context(), bundle)
 	require.NotNil(t, detection)
 	compos := detection.Components
-	require.Len(t, compos, 1)
-	require.Equal(t, "ML-DSA-65", compos[0].Name)
+
+	bomRefs := make([]string, len(compos))
+	hashes := 0
+	for i, compo := range compos {
+		bomRefs[i] = compo.BOMRef
+		if strings.Contains(compo.BOMRef, cdxtest.MLDSA65PublicKeyHash) {
+			hashes++
+		}
+	}
+	require.Equal(t, 2, hashes, "There should be two components with a public key hash")
+	t.Logf("bomRefs: %v", bomRefs)
 }

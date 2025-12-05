@@ -2,10 +2,7 @@ package pem
 
 import (
 	"context"
-	"crypto"
-	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -13,6 +10,7 @@ import (
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	czx509 "github.com/CZERTAINLY/CBOM-lens/internal/scanner/x509"
+	"github.com/CZERTAINLY/CBOM-lens/internal/xcrypto"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -78,13 +76,12 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 		/*********** PRIVATE KEYS ***********/
 		case "PRIVATE KEY":
 			// PKCS#8 format - can be RSA, ECDSA, Ed25519
-			if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err != nil {
+			if key, err := xcrypto.ParsePKCS8PrivateKey(block.Bytes); err != nil {
 				bundle.ParseErrors[order] =
 					fmt.Errorf("failed to parse PKCS#8 private key at position %d: %w", order, err)
 			} else {
 				pki := model.PrivateKeyInfo{
 					Key:        key,
-					Type:       keyType(key),
 					Source:     "PKCS8-PEM",
 					BlockIndex: len(bundle.RawBlocks) - 1,
 				}
@@ -99,7 +96,6 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 			} else {
 				pki := model.PrivateKeyInfo{
 					Key:        key,
-					Type:       keyType(key),
 					Source:     "PKCS1-PEM",
 					BlockIndex: len(bundle.RawBlocks) - 1,
 				}
@@ -114,7 +110,6 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 			} else {
 				pki := model.PrivateKeyInfo{
 					Key:        key,
-					Type:       keyType(key),
 					Source:     "EC-PEM",
 					BlockIndex: len(bundle.RawBlocks) - 1,
 				}
@@ -130,7 +125,7 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 			}
 
 		case "PUBLIC KEY":
-			if pubKey, err := x509.ParsePKIXPublicKey(block.Bytes); err != nil {
+			if pubKey, err := xcrypto.ParsePKIXPublicKey(block.Bytes); err != nil {
 				bundle.ParseErrors[order] =
 					fmt.Errorf("failed to parse public key at position %d: %w", order, err)
 			} else {
@@ -164,7 +159,6 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 				}
 				pki := model.PrivateKeyInfo{
 					Key:        key,
-					Type:       keyType(key),
 					Source:     "PEM",
 					BlockIndex: len(bundle.RawBlocks) - 1,
 				}
@@ -202,17 +196,4 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 		"location", bundle.Location,
 	)
 	return bundle, nil
-}
-
-func keyType(key crypto.PrivateKey) string {
-	switch key.(type) {
-	case *rsa.PrivateKey:
-		return "RSA"
-	case *ecdsa.PrivateKey:
-		return "ECDSA"
-	case ed25519.PrivateKey:
-		return "Ed25519"
-	default:
-		return fmt.Sprintf("Unknown (%T)", key)
-	}
 }

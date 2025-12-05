@@ -32,9 +32,9 @@ type pqcInfo struct {
 	signatureSize            int
 }
 
-var unsupportedAlgorithms = map[string]algorithmInfo{
+var pqcAlgorithms = map[string]algorithmInfo{
 	// https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf
-	"2.16.840.1.101.3.4.3.17": {
+	"ML-DSA-44": {
 		name:          "ML-DSA-44",
 		oid:           "2.16.840.1.101.3.4.3.17",
 		paramSetID:    "44",
@@ -51,7 +51,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			signatureSize:            2420,
 		},
 	},
-	"2.16.840.1.101.3.4.3.18": {
+	"ML-DSA-65": {
 		name:          "ML-DSA-65",
 		oid:           "2.16.840.1.101.3.4.3.18",
 		paramSetID:    "65",
@@ -68,7 +68,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			signatureSize:            3309,
 		},
 	},
-	"2.16.840.1.101.3.4.3.19": {
+	"ML-DSA-87": {
 		name:          "ML-DSA-87",
 		oid:           "2.16.840.1.101.3.4.3.19",
 		paramSetID:    "87",
@@ -197,6 +197,9 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 			meta.name = "DSA"
 			meta.algorithmName = "crypto/algorithm/dsa"
 		}
+
+	case "ML-DSA-44", "ML-DSA-65", "ML-DSA-87":
+		return pqcAlgorithms[keyType]
 
 	default:
 		meta.name = "Unknown"

@@ -5,7 +5,6 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"testing"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
@@ -69,7 +68,6 @@ func TestDetector(t *testing.T) {
 						PrivateKeys: []model.PrivateKeyInfo{
 							{
 								Key:    cert.Key,
-								Type:   "Ed25519",
 								Source: "PKCS8-PEM",
 							},
 						},
@@ -100,7 +98,6 @@ func TestDetector(t *testing.T) {
 						PrivateKeys: []model.PrivateKeyInfo{
 							{
 								Key:    cert.Key,
-								Type:   "ECDSA",
 								Source: "EC-PEM",
 							}},
 						RawBlocks: []model.PEMBlock{
@@ -125,7 +122,6 @@ func TestDetector(t *testing.T) {
 					bundle: model.PEMBundle{
 						PrivateKeys: []model.PrivateKeyInfo{{
 							Key:    key,
-							Type:   "Ed25519",
 							Source: "PEM",
 						}},
 						RawBlocks: []model.PEMBlock{
@@ -261,34 +257,6 @@ func TestDetector(t *testing.T) {
 			},
 			then: model.ErrNoMatch,
 		},
-		{
-			scenario: "ML-KEM-1024-PRIVATE-KEY (PQC, PKCS#8)",
-			given: func(t *testing.T) given {
-				pk, err := cdxtest.TestData(cdxtest.MLDSA65PrivateKey)
-				require.NoError(t, err)
-
-				block, _ := pem.Decode(pk)
-				require.NotNil(t, block)
-
-				return given{
-					data: pk,
-					bundle: model.PEMBundle{
-						ParseErrors: map[int]error{
-							0: errors.New("failed to parse PKCS#8 private key at position 0: x509: PKCS#8 wrapping contained private key with unknown algorithm: 2.16.840.1.101.3.4.3.18"),
-						},
-						RawBlocks: []model.PEMBlock{
-							{
-								Type:    "PRIVATE KEY",
-								Headers: map[string]string{},
-								Bytes:   block.Bytes,
-								Order:   0,
-							},
-						},
-					},
-				}
-			},
-			then: nil,
-		},
 	}
 
 	for _, tc := range testCases {
@@ -306,6 +274,8 @@ func TestDetector(t *testing.T) {
 				require.Equal(t, tc.then.Error(), err.Error())
 			} else {
 				require.NoError(t, err)
+
+				t.Logf("bundle.ParseErrors: %+v", bundle.ParseErrors)
 
 				for idx, gotErr := range bundle.ParseErrors {
 					expectedErr, ok := given.bundle.ParseErrors[idx]

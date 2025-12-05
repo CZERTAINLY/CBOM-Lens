@@ -12,7 +12,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/CZERTAINLY/CBOM-lens/internal/xcrypto"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa44"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 )
 
 // publicKeyAlgComponent creates a CycloneDX component for a public key algorithm
@@ -73,7 +77,7 @@ func (c Converter) publicKeyComponents(_ context.Context, pubKeyAlg x509.PublicK
 
 func (c Converter) hashPublicKey(pubKey crypto.PublicKey) (value, hash string) {
 	// Marshal to PKIX/SPKI format (standard DER encoding)
-	pubKeyBytes, err := x509.MarshalPKIXPublicKey(pubKey)
+	pubKeyBytes, err := xcrypto.MarshalPKIXPublicKey(pubKey)
 	if err != nil {
 		return
 	}
@@ -105,6 +109,12 @@ func publicKeyAlgorithmInfo(pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.Pub
 		if dsaKey, ok := pubKey.(*dsa.PublicKey); ok {
 			key = dsaKeyAdapter{dsaKey}
 		}
+	case xcrypto.MLDSA44Algo:
+		keyType = "ML-DSA-44"
+	case xcrypto.MLDSA65Algo:
+		keyType = "ML-DSA-65"
+	case xcrypto.MLDSA87Algo:
+		keyType = "ML-DSA-87"
 	default:
 		keyType = "Unknown"
 	}
@@ -122,6 +132,12 @@ func getPublicKeyAlgorithm(pubKey crypto.PublicKey) x509.PublicKeyAlgorithm {
 		return x509.Ed25519
 	case *dsa.PublicKey:
 		return x509.DSA
+	case *mldsa44.PublicKey:
+		return xcrypto.MLDSA44Algo
+	case *mldsa65.PublicKey:
+		return xcrypto.MLDSA65Algo
+	case *mldsa87.PublicKey:
+		return xcrypto.MLDSA87Algo
 	default:
 		return x509.UnknownPublicKeyAlgorithm
 	}

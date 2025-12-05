@@ -57,13 +57,11 @@ func TestConverter_PEM(t *testing.T) {
 		PrivateKeys: []model.PrivateKeyInfo{
 			{
 				Key:        selfSigned.Key,
-				Type:       "RSA",
 				Source:     "PEM",
 				BlockIndex: -1,
 			},
 			{
 				Key:        csrKey,
-				Type:       "ECDSA",
 				Source:     "PEM",
 				BlockIndex: -1,
 			},

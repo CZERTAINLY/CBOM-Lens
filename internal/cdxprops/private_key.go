@@ -11,7 +11,11 @@ import (
 	"strings"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa44"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
 )
 
 func (c Converter) PrivateKey(ctx context.Context, id string, key crypto.PrivateKey) (algoCompo, keyCompo cdx.Component) {
@@ -55,6 +59,12 @@ func privateKeyInfo(key crypto.PrivateKey) algorithmInfo {
 		keyInterface = ecKeyAdapter{&k.PublicKey}
 	case ed25519.PrivateKey:
 		kt = "Ed25519"
+	case *mldsa44.PrivateKey:
+		kt = "ML-DSA-44"
+	case *mldsa65.PrivateKey:
+		kt = "ML-DSA-65"
+	case *mldsa87.PrivateKey:
+		kt = "ML-DSA-87"
 	default:
 		kt = "Unknown"
 	}
@@ -76,6 +86,12 @@ func getPublicKey(privKey crypto.PrivateKey) (crypto.PublicKey, error) {
 		return k.Public(), nil
 	case *dsa.PrivateKey:
 		return &k.PublicKey, nil
+	case *mldsa44.PrivateKey:
+		return k.Public(), nil
+	case *mldsa65.PrivateKey:
+		return k.Public(), nil
+	case *mldsa87.PrivateKey:
+		return k.Public(), nil
 	default:
 		return nil, fmt.Errorf("unsupported private key type %T", k)
 	}
