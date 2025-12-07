@@ -1,3 +1,11 @@
+# Configuration Reference
+
+This document is the field-by-field reference for the CBOM-Lens configuration.
+
+For a narrative configuration guide, see the [Configuration guide](configuration.md). For CUE schema details, see the schema file [config.cue](config.cue).
+
+---
+
 # CBOM-Lens Configuration Schema
 
 Note the [config.cue](config.cue) enables slightly more options, however those are those, which are supported now.

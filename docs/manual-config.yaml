@@ -1,3 +1,6 @@
+# Example manual mode configuration for CBOM-Lens.
+# Referenced by docs/configuration.md and docs/config-reference.md.
+
 version: 0
 filesystem:
   enabled: true
