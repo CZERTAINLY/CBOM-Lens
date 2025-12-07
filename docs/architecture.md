@@ -87,8 +87,6 @@ The split allows:
 - Passing only scan-specific data across process boundaries and APIs.
 - Reusing the same validation fragments for both full and subset configs.
 
-See `config-schema.md` for more details on CUE definitions.
-
 ---
 
 ## 4. Detector interface

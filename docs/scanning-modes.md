@@ -57,13 +57,13 @@ CBOM-Lens uses the [github.com/robfig/cron](https://pkg.go.dev/github.com/robfig
 
 A cron expression has 5 space-separated fields:
 
-Field name   | Mandatory? | Allowed values  | Allowed special characters
------------  | ---------- | --------------  | --------------------------
-Minutes      | Yes        | 0-59            | * / , -
-Hours        | Yes        | 0-23            | * / , -
-Day of month | Yes        | 1-31            | * / , - ?
-Month        | Yes        | 1-12 or JAN-DEC | * / , -
-Day of week  | Yes        | 0-6 or SUN-SAT  | * / , - ?
+| Field name   | Mandatory? | Allowed values  | Allowed special characters |
+|--------------|------------|-----------------|----------------------------|
+| Minutes      | Yes        | 0-59            | * / , -                    |
+| Hours        | Yes        | 0-23            | * / , -                    |
+| Day of month | Yes        | 1-31            | * / , - ?                  |
+| Month        | Yes        | 1-12 or JAN-DEC | * / , -                    |
+| Day of week  | Yes        | 0-6 or SUN-SAT  | * / , - ?                  |
 
 Month and day-of-week values are case insensitive (e.g., `SUN`, `Sun`, `sun`).
 
@@ -71,7 +71,7 @@ Month and day-of-week values are case insensitive (e.g., `SUN`, `Sun`, `sun`).
 
 - **Asterisk (\*)** – match all values of the field. Example: `*` in the month field means "every month".
 - **Slash (/)** – increments of ranges. Example: `3-59/15` in the minutes field means "the 3rd minute of the hour and every 15 minutes thereafter". `*/N` is shorthand for "from first to last, every N".
-- **Comma (,) ** – list of values. Example: `MON,WED,FRI` in day-of-week means Mondays, Wednesdays, and Fridays.
+- **Comma (,)** – list of values. Example: `MON,WED,FRI` in day-of-week means Mondays, Wednesdays, and Fridays.
 - **Hyphen (-)** – ranges. Example: `9-17` in the hours field means every hour from 9:00 to 17:00 inclusive.
 - **Question mark (?)** – may be used instead of `*` in day-of-month or day-of-week when that field is not relevant.
 
@@ -79,13 +79,13 @@ Month and day-of-week values are case insensitive (e.g., `SUN`, `Sun`, `sun`).
 
 You may use one of the predefined macros:
 
-Entry                  | Description                                | Equivalent to
------                  | -----------                                | -------------
-`@yearly` (or `@annually`) | Run once a year, midnight, Jan. 1st        | `0 0 1 1 *`
-`@monthly`             | Run once a month, midnight, first of month | `0 0 1 * *`
-`@weekly`              | Run once a week, midnight between Sat/Sun  | `0 0 * * 0`
-`@daily` (or `@midnight`) | Run once a day, midnight                   | `0 0 * * *`
-`@hourly`              | Run once an hour, beginning of hour        | `0 * * * *`
+| Entry                      | Description                                | Equivalent to |
+|----------------------------|--------------------------------------------|---------------|
+| `@yearly` (or `@annually`) | Run once a year, midnight, Jan. 1st        | `0 0 1 1 *`   |
+| `@monthly`                 | Run once a month, midnight, first of month | `0 0 1 * *`   |
+| `@weekly`                  | Run once a week, midnight between Sat/Sun  | `0 0 * * 0`   |
+| `@daily` (or `@midnight`)  | Run once a day, midnight                   | `0 0 * * *`   |
+| `@hourly`                  | Run once an hour, beginning of hour        | `0 * * * *`   |
 
 ### 2.2 ISO-8601 duration
 
@@ -152,11 +152,11 @@ For a deeper integration overview, see `integration-czertainly.md`.
 
 ## 4. Mode comparison
 
-Mode       | Scheduling     | Lifetime       | Typical use cases
----------- | -------------- | -------------- | -----------------
-`manual`   | external (none inside CBOM-Lens) | one-shot process | ad-hoc scans, CI jobs
-`timer`    | internal (cron or duration)      | long-lived       | periodic scans on a host
-`discovery`| external (CZERTAINLY Core)       | long-lived       | fully managed discovery with CZERTAINLY
+| Mode        | Scheduling                       | Lifetime         | Typical use cases                       |
+|-------------|----------------------------------|------------------|-----------------------------------------|
+| `manual`    | external (none inside CBOM-Lens) | one-shot process | ad-hoc scans, CI jobs                   |
+| `timer`     | internal (cron or duration)      | long-lived       | periodic scans on a host                |
+| `discovery` | external (CZERTAINLY Core)       | long-lived       | fully managed discovery with CZERTAINLY |
 
 Choose the mode that best matches how you want CBOM-Lens to be orchestrated.
 

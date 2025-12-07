@@ -12,7 +12,6 @@
 ## Developer documentation
 
 - `examples/manual-config.yaml` – full manual mode configuration example.
-- `config-schema.md` – CUE schema overview and validation rules.
 - `config-reference.md` – field-by-field configuration reference.
 
 ## Configuration & reference
