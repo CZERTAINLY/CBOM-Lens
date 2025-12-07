@@ -1,51 +1,55 @@
 # CBOM-Lens Documentation
-- `LICENSE.md` for license information.
-- Top-level project `README.md` for a concise overview and quick start.
-
-## See also
-
-- `testing-ci.md` – tests, integration tests, and CI setup.
-- `extending-detectors.md` – how to implement and wire new detectors.
-- `architecture.md` – architecture, processes, and package layout.
-- `development.md` – developer onboarding, build, and workflow.
-
-## Developer documentation
-
-- `examples/manual-config.yaml` – full manual mode configuration example.
-- `config-reference.md` – field-by-field configuration reference.
-
-## Configuration & reference
-
-- `cbom-format.md` – CBOM structure, `bom-ref` semantics, and PQC representation.
-- `scanning-use-cases.md` – scanning strategies and best practices for security teams.
-
-## Security & CBOM documentation
-
-- `integration-czertainly.md` – integrating with CZERTAINLY Core and CBOM-Repository.
-- `operations.md` – running CBOM-Lens in practice (logs, outputs, uploads).
-- `scanning-modes.md` – manual, timer, and discovery modes; cron and ISO-8601 schedules.
-- `configuration.md` – narrative configuration guide with practical examples.
-- `quick-start.md` – minimal examples for filesystem, container, and port scans.
-- `installation.md` – how to install and upgrade CBOM-Lens.
-- `overview.md` – product overview and key concepts.
-
-## Operator documentation
-
-- **Scan modes & scheduling:** `docs/scanning-modes.md`.
-- **Configuration guide:** `docs/configuration.md`.
-- **Quick start (operators):** `docs/quick-start.md`.
-- **Project overview:** see the top-level `README.md` and `docs/overview.md`.
-
-## Start here
-
-- **Developers / contributors** – understanding the architecture, extending detectors, and running tests.
-- **Security engineers** – understanding what is scanned, what the CBOM contains, and how to use it.
-- **Operators / DevOps** – installing, configuring, and running CBOM-Lens.
-
-## Audience guide
 
 CBOM-Lens is a CLI tool that scans filesystems, container images, and network ports to discover cryptographic assets and produces a CycloneDX CBOM 1.6. This directory contains operator, security, and developer documentation.
 
-Welcome to the CBOM-Lens documentation.
+---
 
+## Start here
 
+- **Project overview:** see the top-level [README](../README.md) and [Overview](overview.md).
+- **Quick start (operators):** [Quick Start](quick-start.md).
+- **Configuration guide:** [Configuration guide](configuration.md).
+- **Scan modes & scheduling:** [Scanning modes & scheduling](scanning-modes.md).
+
+---
+
+## Operator documentation
+
+- [Overview](overview.md) – product overview and key concepts.
+- [Quick Start](quick-start.md) – minimal examples for filesystem, container, and port scans.
+- [Configuration guide](configuration.md) – narrative configuration guide with practical examples.
+- [Scanning modes & scheduling](scanning-modes.md) – manual, timer, and discovery modes; cron and ISO-8601 schedules.
+- [Operations](operations.md) – running CBOM-Lens in practice (logs, outputs, uploads).
+- [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md) – integrating with CZERTAINLY Core and CBOM-Repository.
+
+---
+
+## Security & CBOM documentation
+
+- [Scanning use cases & best practices](scanning-use-cases.md) – scanning strategies and best practices for security teams.
+- [CBOM output format](cbom-format.md) – CBOM structure, `bom-ref` semantics, and PQC representation.
+
+---
+
+## Configuration & reference
+
+- [Configuration guide](configuration.md) – how to configure CBOM-Lens for common deployment scenarios.
+- [Configuration reference](config.md) – field-by-field configuration reference.
+- [Example manual mode configuration](manual-config.yaml) – full manual mode configuration example.
+- [CUE configuration schema](config.cue) – formal configuration schema used for validation.
+
+---
+
+## Developer documentation
+
+- [Development guide](development.md) – developer onboarding, build, and workflow.
+- [Architecture](architecture.md) – architecture, processes, and package layout.
+- [Extending detectors](extending-detectors.md) – how to implement and wire new detectors.
+- [Testing & CI](testing-ci.md) – tests, integration tests, and CI setup.
+
+---
+
+## See also
+
+- Top-level project [README](../README.md) for a concise overview and quick start.
+- [LICENSE.md](../LICENSE.md) for license information.
