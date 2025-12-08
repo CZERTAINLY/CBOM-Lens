@@ -69,7 +69,7 @@ The supervisor and scan communicate purely over stdin/stdout, which keeps the de
 
 ## 3. Configuration objects
 
-Configuration is defined in CUE (`docs/config.cue`) and mapped to Go structs in `internal/model`.
+Configuration is defined in CUE (`internal/model/config.cue`) and mapped to Go structs in `internal/model`.
 
 There are two main configuration objects:
 

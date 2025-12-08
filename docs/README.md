@@ -36,7 +36,7 @@ CBOM-Lens is a CLI tool that scans filesystems, container images, and network po
 - [Configuration guide](configuration.md) – how to configure CBOM-Lens for common deployment scenarios.
 - [Configuration reference](config.md) – field-by-field configuration reference.
 - [Example manual mode configuration](manual-config.yaml) – full manual mode configuration example.
-- [CUE configuration schema](config.cue) – formal configuration schema used for validation.
+- [CUE configuration schema](../internal/model/config.cue) – formal configuration schema used for validation.
 
 ---
 
