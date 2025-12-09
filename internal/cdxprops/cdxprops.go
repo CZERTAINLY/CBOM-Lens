@@ -218,7 +218,7 @@ func setAlgorithmPrimitive(compo *cdx.Component, primitive cdx.CryptoPrimitive) 
 	compo.CryptoProperties.AlgorithmProperties.Primitive = primitive
 }
 
-func addAlgorithmCrpyoFunctions(compo *cdx.Component, functions ...cdx.CryptoFunction) {
+func addAlgorithmCryptoFunctions(compo *cdx.Component, functions ...cdx.CryptoFunction) {
 	if compo == nil {
 		return
 	}

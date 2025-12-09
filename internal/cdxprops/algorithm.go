@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/x509"
 	"fmt"
 	"strconv"
 	"strings"
@@ -282,4 +283,27 @@ func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 		}
 	}
 	return compo
+}
+
+func inferAlgorithmPrimitive(algop *cdx.Component, info algorithmInfo, keyUsage x509.KeyUsage) {
+	if algop == nil {
+		return
+	}
+
+	var primitive = cdx.CryptoPrimitiveSignature
+	if strings.Contains(info.name, "RSA") {
+		if keyUsage != 0 &&
+			(keyUsage&x509.KeyUsageDigitalSignature+
+				keyUsage&x509.KeyUsageCRLSign+
+				keyUsage&x509.KeyUsageCertSign > 0) &&
+			(keyUsage&x509.KeyUsageKeyEncipherment == 0) {
+			primitive = cdx.CryptoPrimitiveSignature
+		} else {
+			primitive = cdx.CryptoPrimitivePKE
+		}
+	}
+	setAlgorithmPrimitive(algop, primitive)
+	if primitive == cdx.CryptoPrimitivePKE {
+		addAlgorithmCryptoFunctions(algop, cdx.CryptoFunctionSign)
+	}
 }

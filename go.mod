@@ -7,6 +7,7 @@ require (
 	github.com/CycloneDX/cyclonedx-go v0.9.3
 	github.com/Ullaakut/nmap/v3 v3.0.6
 	github.com/anchore/stereoscope v0.1.13
+	github.com/cloudflare/circl v1.6.1
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/gliderlabs/ssh v0.3.8
 	github.com/go-co-op/gocron/v2 v2.18.2

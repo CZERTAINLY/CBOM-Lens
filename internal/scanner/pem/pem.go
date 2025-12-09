@@ -57,7 +57,7 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 
 		switch block.Type {
 		/*********** CERTIFICATES ***********/
-		case "CERTIFICATE", "TRUSTED CERTIFICATE":
+		case "BEGIN CERTIFICATE", "CERTIFICATE", "TRUSTED CERTIFICATE":
 			if cs, err := x509.ParseCertificates(block.Bytes); err != nil {
 				bundle.ParseErrors[order] =
 					fmt.Errorf("failed to parse certificate at position %d: %w", order, err)

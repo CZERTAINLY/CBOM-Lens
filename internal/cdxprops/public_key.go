@@ -22,26 +22,8 @@ import (
 // publicKeyAlgComponent creates a CycloneDX component for a public key algorithm
 func (c Converter) publicKeyComponents(_ context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, keyUsage x509.KeyUsage) (algo, key cdx.Component) {
 	info := publicKeyAlgorithmInfo(pubKeyAlg, pubKey)
-
-	var primitive = cdx.CryptoPrimitiveSignature
-
-	if strings.Contains(info.name, "RSA") {
-		if keyUsage != 0 &&
-			(keyUsage&x509.KeyUsageDigitalSignature+
-				keyUsage&x509.KeyUsageCRLSign+
-				keyUsage&x509.KeyUsageCertSign > 0) &&
-			(keyUsage&x509.KeyUsageKeyEncipherment == 0) {
-			primitive = cdx.CryptoPrimitiveSignature
-		} else {
-			primitive = cdx.CryptoPrimitivePKE
-		}
-	}
-
 	algo = info.componentWOBomRef(c.czertainly)
-	setAlgorithmPrimitive(&algo, primitive)
-	if primitive == cdx.CryptoPrimitivePKE {
-		addAlgorithmCrpyoFunctions(&algo, cdx.CryptoFunctionSign)
-	}
+	inferAlgorithmPrimitive(&algo, info, keyUsage)
 	c.BOMRefHash(&algo, info.algorithmName)
 
 	pubKeyValue, pubKeyHash := c.hashPublicKey(pubKey)

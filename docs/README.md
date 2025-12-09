@@ -37,6 +37,7 @@ CBOM-Lens is a CLI tool that scans filesystems, container images, and network po
 - [Configuration reference](config.md) – field-by-field configuration reference.
 - [Example manual mode configuration](manual-config.yaml) – full manual mode configuration example.
 - [CUE configuration schema](../internal/model/config.cue) – formal configuration schema used for validation.
+- [Post Quantum Crypto Support](post-quantum-crypto.md) - document explaining the level of support for post quantum cryptographic algorithms.
 
 ---
 

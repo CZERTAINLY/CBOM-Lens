@@ -22,6 +22,7 @@ func (c Converter) PrivateKey(ctx context.Context, id string, key crypto.Private
 	info := privateKeyInfo(key)
 
 	algoCompo = info.componentWOBomRef(c.czertainly)
+	inferAlgorithmPrimitive(&algoCompo, info, 0)
 	c.BOMRefHash(&algoCompo, info.algorithmName)
 
 	bomRef := "crypto/private_key/" + strings.ToLower(algoCompo.Name) + "@" + id
