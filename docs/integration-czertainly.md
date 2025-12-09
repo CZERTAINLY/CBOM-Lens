@@ -91,6 +91,19 @@ service:
 
 ---
 
+## 3. CZERTAINLY-Specific Extensions
+
+The CBOM generation process can be configured to include CZERTAINLY-specific properties, such as `czertainly:component:certificate:base64_content`. The complete list of supported properties can be found in [../internal/cdxprops/czertainly/czertainly.go].
+
+```yaml
+cbom:
+  version: "1.6"
+  extensions:
+    - czertainly
+```
+
+---
+
 ## 4. Troubleshooting integration
 
 Common issues:

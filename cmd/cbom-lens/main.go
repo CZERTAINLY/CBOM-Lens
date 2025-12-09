@@ -143,6 +143,7 @@ func doScan(cmd *cobra.Command, args []string) error {
 				Containers: serviceConfig.Containers,
 				Ports:      serviceConfig.Ports,
 				Service:    serviceConfig.Service.ServiceFields,
+				CBOM:       serviceConfig.CBOM,
 			}
 		}
 	}
@@ -213,6 +214,7 @@ func doRun(cmd *cobra.Command, args []string) error {
 			Verbose: flagVerbose || config.Service.Verbose,
 			Log:     config.Service.Log,
 		},
+		CBOM: config.CBOM,
 	})
 
 	var discoveryHttp *http.Server
