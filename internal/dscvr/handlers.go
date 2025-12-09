@@ -19,6 +19,10 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
+const (
+	repositoryUploadPath = "api/v1/bom"
+)
+
 func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
@@ -85,39 +89,65 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var mp metaProperties
-		var micData string
-		var mi getDiscoveryMetaItem
+		var mis []getDiscoveryMetaItem
 		if *dr.Success {
 			status = "completed"
-			mp = metaProperties{
-				Label:   "Uploaded CBOM-Repository Key",
-				Visible: true,
-			}
 
-			mi = getDiscoveryMetaItem{
+			mis = append(mis, getDiscoveryMetaItem{
 				Version:     2,
 				UUID:        lensResultMetadataUploadKeyAttrUUID,
 				Name:        lensResultMetadataUploadKeyAttrName,
 				Type:        "meta",
 				ContentType: "codeblock",
-				Properties:  mp,
+				Properties: metaProperties{
+					Label:   "Uploaded CBOM-Repository Key and Simple Crypto Statistics",
+					Visible: true,
+				},
 				Content: []any{
 					metaItemContentCodeblock{
 						Data: metaItemContentCodeblockItem{
 							Language: "json",
-							Code:     *dr.UploadKey,
+							Code:     base64.StdEncoding.EncodeToString([]byte(*dr.UploadKey)),
 						},
 					},
 				},
+			})
+
+			type repositoryRespKeys struct {
+				SerialNumber string `json:"serialNumber"`
+				Version      int    `json:"version"`
 			}
+			var rrk repositoryRespKeys
+			if err := json.Unmarshal([]byte(*dr.UploadKey), &rrk); err != nil {
+				slog.ErrorContext(ctx, "`json.Unmarshal()` failed", slog.String("error", err.Error()))
+				http.Error(w, "Internal server error.", http.StatusInternalServerError)
+				return
+			}
+
+			mis = append(mis, getDiscoveryMetaItem{
+				Version:     2,
+				UUID:        lensResultMetadataURIAttrUUID,
+				Name:        lensResultMetadataURIAttrName,
+				Type:        "meta",
+				ContentType: "string",
+				Properties: metaProperties{
+					Label:   "Uploaded CBOM-Repository URI",
+					Visible: true,
+				},
+				Content: []any{
+					metaItemContentString{
+						Data: fmt.Sprintf("%s/%s/%s?version=%d", s.cfg.Repository.URL.String(), repositoryUploadPath, rrk.SerialNumber, rrk.Version),
+					},
+				},
+			})
+
 		} else {
 			status = "failed"
 			mp = metaProperties{
 				Label:   "Failure reason",
 				Visible: true,
 			}
-			micData = *dr.FailureReason
-			mi = getDiscoveryMetaItem{
+			mis = append(mis, getDiscoveryMetaItem{
 				Version:     2,
 				UUID:        lensResultMetadataFailureReasonAttrUUID,
 				Name:        lensResultMetadataFailureReasonAttrName,
@@ -126,10 +156,10 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 				Properties:  mp,
 				Content: []any{
 					metaItemContentString{
-						Data: micData,
+						Data: *dr.FailureReason,
 					},
 				},
-			}
+			})
 		}
 
 		toJson(ctx, w, getDiscoveryResponse{
@@ -137,7 +167,7 @@ func (s *Server) getDiscovery(w http.ResponseWriter, r *http.Request) {
 			Name:            request.Name,
 			Status:          status,
 			CertificateData: []any{},
-			Meta:            []getDiscoveryMetaItem{mi},
+			Meta:            mis,
 		})
 		return
 	}
@@ -296,7 +326,7 @@ func (s *Server) listAttributeDefinitions(w http.ResponseWriter, r *http.Request
 			{
 				Data: attrCodeblockContentData{
 					Language: "yaml",
-					Code:     string(b),
+					Code:     base64.StdEncoding.EncodeToString(b),
 				},
 			},
 		},

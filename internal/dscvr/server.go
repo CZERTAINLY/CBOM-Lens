@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,7 +123,7 @@ func (s *Server) UploadedCallback(err error, jobName, resp string) {
 	defer cancel()
 
 	if err == nil {
-		if err := store.FinishOK(ctx, s.db, s.uuid, base64.StdEncoding.EncodeToString([]byte(resp))); err != nil {
+		if err := store.FinishOK(ctx, s.db, s.uuid, resp); err != nil {
 			slog.Error("`store.FinishOK()` failed", slog.String("error", err.Error()))
 		}
 	} else {

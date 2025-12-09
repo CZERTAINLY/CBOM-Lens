@@ -11,11 +11,15 @@ const (
 	lensConfigurationAttrType        = "data"
 	lensConfigurationAttrContentType = "codeblock"
 
-	// constants related to czertainly core meta attribute for passing upload key
+	// constants related to czertainly core meta attribute for passing upload result json
 	lensResultMetadataUploadKeyAttrUUID = "8895b0c5-d16b-4c85-991c-be9156c59e8d"
-	lensResultMetadataUploadKeyAttrName = "cbom_lens_result_upload_key"
+	lensResultMetadataUploadKeyAttrName = "cbom_lens_result_upload_json"
 
-	// constants related to czertainly core meta attribute for passing result
+	// constants related to czertainly core meta attribute for passing repository get uri
+	lensResultMetadataURIAttrUUID = "a29d6d07-17ab-4211-bc66-6c95f9e38842"
+	lensResultMetadataURIAttrName = "cbom_lens_result_repository_uri"
+
+	// constants related to czertainly core meta attribute for passing result in case of failure
 	lensResultMetadataFailureReasonAttrUUID = "429d078c-73d1-445a-bf48-606509a3619e"
 	lensResultMetadataFailureReasonAttrName = "cbom_lens_result_string"
 

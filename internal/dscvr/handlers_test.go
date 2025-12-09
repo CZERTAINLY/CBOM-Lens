@@ -130,6 +130,9 @@ func TestServer_listAttributeDefinitions(t *testing.T) {
 	require.Len(t, result, 1)
 	require.Equal(t, lensConfigurationAttrUUID, result[0].UUID)
 	require.Equal(t, lensConfigurationAttrName, result[0].Name)
+	require.Equal(t, 1, len(result[0].Content))
+	require.Equal(t, "yaml", result[0].Content[0].Data.Language)
+	require.Equal(t, "dmVyc2lvbjogMApmaWxlc3lzdGVtOgogICAgZW5hYmxlZDogdHJ1ZQogICAgcGF0aHM6CiAgICAgICAgLSAvdGVzdApjb250YWluZXJzOgogICAgZW5hYmxlZDogZmFsc2UKICAgIGNvbmZpZzogW10KcG9ydHM6CiAgICBlbmFibGVkOiBmYWxzZQogICAgYmluYXJ5OiAiIgogICAgcG9ydHM6ICIiCiAgICBpcHY0OiBmYWxzZQogICAgaXB2NjogZmFsc2UKc2VydmljZToKICAgIHZlcmJvc2U6IGZhbHNlCiAgICBsb2c6ICIiCg==", result[0].Content[0].Data.Code)
 }
 
 func TestServer_listAttributeDefinitions_ConfigError(t *testing.T) {
@@ -511,7 +514,7 @@ func TestServer_getDiscovery_Completed(t *testing.T) {
 	err := store.Start(context.Background(), s.db, uuid)
 	require.NoError(t, err)
 
-	uploadKey := "test-upload-key"
+	uploadKey := `{"serialNumber":"urn:uuid:9a74ce22-21aa-4f8e-b7ff-d4783cd425d8","version":1,"stats":{"crypto-stats":{"crypto-assets":{"total":1,"algorithms":{"total":1},"certificates":{"total":0},"protocols":{"total":0},"related-crypto-materials":{"total":0}}}}}`
 	err = store.FinishOK(context.Background(), s.db, uuid, uploadKey)
 	require.NoError(t, err)
 
@@ -539,8 +542,9 @@ func TestServer_getDiscovery_Completed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uuid, result.UUID)
 	require.Equal(t, "completed", result.Status)
-	require.Len(t, result.Meta, 1)
+	require.Len(t, result.Meta, 2)
 	require.Equal(t, lensResultMetadataUploadKeyAttrUUID, result.Meta[0].UUID)
+	require.Equal(t, lensResultMetadataURIAttrUUID, result.Meta[1].UUID)
 }
 
 func TestServer_getDiscovery_Failed(t *testing.T) {
