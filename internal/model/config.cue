@@ -24,7 +24,7 @@ service?: #ServiceFields
 cbom?: #CBOM
 }
 
-// CBOM defines a cbom properties
+// CBOM defines cbom properties
 #CBOM: {
   version?: string | *"1.6"
   extensions?: [...string]
