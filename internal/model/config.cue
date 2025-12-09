@@ -1,3 +1,5 @@
+// CUE schema for CBOM-Lens configuration.
+
 package config
 // SCHEMA DEFINITION
 #Config
