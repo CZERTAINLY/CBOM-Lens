@@ -27,7 +27,7 @@ type publicKeyInfo struct {
 
 // ParsePKIXPublicKey() parses a PKIX-encoded public key.
 //
-// This function first attempts to parse the private key using the standard
+// This function first attempts to parse the public key using the standard
 // x509.ParsePKIXPublicKey function. If that fails, it falls back to a
 // custom unmarshalPKIX function to handle non-standard or Post-Quantum
 // Cryptography (PQC) algorithms, such as ML-DSA-65.
@@ -39,7 +39,7 @@ type publicKeyInfo struct {
 // - b: The PKIX-encoded public key as a byte slice.
 //
 // Returns:
-// - crypto.PublicKey: The parsed private key if successful.
+// - crypto.PublicKey: The parsed public key if successful.
 // - error: An error if parsing fails.
 func ParsePKIXPublicKey(b []byte) (crypto.PublicKey, error) {
 	key, err := x509.ParsePKIXPublicKey(b)
