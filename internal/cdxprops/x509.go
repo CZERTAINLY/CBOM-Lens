@@ -103,25 +103,30 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyAlgCompo.BOMRef)
 
 	setAlgorithmPrimitive(&signatureAlgCompo, cdx.CryptoPrimitiveSignature)
-	setAlgorithmPrimitive(&hashAlgCompo, cdx.CryptoPrimitiveHash)
 	setAlgorithmPrimitive(&publicKeyAlgCompo, cdx.CryptoPrimitiveSignature)
 
 	compos := []cdx.Component{
 		mainCertCompo,
 		signatureAlgCompo,
-		hashAlgCompo,
 		publicKeyCompo,
 		publicKeyAlgCompo,
 	}
 
-	deps := []cdx.Dependency{
-		{
-			Ref: signatureAlgCompo.BOMRef,
-			Dependencies: &[]string{
-				publicKeyAlgCompo.BOMRef,
-				hashAlgCompo.BOMRef,
+	var deps []cdx.Dependency
+
+	if hashAlgCompo != nil {
+		setAlgorithmPrimitive(hashAlgCompo, cdx.CryptoPrimitiveHash)
+		compos = append(compos, *hashAlgCompo)
+
+		deps = []cdx.Dependency{
+			{
+				Ref: signatureAlgCompo.BOMRef,
+				Dependencies: &[]string{
+					publicKeyAlgCompo.BOMRef,
+					hashAlgCompo.BOMRef,
+				},
 			},
-		},
+		}
 	}
 
 	return compos, deps, nil
@@ -170,7 +175,7 @@ func (c Converter) certComponent(_ context.Context, hit model.CertHit) cdx.Compo
 	return certComponent
 }
 
-func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model.CertHit) (sigAlgCompo cdx.Component, hashAlgCompo cdx.Component) {
+func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model.CertHit) (sigAlgCompo cdx.Component, hashAlgCompo *cdx.Component) {
 	sigAlg := hit.Cert.SignatureAlgorithm
 	algName := sigAlg.String()
 	oid := sigAlgOID(hit.Cert)
@@ -181,6 +186,15 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 	}
 
 	cryptoProps, props, hashName := c.getAlgorithmProperties(sigAlg)
+	if hashName == "" {
+		// fallback for PQC
+		switch {
+		case strings.Contains(bomName, "slh-dsa-sha2"):
+			hashName = "SHA-256"
+		case strings.Contains(bomName, "slh-dsa-shake"):
+			hashName = "SHAKE-256"
+		}
+	}
 
 	sigAlgCompo = cdx.Component{
 		Type: cdx.ComponentTypeCryptographicAsset,
@@ -193,8 +207,12 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 		Properties: &props,
 	}
 
-	hashAlgCompo = c.hashAlgorithmCompo(hashName)
 	c.BOMRefHash(&sigAlgCompo, bomName)
+
+	if hashName != "" {
+		compo := c.hashAlgorithmCompo(hashName)
+		hashAlgCompo = &compo
+	}
 	return
 }
 
