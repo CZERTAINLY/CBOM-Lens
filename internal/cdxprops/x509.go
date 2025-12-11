@@ -9,6 +9,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/hex"
 	"errors"
@@ -32,55 +33,70 @@ const (
 
 // ---------- ASN.1 helpers (declared once) ----------
 
-type algorithmIdentifier struct {
-	Algorithm  asn1.ObjectIdentifier
-	Parameters asn1.RawValue `asn1:"optional"`
-}
-
-type certOuter struct {
+type certOuterStruct struct {
 	TBSCert   asn1.RawValue
-	SigAlg    algorithmIdentifier
+	SigAlg    pkix.AlgorithmIdentifier
 	Signature asn1.BitString
 }
 
-type spki struct {
-	Algorithm     algorithmIdentifier
-	SubjectPubKey asn1.BitString
+// public key instraxtructure (X) - used for x509.Certificates and public keys
+type pkixStruct struct {
+	Algorithm pkix.AlgorithmIdentifier
+	PublicKey asn1.BitString
 }
 
-func sigAlgOID(cert *x509.Certificate) (string, bool) {
-	var outer certOuter
+// PKCS#8 structure for extracting raw key bytes
+type pkcs8Struct struct {
+	Version int
+	Algo    pkix.AlgorithmIdentifier
+}
+
+// sigAlgOID returns oid of a signature algorithm for x509 Certificate
+// or empty string is it fails
+func sigAlgOID(cert *x509.Certificate) string {
+	var outer certOuterStruct
 	if _, err := asn1.Unmarshal(cert.Raw, &outer); err != nil {
-		return "", false
+		return ""
 	}
-	return outer.SigAlg.Algorithm.String(), true
+	return outer.SigAlg.Algorithm.String()
 }
 
 func spkiOID(cert *x509.Certificate) (string, bool) {
-	var info spki
+	var info pkixStruct
 	if _, err := asn1.Unmarshal(cert.RawSubjectPublicKeyInfo, &info); err != nil {
 		return "", false
 	}
 	return info.Algorithm.Algorithm.String(), true
 }
 
-func ReadSignatureAlgorithmRef(ctx context.Context, cert *x509.Certificate) cdx.BOMReference {
+func parsePKIX(der []byte) (pkixStruct, error) {
+	var info pkixStruct
+	_, err := asn1.Unmarshal(der, &info)
+	return info, err
+}
+
+func parsePKCS8(der []byte) (pkcs8Struct, error) {
+	var info pkcs8Struct
+	_, err := asn1.Unmarshal(der, &info)
+	return info, err
+}
+
+func readSignatureAlgorithmRef(ctx context.Context, cert *x509.Certificate, oidFallback string) cdx.BOMReference {
 	// Prefer Go’s typed enum first (covers all classic algs cleanly).
 	if ref, ok := sigAlgRef[cert.SignatureAlgorithm]; ok {
 		return ref
 	}
 
-	// Fall back to OID (PQC / unknown to stdlib).
-	oid, ok := sigAlgOID(cert)
-	if !ok {
+	if oidFallback == "" {
 		slog.DebugContext(ctx, "Failed to parse signatureAlgorithm OID")
 		return refUnknownAlgorithm
 	}
-	if ref, ok := pqcSigOIDRef[oid]; ok {
+
+	if ref, ok := pqcSigOIDRef[oidFallback]; ok {
 		return ref
 	}
 
-	slog.DebugContext(ctx, "Unknown signature algorithm OID", "oid", oid)
+	slog.DebugContext(ctx, "Unknown signature algorithm OID", "oid", oidFallback)
 	return refUnknownAlgorithm
 }
 
@@ -173,10 +189,10 @@ func (c Converter) certComponent(_ context.Context, hit model.CertHit) cdx.Compo
 func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model.CertHit) (sigAlgCompo cdx.Component, hashAlgCompo cdx.Component) {
 	sigAlg := hit.Cert.SignatureAlgorithm
 	algName := sigAlg.String()
-	bomRef := ReadSignatureAlgorithmRef(ctx, hit.Cert)
+	oid := sigAlgOID(hit.Cert)
+	bomRef := readSignatureAlgorithmRef(ctx, hit.Cert, oid)
 	bomName, _, _ := strings.Cut(string(bomRef), "@")
-	oid, ok := sigAlgOID(hit.Cert)
-	if !ok {
+	if oid == "" {
 		oid = "unknown"
 	}
 

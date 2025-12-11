@@ -59,7 +59,7 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 
 		switch block.Type {
 		/*********** CERTIFICATES ***********/
-		case "CERTIFICATE", "TRUSTED CERTIFICATE":
+		case "BEGIN CERTIFICATE", "CERTIFICATE", "TRUSTED CERTIFICATE":
 			if cs, err := x509.ParseCertificates(block.Bytes); err != nil {
 				bundle.ParseErrors[order] =
 					fmt.Errorf("failed to parse certificate at position %d: %w", order, err)
@@ -76,7 +76,7 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 			}
 
 		/*********** PRIVATE KEYS ***********/
-		case "PRIVATE KEY":
+		case "BEGIN PRIVATE KEY", "PRIVATE KEY":
 			// PKCS#8 format - can be RSA, ECDSA, Ed25519
 			if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err != nil {
 				bundle.ParseErrors[order] =
@@ -129,7 +129,7 @@ func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBund
 				bundle.CertificateRequests = append(bundle.CertificateRequests, csr)
 			}
 
-		case "PUBLIC KEY":
+		case "BEGIN PUBLIC KEY", "PUBLIC KEY":
 			if pubKey, err := x509.ParsePKIXPublicKey(block.Bytes); err != nil {
 				bundle.ParseErrors[order] =
 					fmt.Errorf("failed to parse public key at position %d: %w", order, err)

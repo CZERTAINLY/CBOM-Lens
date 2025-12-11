@@ -3,12 +3,13 @@ package cdxprops
 import (
 	"context"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
@@ -43,12 +44,12 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 	for _, i := range slices.Sorted(maps.Keys(bundle.ParseErrors)) {
 		parseErr := bundle.ParseErrors[i]
 		block := bundle.RawBlocks[i]
-		compo, err := c.analyzeParseError(block, parseErr)
+		compos, err := c.analyzeParseError(block, parseErr)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		components = append(components, compo)
+		components = append(components, compos...)
 	}
 
 	return components, errors.Join(errs...)
@@ -94,53 +95,99 @@ func crlToCDX(crl *x509.RevocationList, location string) cdx.Component {
 }
 
 // Helper functions
-func (c Converter) analyzeParseError(block model.PEMBlock, parseErr error) (cdx.Component, error) {
-	if block.Type == "PRIVATE KEY" {
-		var pkcs8Key pkcs8
-		_, err := asn1.Unmarshal(block.Bytes, &pkcs8Key)
+func (c Converter) analyzeParseError(block model.PEMBlock, origErr error) ([]cdx.Component, error) {
+	switch block.Type {
+	case "PRIVATE KEY":
+		algo, err := c.unsupportedPKCS8PrivateKey(block.Bytes)
 		if err != nil {
-			return cdx.Component{}, fmt.Errorf("parsing PKCS#8 via ASN.1: %w", err)
+			return nil, errors.Join(origErr, err)
 		}
-
-		info, ok := unsupportedAlgorithms[pkcs8Key.Algo.Algorithm.String()]
-		if !ok {
-			return cdx.Component{}, parseErr
-		}
-		// FIXME: correct components
-		algo, _, err := c.unsupportedPKCS8PrivateKey(pkcs8Key, info, block.Bytes)
+		return []cdx.Component{algo}, nil
+	case "BEGIN PUBLIC KEY", "PUBLIC KEY":
+		key, algo, err := c.unsupportedPKIX(block.Bytes)
 		if err != nil {
-			return cdx.Component{}, errors.Join(parseErr, err)
+			return nil, errors.Join(origErr, err)
 		}
-		return algo, nil
+		return []cdx.Component{key, algo}, nil
 	}
-	return cdx.Component{}, parseErr
+	return nil, origErr
 }
 
 // ********** PQC support **********
 
-// PKCS#8 PrivateKeyInfo structure
-type pkcs8 struct {
-	Version    int
-	Algo       pkix.AlgorithmIdentifier
-	PrivateKey []byte
-}
-
-// ML-KEM private key structure
-type unsupportedPrivateKey struct {
-	Seed       []byte
-	PrivateKey []byte
-}
-
-func (c Converter) unsupportedPKCS8PrivateKey(pkcs8Key pkcs8, info algorithmInfo, _ []byte) (algo, key cdx.Component, err error) {
-	var privKey unsupportedPrivateKey
-	_, err = asn1.Unmarshal(pkcs8Key.PrivateKey, &privKey)
+func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (cdx.Component, error) {
+	var pkcs8 pkcs8Struct
+	_, err := asn1.Unmarshal(der, &pkcs8)
 	if err != nil {
-		err = fmt.Errorf("parsing PKCS#8 private key via ASN.1: %w", err)
+		return cdx.Component{}, fmt.Errorf("parsing PKCS#8 via ASN.1: %w", err)
+	}
+	info, ok := unsupportedAlgorithms[pkcs8.Algo.Algorithm.String()]
+	if !ok {
+		return cdx.Component{}, fmt.Errorf("unsusported fallback oid %q", pkcs8.Algo.Algorithm.String())
+	}
+
+	algo := info.componentWOBomRef(c.czertainly)
+	c.BOMRefHash(&algo, info.algorithmName)
+	return algo, nil
+}
+
+func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err error) {
+	var pubKey pkixStruct
+	_, err = asn1.Unmarshal(der, &pubKey)
+	if err != nil {
+		err = fmt.Errorf("parsing PKIX via ASN.1: %w", err)
+		return
+	}
+	info, ok := unsupportedAlgorithms[pubKey.Algorithm.Algorithm.String()]
+	if !ok {
+		err = fmt.Errorf("unsusported fallback oid %q", pubKey.Algorithm.Algorithm.String())
 		return
 	}
 
 	algo = info.componentWOBomRef(c.czertainly)
+	setAlgorithmPrimitive(&algo, cdx.CryptoPrimitiveSignature)
 	c.BOMRefHash(&algo, info.algorithmName)
 
+	pubKeyValue, pubKeyHash := c.hashPublicKey(pubKey)
+	// public key properties
+	var bomRef = fmt.Sprintf(
+		"crypto/key/%s@%s",
+		strings.ToLower(info.name),
+		pubKeyHash,
+	)
+
+	relatedProps := &cdx.RelatedCryptoMaterialProperties{
+		Type:         cdx.RelatedCryptoMaterialTypePublicKey,
+		AlgorithmRef: cdx.BOMReference(algo.BOMRef),
+		Value:        pubKeyValue,
+	}
+
+	if info.keySize > 0 {
+		relatedProps.Size = &info.keySize
+	}
+
+	key = cdx.Component{
+		Type:   cdx.ComponentTypeCryptographicAsset,
+		Name:   info.name,
+		BOMRef: bomRef,
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,
+			OID:                             info.oid,
+			RelatedCryptoMaterialProperties: relatedProps,
+		},
+	}
+
+	return
+}
+
+func (c Converter) hashRawPublicKey(der []byte) (value, hash string) {
+	// Marshal to PKIX/SPKI format (standard DER encoding)
+	pubKeyBytes, err := x509.MarshalPKIXPublicKey(der)
+	if err != nil {
+		return
+	}
+
+	value = base64.StdEncoding.EncodeToString(pubKeyBytes)
+	hash = c.bomRefHasher(pubKeyBytes)
 	return
 }
