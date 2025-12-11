@@ -15,22 +15,28 @@ import (
 
 // Internal shared structure for algorithm metadata
 type algorithmInfo struct {
-	name                   string
-	oid                    string
-	paramSetID             string
-	keySize                int
-	algorithmName          string
-	cryptoFunctions        []cdx.CryptoFunction
-	classicalSecurityLevel int
-	pqc                    pqcInfo
+	name                     string
+	oid                      string
+	paramSetID               string
+	keySize                  int
+	algorithmName            string
+	cryptoFunctions          []cdx.CryptoFunction
+	classicalSecurityLevel   int
+	nistQuantumSecurityLevel int
+	pqc                      isPqcInfo
+}
+
+type isPqcInfo interface {
+	isPqcInfo()
 }
 
 type pqcInfo struct {
-	nistQuantumSecurityLevel int
-	privKeySize              int
-	pubKeySize               int
-	signatureSize            int
+	privKeySize   int
+	pubKeySize    int
+	signatureSize int
 }
+
+func (pqcInfo) isPqcInfo() {}
 
 var unsupportedAlgorithms = map[string]algorithmInfo{
 	// https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf
@@ -43,12 +49,12 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 		cryptoFunctions: []cdx.CryptoFunction{
 			cdx.CryptoFunctionSign,
 		},
-		classicalSecurityLevel: 128,
+		classicalSecurityLevel:   128,
+		nistQuantumSecurityLevel: 2,
 		pqc: pqcInfo{
-			nistQuantumSecurityLevel: 2,
-			privKeySize:              2560,
-			pubKeySize:               1312,
-			signatureSize:            2420,
+			privKeySize:   2560,
+			pubKeySize:    1312,
+			signatureSize: 2420,
 		},
 	},
 	"2.16.840.1.101.3.4.3.18": {
@@ -60,12 +66,12 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 		cryptoFunctions: []cdx.CryptoFunction{
 			cdx.CryptoFunctionSign,
 		},
-		classicalSecurityLevel: 192,
+		classicalSecurityLevel:   192,
+		nistQuantumSecurityLevel: 3,
 		pqc: pqcInfo{
-			nistQuantumSecurityLevel: 3,
-			privKeySize:              4032,
-			pubKeySize:               1952,
-			signatureSize:            3309,
+			privKeySize:   4032,
+			pubKeySize:    1952,
+			signatureSize: 3309,
 		},
 	},
 	"2.16.840.1.101.3.4.3.19": {
@@ -77,12 +83,12 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 		cryptoFunctions: []cdx.CryptoFunction{
 			cdx.CryptoFunctionSign,
 		},
-		classicalSecurityLevel: 192,
+		classicalSecurityLevel:   192,
+		nistQuantumSecurityLevel: 5,
 		pqc: pqcInfo{
-			nistQuantumSecurityLevel: 5,
-			privKeySize:              4896,
-			pubKeySize:               2592,
-			signatureSize:            4627,
+			privKeySize:   4896,
+			pubKeySize:    2592,
+			signatureSize: 4627,
 		},
 	},
 }
@@ -234,8 +240,8 @@ func (a dsaKeyAdapter) BitLen() int {
 
 func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 	var nqsl *int
-	if i.pqc.nistQuantumSecurityLevel != 0 {
-		nqsl = &i.pqc.nistQuantumSecurityLevel
+	if i.nistQuantumSecurityLevel != 0 {
+		nqsl = &i.nistQuantumSecurityLevel
 	}
 
 	cryptoProps := &cdx.CryptoProperties{
@@ -262,21 +268,39 @@ func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 		CryptoProperties: cryptoProps,
 	}
 
-	if withCzertainly && nqsl != nil {
-		compo.Properties = &[]cdx.Property{
-			{
-				Name:  czertainly.AlgorithmPrivateKeySize,
-				Value: strconv.Itoa(i.pqc.privKeySize),
-			},
-			{
-				Name:  czertainly.AlgorithmPublicKeySize,
-				Value: strconv.Itoa(i.pqc.pubKeySize),
-			},
-			{
-				Name:  czertainly.AlgorithmSignatureSize,
-				Value: strconv.Itoa(i.pqc.signatureSize),
-			},
-		}
+	var props []cdx.Property
+	if withCzertainly {
+		props = czertainlyPqcProps(props, i.pqc)
+	}
+
+	if len(props) > 0 {
+		compo.Properties = &props
 	}
 	return compo
+}
+
+func czertainlyPqcProps(props []cdx.Property, x isPqcInfo) []cdx.Property {
+	switch i := x.(type) {
+	case pqcInfo:
+		return pqcProps(props, i)
+	}
+	return nil
+}
+
+func pqcProps(props []cdx.Property, i pqcInfo) []cdx.Property {
+	props2 := []cdx.Property{
+		{
+			Name:  czertainly.AlgorithmPrivateKeySize,
+			Value: strconv.Itoa(i.privKeySize),
+		},
+		{
+			Name:  czertainly.AlgorithmPublicKeySize,
+			Value: strconv.Itoa(i.pubKeySize),
+		},
+		{
+			Name:  czertainly.AlgorithmSignatureSize,
+			Value: strconv.Itoa(i.signatureSize),
+		},
+	}
+	return append(props, props2...)
 }
