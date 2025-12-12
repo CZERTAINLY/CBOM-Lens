@@ -156,52 +156,35 @@ var hashInfoMap = map[crypto.Hash]hashAlgorithmInfo{
 }
 
 var stringToHash = map[string]crypto.Hash{
-	"MD4":         crypto.MD4,
-	"MD5":         crypto.MD5,
-	"SHA-1":       crypto.SHA1,
-	"SHA1":        crypto.SHA1,
-	"SHA-224":     crypto.SHA224,
-	"SHA224":      crypto.SHA224,
-	"SHA-256":     crypto.SHA256,
-	"SHA256":      crypto.SHA256,
-	"SHA-384":     crypto.SHA384,
-	"SHA384":      crypto.SHA384,
-	"SHA-512":     crypto.SHA512,
-	"SHA512":      crypto.SHA512,
-	"SHA-512/224": crypto.SHA512_224,
-	"SHA512/224":  crypto.SHA512_224,
-	"SHA-512/256": crypto.SHA512_256,
-	"SHA512/256":  crypto.SHA512_256,
-	"SHA3-224":    crypto.SHA3_224,
-	"SHA3-256":    crypto.SHA3_256,
-	"SHA3-384":    crypto.SHA3_384,
-	"SHA3-512":    crypto.SHA3_512,
-	"RIPEMD-160":  crypto.RIPEMD160,
-	"RIPEMD160":   crypto.RIPEMD160,
-	"BLAKE2s-256": crypto.BLAKE2s_256,
-	"BLAKE2s256":  crypto.BLAKE2s_256,
-	"BLAKE2b-256": crypto.BLAKE2b_256,
-	"BLAKE2b256":  crypto.BLAKE2b_256,
-	"BLAKE2b-384": crypto.BLAKE2b_384,
-	"BLAKE2b384":  crypto.BLAKE2b_384,
-	"BLAKE2b-512": crypto.BLAKE2b_512,
-	"BLAKE2b512":  crypto.BLAKE2b_512,
+	"MD4":        crypto.MD4,
+	"MD5":        crypto.MD5,
+	"SHA1":       crypto.SHA1,
+	"SHA224":     crypto.SHA224,
+	"SHA256":     crypto.SHA256,
+	"SHA384":     crypto.SHA384,
+	"SHA512":     crypto.SHA512,
+	"SHA512/224": crypto.SHA512_224,
+	"SHA512/256": crypto.SHA512_256,
+	"SHA3224":    crypto.SHA3_224,
+	"SHA3256":    crypto.SHA3_256,
+	"SHA3384":    crypto.SHA3_384,
+	"SHA3512":    crypto.SHA3_512,
+	"RIPEMD160":  crypto.RIPEMD160,
+	"BLAKE2s256": crypto.BLAKE2s_256,
+	"BLAKE2b256": crypto.BLAKE2b_256,
+	"BLAKE2b384": crypto.BLAKE2b_384,
+	"BLAKE2b512": crypto.BLAKE2b_512,
 }
 
 func (c Converter) hashAlgorithmCompo(name string) cdx.Component {
 	name = strings.ToUpper(name)
-	// normalize nmap TLS names
-	switch name {
-	case "SHA1":
-		name = "SHA-1"
-	case "SHA256":
-		name = "SHA-256"
-	case "SHA-384":
-		name = "SHA-384"
-	}
+	// normalize hash names
 	if name == "SHA" {
 		name = "SHA1"
 	}
+	// drop - everywhere
+	name = strings.ReplaceAll(name, "-", "")
+
 	var info hashAlgorithmInfo
 	if h, ok := stringToHash[name]; ok {
 		if !ok {
