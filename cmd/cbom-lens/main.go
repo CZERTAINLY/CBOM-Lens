@@ -23,6 +23,8 @@ import (
 
 const defaultHttpServerGracefulPeriod = 5 * time.Second
 
+var version = "dev"
+
 var (
 	userConfigPath string // /default/config/path/cbom-lens on given OS
 	configPath     string // actual config file used (if loaded)
@@ -90,24 +92,25 @@ func main() {
 }
 
 func doVersion(cmd *cobra.Command, args []string) error {
-	info, ok := debug.ReadBuildInfo()
-	if !ok || info == nil {
-		return fmt.Errorf("cbom-lens: version info not available")
-	}
-
 	if configPath != "" {
 		fmt.Printf("config: %s\n", configPath)
 	}
-	fmt.Printf("cbom-lens: %s\n", info.Main.Version)
-	fmt.Printf("go:     %s\n", info.GoVersion)
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			fmt.Printf("commit: %s\n", s.Value)
-		case "vcs.time":
-			fmt.Printf("date:   %s\n", s.Value)
-		case "vcs.modified":
-			fmt.Printf("dirty:  %s\n", s.Value)
+	fmt.Printf("cbom-lens: %s\n", version)
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info == nil {
+		fmt.Printf("build info not available")
+	} else {
+		fmt.Printf("go:     %s\n", info.GoVersion)
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				fmt.Printf("commit: %s\n", s.Value)
+			case "vcs.time":
+				fmt.Printf("date:   %s\n", s.Value)
+			case "vcs.modified":
+				fmt.Printf("dirty:  %s\n", s.Value)
+			}
 		}
 	}
 	fmt.Println()
