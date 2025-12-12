@@ -164,6 +164,25 @@ func TestGetAlgorithmProperties(t *testing.T) {
 	require.Equal(t, 128, *props.ClassicalSecurityLevel)
 }
 
+func TestGetAlgorithmProperties_oidfallback(t *testing.T) {
+	cv := Converter{}
+	props, extra, hash := cv.getAlgorithmProperties(-1, "2.16.840.1.101.3.4.3.31")
+	require.Equal(t, cdx.CryptoPrimitiveSignature, props.Primitive)
+	require.Equal(t, "256F", props.ParameterSetIdentifier)
+	require.EqualValues(t, "", props.Padding)
+	require.Equal(t, "SHAKE-256", hash)
+	require.NotNil(t, props.ClassicalSecurityLevel)
+	require.Equal(t, 256, *props.ClassicalSecurityLevel)
+	require.Empty(t, props.Curve)
+	require.Empty(t, extra)
+}
+
+func TestGetAlgorithmProperties_oidfallback_nope(t *testing.T) {
+	cv := Converter{}
+	_, _, hash := cv.getAlgorithmProperties(-1, "0.0.0.0")
+	require.Equal(t, "", hash)
+}
+
 func TestConverter_getAlgorithmProperties(t *testing.T) {
 	tests := []struct {
 		name           string
