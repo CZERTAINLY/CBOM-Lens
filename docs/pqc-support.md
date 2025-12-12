@@ -1,6 +1,6 @@
 # PQC support
 
-`CMOB-Lens` is written in Go, which does not support PQC algorithm yet. The tool fallbacks to parsing the ASN.1 structure in cases it can't use stdlib to do so.
+`CBOM-Lens` is written in Go, which does not support PQC algorithm yet. The tool fallbacks to parsing the ASN.1 structure in cases it can't use stdlib to do so.
 
 This works for PEM format and x500.Certificates.
 
