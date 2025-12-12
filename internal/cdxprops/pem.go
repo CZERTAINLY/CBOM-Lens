@@ -148,7 +148,7 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 	setAlgorithmPrimitive(&algo, cdx.CryptoPrimitiveSignature)
 	c.BOMRefHash(&algo, info.algorithmName)
 
-	pubKeyValue, pubKeyHash := c.hashPublicKey(pubKey)
+	pubKeyValue, pubKeyHash := c.hashRawPublicKey(der)
 	// public key properties
 	var bomRef = fmt.Sprintf(
 		"crypto/key/%s@%s",
