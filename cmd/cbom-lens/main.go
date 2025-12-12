@@ -99,7 +99,7 @@ func doVersion(cmd *cobra.Command, args []string) error {
 
 	info, ok := debug.ReadBuildInfo()
 	if !ok || info == nil {
-		fmt.Printf("build info not available")
+		fmt.Printf("build info not available\n")
 	} else {
 		fmt.Printf("go:     %s\n", info.GoVersion)
 		for _, s := range info.Settings {
