@@ -80,7 +80,7 @@ func TestGetAlgorithmProperties_Table(t *testing.T) {
 			// set the unexported flag directly (test in same package)
 			c.czertainly = true
 
-			cryptoProps, props, hash := c.getAlgorithmProperties(tt.sigAlg)
+			cryptoProps, props, hash := c.getAlgorithmProperties(tt.sigAlg, "")
 
 			// cryptoProps checks
 			require.Equal(t, tt.wantParamSetID, cryptoProps.ParameterSetIdentifier)
@@ -111,7 +111,7 @@ func TestGetAlgorithmProperties_NoCzertainly(t *testing.T) {
 	var c Converter
 	c.czertainly = false
 
-	_, props, _ := c.getAlgorithmProperties(x509.SHA256WithRSA)
+	_, props, _ := c.getAlgorithmProperties(x509.SHA256WithRSA, "")
 	// when czertainly flag is false, no czertainly-specific properties should be returned
 	for _, p := range props {
 		require.NotEqual(t, czertainly.SignatureAlgorithmFamily, p.Name)
@@ -142,7 +142,7 @@ func TestCurveInformation2(t *testing.T) {
 
 func TestGetAlgorithmProperties(t *testing.T) {
 	cv := Converter{}
-	props, extra, hash := cv.getAlgorithmProperties(x509.SHA256WithRSA)
+	props, extra, hash := cv.getAlgorithmProperties(x509.SHA256WithRSA, "")
 	require.Equal(t, cdx.CryptoPrimitiveSignature, props.Primitive)
 	require.Equal(t, "256", props.ParameterSetIdentifier)
 	require.Equal(t, cdx.CryptoPaddingPKCS1v15, props.Padding)
@@ -152,13 +152,13 @@ func TestGetAlgorithmProperties(t *testing.T) {
 	require.Empty(t, props.Curve)
 	require.Empty(t, extra)
 
-	props, _, hash = cv.getAlgorithmProperties(x509.ECDSAWithSHA384)
+	props, _, hash = cv.getAlgorithmProperties(x509.ECDSAWithSHA384, "")
 	require.Equal(t, "secp384r1", props.Curve)
 	require.Equal(t, "SHA-384", hash)
 	require.NotNil(t, props.ClassicalSecurityLevel)
 	require.Equal(t, 192, *props.ClassicalSecurityLevel)
 
-	props, _, hash = cv.getAlgorithmProperties(x509.PureEd25519)
+	props, _, hash = cv.getAlgorithmProperties(x509.PureEd25519, "")
 	require.Equal(t, "256", props.ParameterSetIdentifier)
 	require.Equal(t, "SHA-512", hash)
 	require.Equal(t, 128, *props.ClassicalSecurityLevel)
@@ -198,7 +198,7 @@ func TestConverter_getAlgorithmProperties(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := Converter{czertainly: tt.czertainly}
-			got, props, hash := c.getAlgorithmProperties(tt.sigAlg)
+			got, props, hash := c.getAlgorithmProperties(tt.sigAlg, "")
 
 			if got.ParameterSetIdentifier != tt.wantParamSetID {
 				t.Errorf("ParameterSetIdentifier = %v, want %v", got.ParameterSetIdentifier, tt.wantParamSetID)
