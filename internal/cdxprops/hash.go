@@ -31,13 +31,13 @@ var hashInfoMap2 = map[string]hashAlgorithmInfo{
 		OID:                    "1.2.840.113549.2.2",
 	},
 	"SHAKE128": {
-		Name:                   "SHAKE128",
+		Name:                   "SHAKE-128",
 		ParameterSetIdentifier: 128,
 		ClassicalSecurityLevel: 128,
 		OID:                    "2.16.840.1.101.3.6.5.3",
 	},
 	"SHAKE256": {
-		Name:                   "SHAKE256",
+		Name:                   "SHAKE-256",
 		ParameterSetIdentifier: 256,
 		ClassicalSecurityLevel: 256,
 		OID:                    "2.16.840.1.101.3.6.5.4",

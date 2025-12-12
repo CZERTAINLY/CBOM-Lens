@@ -185,14 +185,11 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 		oid = "unknown"
 	}
 
-	cryptoProps, props, hashName := c.getAlgorithmProperties(sigAlg)
-	if hashName == "" {
-		// fallback for PQC
-		switch {
-		case strings.Contains(bomName, "slh-dsa-sha2"):
-			hashName = "SHA-256"
-		case strings.Contains(bomName, "slh-dsa-shake"):
-			hashName = "SHAKE-256"
+	cryptoProps, props, hashName := c.getAlgorithmProperties(sigAlg, oid)
+	if algName == "0" {
+		info, ok := unsupportedAlgorithms[oid]
+		if ok {
+			algName = info.algorithmName
 		}
 	}
 

@@ -2,6 +2,7 @@ package cdxprops
 
 import (
 	"crypto/x509"
+	"strings"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
 
@@ -95,7 +96,7 @@ var spkiOIDRef = map[string]cdx.BOMReference{
 }
 
 // getAlgorithmProperties generates crypto algorithm properties for a signature algorithm
-func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm) (cdx.CryptoAlgorithmProperties, []cdx.Property, string) {
+func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFallback string) (cdx.CryptoAlgorithmProperties, []cdx.Property, string) {
 	var algorithmFamily string
 	var hash string
 	var paramSetID string
@@ -205,6 +206,27 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm) (cdx.C
 		classicalSecurityLevel = 0
 	}
 
+	var props []cdx.Property
+	if oidFallback != "" && algorithmFamily == "Unknown" {
+		info, ok := unsupportedAlgorithms[oidFallback]
+		if ok {
+			algorithmFamily = info.name
+			paramSetID = info.paramSetID
+			classicalSecurityLevel = info.classicalSecurityLevel
+			nistQuantumSecurityLevel = info.nistQuantumSecurityLevel
+			// fallback for PQC
+			switch {
+			case strings.Contains(info.algorithmName, "slh-dsa-sha2"):
+				hash = "SHA-256"
+			case strings.Contains(info.algorithmName, "slh-dsa-shake"):
+				hash = "SHAKE-256"
+			}
+			if c.czertainly {
+				props = append(props, czertainlyPqcProps(props, info.pqc)...)
+			}
+		}
+	}
+
 	execEnv := cdx.CryptoExecutionEnvironmentSoftwarePlainRAM
 	var nqsl *int
 	if nistQuantumSecurityLevel != 0 {
@@ -223,7 +245,6 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm) (cdx.C
 		NistQuantumSecurityLevel: nqsl,
 	}
 
-	var props []cdx.Property
 	if c.czertainly {
 		p := cdx.Property{
 			Name:  czertainly.SignatureAlgorithmFamily,
