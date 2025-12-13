@@ -10,16 +10,31 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 
 // publicKeyAlgComponent creates a CycloneDX component for a public key algorithm
-func (c Converter) publicKeyComponents(_ context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, keyUsage x509.KeyUsage) (algo, key cdx.Component) {
+func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate) (algo, key cdx.Component) {
 	info := publicKeyAlgorithmInfo(pubKeyAlg, pubKey)
 
+	if info.oid == "0.0.0.0" && cert != nil {
+		oidFallback := spkiOID(cert)
+		var ok bool
+		info, ok = unsupportedAlgorithms[oidFallback]
+		if oidFallback != "" && !ok {
+			slog.WarnContext(ctx, "can't find public key components", "oid", oidFallback)
+		}
+	}
+
 	var primitive = cdx.CryptoPrimitiveSignature
+
+	var keyUsage x509.KeyUsage
+	if cert != nil {
+		keyUsage = cert.KeyUsage
+	}
 
 	if strings.Contains(info.name, "RSA") {
 		if keyUsage != 0 &&

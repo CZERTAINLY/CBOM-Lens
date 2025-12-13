@@ -13,6 +13,12 @@ import (
 var data embed.FS
 
 const MLDSA65PrivateKey = "testdata/ml-dsa-65-private-key.pem"
+const MLDSA65PublicKey = "testdata/ml-dsa-65-public-key.pem"
+const MLDSA65Certificate = "testdata/ml-dsa-65-cert.pem"
+
+// can be validated via openssl
+// openssl pkey -pubin -in internal/cdxprops/cdxtest/testdata/ml-dsa-65-public-key.pem -outform DER | openssl dgst -sha256
+const MLDSA65PublicKeyHash = "sha256:bbf687535068e46b92b1a13fddb94cf59149624484986b8435bda6e1ee1536a3"
 
 func TestData(path string) ([]byte, error) {
 	return data.ReadFile(path)

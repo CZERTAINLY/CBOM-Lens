@@ -28,6 +28,7 @@ CBOM-Lens is a CLI tool that scans filesystems, container images, and network po
 
 - [Scanning use cases & best practices](scanning-use-cases.md) – scanning strategies and best practices for security teams.
 - [CBOM output format](cbom-format.md) – CBOM structure, `bom-ref` semantics, and PQC representation.
+- [PQC support](pqc-support.md) - Notes about a PQC support.
 
 ---
 

@@ -2,13 +2,10 @@ package cdxprops
 
 import (
 	"context"
-	"crypto/dsa" //nolint:staticcheck // cbom-lens is going to recognize even obsoleted crypto
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/rsa"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:staticcheck // cbom-lens is going to recognize even obsoleted crypto
 	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/hex"
 	"errors"
@@ -32,55 +29,58 @@ const (
 
 // ---------- ASN.1 helpers (declared once) ----------
 
-type algorithmIdentifier struct {
-	Algorithm  asn1.ObjectIdentifier
-	Parameters asn1.RawValue `asn1:"optional"`
-}
-
-type certOuter struct {
+type certOuterStruct struct {
 	TBSCert   asn1.RawValue
-	SigAlg    algorithmIdentifier
+	SigAlg    pkix.AlgorithmIdentifier
 	Signature asn1.BitString
 }
 
-type spki struct {
-	Algorithm     algorithmIdentifier
-	SubjectPubKey asn1.BitString
+// public key infrastructure (X) - used for x509.Certificates and public keys
+type pkixStruct struct {
+	Algorithm pkix.AlgorithmIdentifier
+	PublicKey asn1.BitString
 }
 
-func sigAlgOID(cert *x509.Certificate) (string, bool) {
-	var outer certOuter
+// PKCS#8 structure for extracting raw key bytes
+type pkcs8Struct struct {
+	Version int
+	Algo    pkix.AlgorithmIdentifier
+}
+
+// sigAlgOID returns oid of a signature algorithm for x509 Certificate
+// or empty string if it fails
+func sigAlgOID(cert *x509.Certificate) string {
+	var outer certOuterStruct
 	if _, err := asn1.Unmarshal(cert.Raw, &outer); err != nil {
-		return "", false
+		return ""
 	}
-	return outer.SigAlg.Algorithm.String(), true
+	return outer.SigAlg.Algorithm.String()
 }
 
-func spkiOID(cert *x509.Certificate) (string, bool) {
-	var info spki
+func spkiOID(cert *x509.Certificate) string {
+	var info pkixStruct
 	if _, err := asn1.Unmarshal(cert.RawSubjectPublicKeyInfo, &info); err != nil {
-		return "", false
+		return ""
 	}
-	return info.Algorithm.Algorithm.String(), true
+	return info.Algorithm.Algorithm.String()
 }
 
-func ReadSignatureAlgorithmRef(ctx context.Context, cert *x509.Certificate) cdx.BOMReference {
+func readSignatureAlgorithmRef(ctx context.Context, cert *x509.Certificate, oidFallback string) cdx.BOMReference {
 	// Prefer Go’s typed enum first (covers all classic algs cleanly).
 	if ref, ok := sigAlgRef[cert.SignatureAlgorithm]; ok {
 		return ref
 	}
 
-	// Fall back to OID (PQC / unknown to stdlib).
-	oid, ok := sigAlgOID(cert)
-	if !ok {
+	if oidFallback == "" {
 		slog.DebugContext(ctx, "Failed to parse signatureAlgorithm OID")
 		return refUnknownAlgorithm
 	}
-	if ref, ok := pqcSigOIDRef[oid]; ok {
+
+	if ref, ok := pqcSigOIDRef[oidFallback]; ok {
 		return ref
 	}
 
-	slog.DebugContext(ctx, "Unknown signature algorithm OID", "oid", oid)
+	slog.DebugContext(ctx, "Unknown signature algorithm OID", "oid", oidFallback)
 	return refUnknownAlgorithm
 }
 
@@ -96,32 +96,37 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 		ctx,
 		hit.Cert.PublicKeyAlgorithm,
 		hit.Cert.PublicKey,
-		hit.Cert.KeyUsage,
+		hit.Cert,
 	)
 	certificateRelatedProperties(&mainCertCompo, hit.Cert)
 	mainCertCompo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef = cdx.BOMReference(signatureAlgCompo.BOMRef)
 	mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyAlgCompo.BOMRef)
 
 	setAlgorithmPrimitive(&signatureAlgCompo, cdx.CryptoPrimitiveSignature)
-	setAlgorithmPrimitive(&hashAlgCompo, cdx.CryptoPrimitiveHash)
 	setAlgorithmPrimitive(&publicKeyAlgCompo, cdx.CryptoPrimitiveSignature)
 
 	compos := []cdx.Component{
 		mainCertCompo,
 		signatureAlgCompo,
-		hashAlgCompo,
 		publicKeyCompo,
 		publicKeyAlgCompo,
 	}
 
-	deps := []cdx.Dependency{
-		{
-			Ref: signatureAlgCompo.BOMRef,
-			Dependencies: &[]string{
-				publicKeyAlgCompo.BOMRef,
-				hashAlgCompo.BOMRef,
+	var deps []cdx.Dependency
+
+	if hashAlgCompo != nil {
+		setAlgorithmPrimitive(hashAlgCompo, cdx.CryptoPrimitiveHash)
+		compos = append(compos, *hashAlgCompo)
+
+		deps = []cdx.Dependency{
+			{
+				Ref: signatureAlgCompo.BOMRef,
+				Dependencies: &[]string{
+					publicKeyAlgCompo.BOMRef,
+					hashAlgCompo.BOMRef,
+				},
 			},
-		},
+		}
 	}
 
 	return compos, deps, nil
@@ -170,17 +175,23 @@ func (c Converter) certComponent(_ context.Context, hit model.CertHit) cdx.Compo
 	return certComponent
 }
 
-func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model.CertHit) (sigAlgCompo cdx.Component, hashAlgCompo cdx.Component) {
+func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model.CertHit) (sigAlgCompo cdx.Component, hashAlgCompo *cdx.Component) {
 	sigAlg := hit.Cert.SignatureAlgorithm
 	algName := sigAlg.String()
-	bomRef := ReadSignatureAlgorithmRef(ctx, hit.Cert)
+	oid := sigAlgOID(hit.Cert)
+	bomRef := readSignatureAlgorithmRef(ctx, hit.Cert, oid)
 	bomName, _, _ := strings.Cut(string(bomRef), "@")
-	oid, ok := sigAlgOID(hit.Cert)
-	if !ok {
+	if oid == "" {
 		oid = "unknown"
 	}
 
-	cryptoProps, props, hashName := c.getAlgorithmProperties(sigAlg)
+	cryptoProps, props, hashName := c.getAlgorithmProperties(sigAlg, oid)
+	if algName == "0" {
+		info, ok := unsupportedAlgorithms[oid]
+		if ok {
+			algName = info.algorithmName
+		}
+	}
 
 	sigAlgCompo = cdx.Component{
 		Type: cdx.ComponentTypeCryptographicAsset,
@@ -193,8 +204,12 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 		Properties: &props,
 	}
 
-	hashAlgCompo = c.hashAlgorithmCompo(hashName)
 	c.BOMRefHash(&sigAlgCompo, bomName)
+
+	if hashName != "" {
+		compo := c.hashAlgorithmCompo(hashName)
+		hashAlgCompo = &compo
+	}
 	return
 }
 
@@ -253,40 +268,4 @@ func sha256Hash(data []byte) []byte {
 func sha1Hash(data []byte) []byte {
 	hash := sha1.Sum(data) // NOSONAR - we provide sha1 and sha256 hashes
 	return hash[:]
-}
-
-func ReadSubjectPublicKeyRef(ctx context.Context, cert *x509.Certificate) cdx.BOMReference {
-	// First try concrete key types the stdlib understands.
-	switch pub := cert.PublicKey.(type) {
-	case *rsa.PublicKey:
-		return cdx.BOMReference(fmt.Sprintf("crypto/key/rsa-%d@1.2.840.113549.1.1.1", pub.N.BitLen()))
-	case *ecdsa.PublicKey:
-		switch pub.Params().BitSize {
-		case 256:
-			return "crypto/key/ecdsa-p256@1.2.840.10045.3.1.7"
-		case 384:
-			return "crypto/key/ecdsa-p384@1.3.132.0.34"
-		case 521:
-			return "crypto/key/ecdsa-p521@1.3.132.0.35"
-		default:
-			return "crypto/key/ecdsa-unknown@1.2.840.10045.2.1"
-		}
-	case ed25519.PublicKey:
-		return "crypto/key/ed25519-256@1.3.101.112"
-	case *dsa.PublicKey:
-		return cdx.BOMReference(fmt.Sprintf("crypto/key/dsa-%d@1.2.840.10040.4.1", pub.P.BitLen()))
-	}
-
-	// Otherwise parse SPKI.algorithm OID (PQC & other non-stdlib types).
-	oid, ok := spkiOID(cert)
-	if !ok {
-		slog.DebugContext(ctx, "Failed to parse SPKI OID")
-		return refUnknownKey
-	}
-	if ref, ok := spkiOIDRef[oid]; ok {
-		return ref
-	}
-
-	slog.DebugContext(ctx, "Unknown public key algorithm OID", "oid", oid)
-	return refUnknownKey
 }

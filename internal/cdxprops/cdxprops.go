@@ -138,7 +138,7 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 			ctx,
 			getPublicKeyAlgorithm(pubKey),
 			pubKey,
-			0,
+			nil,
 		)
 		_, pubKeyID, _ := strings.Cut(pubKeyCompo.BOMRef, "@")
 		privKeyAlgo, privKeyCompo := c.PrivateKey(ctx, pubKeyID, privKey)
