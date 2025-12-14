@@ -123,6 +123,6 @@ For examples, see how algorithms and PQC assets are modelled and described in `c
 ## 6. Next steps
 
 - Explore existing detectors in `internal/scanner/` for concrete examples.
-- Adjust configuration or schema if your detector requires new config fields (see the CUE schema [config.cue](config.cue) and the [Configuration reference](config.md)).
+- Adjust configuration or schema if your detector requires new config fields (see the CUE schema [config.cue](../internal/model/config.cue) and the [Configuration reference](config.md)).
 - Add or update documentation when new detector types or capabilities are introduced.
 - For how algorithms and PQC assets are modelled in CBOMs, see [CBOM output format](cbom-format.md).

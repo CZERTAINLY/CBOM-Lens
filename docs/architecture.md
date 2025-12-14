@@ -69,7 +69,7 @@ The supervisor and scan communicate purely over stdin/stdout, which keeps the de
 
 ## 3. Configuration objects
 
-Configuration is defined in CUE (`internal/model/config.cue`) and mapped to Go structs in `internal/model`.
+Configuration is defined in CUE ([config.cue](../internal/model/config.cue)) and mapped to Go structs in [internal/model](../internal/model/).
 
 There are two main configuration objects:
 
@@ -156,4 +156,4 @@ See `extending-detectors.md` for how to add and register new detectors.
 
 - To modify or extend detectors: see [Extending detectors](extending-detectors.md).
 - To run and extend tests: see [Testing & CI](testing-ci.md).
-- To adjust configuration schema: see the CUE schema [config.cue](config.cue) and the [Configuration reference](config.md).
+- To adjust configuration schema: see the CUE schema [config.cue](../internal/model/config.cue) and the [Configuration reference](config.md).

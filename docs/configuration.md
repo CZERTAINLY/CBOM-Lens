@@ -89,7 +89,7 @@ service:
     base_url: https://core-demo.example.net/api
 ```
 
-See `scanning-modes.md` for mode semantics, cron syntax, and ISO-8601 duration details.
+See [Scanning modes & scheduling](scanning-modes.md) for mode semantics, cron syntax, and ISO-8601 duration details.
 
 ---
 
@@ -157,7 +157,7 @@ ports:
   ipv6: false
 ```
 
-Additional options (see `config-reference.md` for full details) may include:
+Additional options (see the [Configuration reference](config.md) for full details) may include:
 
 - Which TCP ports to scan.
 - Path to the nmap binary.
@@ -188,7 +188,7 @@ service:
 
 CBOM-Lens will attempt to both save and upload. Errors in one path are logged but do not stop the other.
 
-See `operations.md` and `integration-czertainly.md` for operational and integration details.
+See [Operations](operations.md) and [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md) for operational and integration details.
 
 ---
 
@@ -207,7 +207,7 @@ At runtime CBOM-Lens expands `${VAR}` placeholders using the current process env
 
 This is useful for passing credentials, hostnames, or other dynamic values without hardcoding them in the configuration file.
 
-See `config-reference.md` for the precise rules and examples.
+See the [Configuration reference](config.md) for the precise rules and examples.
 
 ---
 
@@ -215,7 +215,7 @@ See `config-reference.md` for the precise rules and examples.
 
 A full manual mode configuration example is available at:
 
-- `examples/manual-config.yaml`
+- [manual-config.yaml](manual-config.yaml)
 
 Use it as a starting point and adjust to your environment.
 

@@ -146,7 +146,7 @@ Key points:
 - CZERTAINLY Core connects to CBOM-Lens using this API to orchestrate scans.
 - A CBOM-Repository (`service.repository.base_url`) is strongly recommended, as CZERTAINLY Core typically pulls BOMs from there.
 
-For a deeper integration overview, see `integration-czertainly.md`.
+For a deeper integration overview, see [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md).
 
 ---
 

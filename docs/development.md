@@ -77,7 +77,7 @@ If you add new configuration fields:
 
 - Update the Go structs in `internal/model`.
 - Update the CUE schema in `docs/config.cue`.
-- Extend `config-reference.md` with the new field.
+- Extend the [Configuration reference](config.md) with the new field.
 
 ---
 
@@ -107,8 +107,6 @@ If you plan to contribute:
 - Follow the existing code style and patterns in the repository.
 - Add tests for new features or bug fixes.
 - Update documentation where relevant.
-
-If a `CONTRIBUTING.md` file is present in the repository, follow the guidelines described there.
 
 ---
 
