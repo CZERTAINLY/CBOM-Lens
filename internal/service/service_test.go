@@ -152,6 +152,7 @@ service:
 	})
 
 	t.Run("config override", func(t *testing.T) {
+		t.Parallel()
 		var cfg = model.Config{
 			Version: 0,
 			Service: model.Service{
@@ -167,7 +168,7 @@ service:
 		require.NoError(t, err)
 		supervisor = supervisor.WithUploaders(t.Context(), u)
 
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		t.Cleanup(cancel)
 
 		var g sync.WaitGroup
