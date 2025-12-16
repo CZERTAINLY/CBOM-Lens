@@ -184,7 +184,7 @@ service:
 				Paths:   []string{"default1", "default2"},
 			},
 		}
-		//Third parameter causes a subprocess to prints the stdin and exit.
+		//Third parameter causes a subprocess to print the stdin and exit.
 		//Because scan config is passed to a subprocess via stdin, this
 		//is enough to validate the override
 		supervisor.AddJob(t.Context(), t.Name(), dflt, "", "", "print-stdin")
