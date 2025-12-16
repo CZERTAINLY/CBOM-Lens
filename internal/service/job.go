@@ -21,7 +21,7 @@ import (
 // Each Job has a default configuration loaded from a YAML file.
 // This configuration can be temporarily overridden via the discovery protocol,
 // allowing the job to start with a different set of values for a single run.
-// After the job completes, the override is cleared before the next job starts,
+// After being used once, the override is cleared at the beginning of the next Start call,
 // ensuring subsequent runs revert to the default configuration unless a new override is set.
 // The configOverride field holds the temporary override, and overrideUsed tracks if it was applied.
 type Job struct {
