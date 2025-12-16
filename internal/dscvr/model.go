@@ -179,6 +179,20 @@ func (a *attrCodeblock) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+func (a attrCodeblock) MarshalJSON() ([]byte, error) {
+	type auxBlock attrCodeblock
+	var aux = auxBlock(a)
+
+	for i, content := range a.Content {
+		raw, err := json.Marshal(content.Data)
+		if err != nil {
+			return nil, err
+		}
+		aux.Content[i].RawData = raw
+	}
+	return json.Marshal(aux)
+}
+
 func validateAttr(attrs []attrCodeblock) error {
 	for _, cpy := range attrs {
 		switch cpy.UUID {

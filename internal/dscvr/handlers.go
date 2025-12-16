@@ -317,8 +317,25 @@ func (s *Server) listAttributeDefinitions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var resp listAttributeDefinitionsResponse
-	resp = append(resp, attrCodeblock{
+	info := attrCodeblock{
+		Version:     ptrInt(2),
+		UUID:        lensConfigurationInfoAttrUUID,
+		Name:        lensConfigurationInfoAttrName,
+		Description: ptrString("Describe configuration options for scanning."),
+		Type:        ptrString(lensConfigurationInfoAttrType),
+		ContentType: ptrString(lensConfigurationInfoAttrContentType),
+		Properties: &attrProperties{
+			Label:   "CBOM-Lens scan configuration.",
+			Visible: true,
+		},
+		Content: []attrCodeblockContent{
+			{
+				Data: lensConfigurationInfoData,
+			},
+		},
+	}
+
+	config := attrCodeblock{
 		Version:     ptrInt(2),
 		UUID:        lensConfigurationAttrUUID,
 		Name:        lensConfigurationAttrName,
@@ -337,7 +354,8 @@ func (s *Server) listAttributeDefinitions(w http.ResponseWriter, r *http.Request
 				},
 			},
 		},
-	})
+	}
+	var resp = listAttributeDefinitionsResponse{info, config}
 
 	toJson(r.Context(), w, resp)
 }
