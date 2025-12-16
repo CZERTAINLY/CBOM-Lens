@@ -81,6 +81,9 @@ func (s *Supervisor) AddJob(ctx context.Context, name string, cfg model.Scan, te
 		j.WithTestData(testData[0], "")
 	} else if len(testData) == 2 {
 		j.WithTestData(testData[0], testData[1])
+	} else if len(testData) == 3 {
+		j.WithTestData(testData[0], testData[1])
+		j.WithPrintStdin()
 	}
 
 	s.jobsChan <- jobAdd{name: name, job: j}
@@ -257,7 +260,7 @@ func (s *Supervisor) handleJobConfigure(ctx context.Context, name string, config
 		slog.WarnContext(ctx, "job not added: ignoring configure", "job_name", name)
 		return
 	} else {
-		jobp.MergeConfig(config)
+		jobp.ConfigOverride(config)
 	}
 }
 
