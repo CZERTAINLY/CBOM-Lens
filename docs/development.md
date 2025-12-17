@@ -53,16 +53,16 @@ Key directories:
 - `cmd/cbom-lens/` – CLI entrypoint and wiring of detectors.
 - `internal/bom/` – CBOM builder and validation logic.
 - `internal/cdxprops/` – CycloneDX property helpers and algorithms.
-- `internal/model/` – configuration, detection, and domain models.
 - `internal/dscvr/` – discovery server and related APIs.
-- `internal/service/` – service orchestration, jobs, and runners.
-- `internal/walk/` – filesystem and image walking.
+- `internal/model/` – configuration, detection, and domain models.
 - `internal/nmap/` – integration with nmap.
 - `internal/scanner/` – detectors such as gitleaks and x509.
+- `internal/service/` – service orchestration, jobs, and runners.
+- `internal/walk/` – filesystem and image walking.
 - `docs/` – user and developer documentation.
 - `testing/` – supporting scripts and test data for integration tests.
 
-See `architecture.md` for more details.
+See [Architecture](architecture.md) for more details.
 
 ---
 
@@ -75,15 +75,15 @@ See `architecture.md` for more details.
 
 If you add new configuration fields:
 
-- Update the Go structs in `internal/model`.
-- Update the CUE schema in `docs/config.cue`.
+- Update the [Go structs](../internal/model).
+- Update the [CUE schema](../internal/model/config.cue).
 - Extend the [Configuration reference](config.md) with the new field.
 
 ---
 
 ## 6. Running tests
 
-See `testing-ci.md` for detailed instructions.
+See [Testing & CI](testing-ci.md) for detailed instructions.
 
 Typical commands:
 
