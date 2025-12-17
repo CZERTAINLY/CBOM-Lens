@@ -29,7 +29,7 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 
 	// Convert public keys
 	for _, pubKey := range bundle.PublicKeys {
-		algo, pubKeyCompo := c.publicKeyComponents(ctx, getPublicKeyAlgorithm(pubKey), pubKey, nil)
+		algo, pubKeyCompo := c.publicKeyComponents(ctx, getPublicKeyAlgorithm(pubKey), pubKey, nil, location)
 		pubKeyCompo.CryptoProperties.RelatedCryptoMaterialProperties.Format = "PEM"
 		components = append(components, algo)
 		components = append(components, pubKeyCompo)

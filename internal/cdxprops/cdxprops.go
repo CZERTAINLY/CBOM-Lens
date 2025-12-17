@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
-	"os"
 	"runtime"
 	"slices"
 	"strings"
@@ -63,7 +62,6 @@ func (c Converter) Leak(ctx context.Context, leaks model.Leaks) *model.Detection
 	return &model.Detection{
 		Source:     "LEAKS",
 		Type:       model.DetectionType(typ),
-		Location:   leaks.Location,
 		Components: compos,
 	}
 }
@@ -86,19 +84,12 @@ func (c Converter) CertHit(ctx context.Context, hit model.CertHit) *model.Detect
 	return &model.Detection{
 		Source:       hit.Source,
 		Type:         model.DetectionTypeCertificate,
-		Location:     hit.Location,
 		Components:   compos,
 		Dependencies: deps,
 	}
 }
 
 func (c Converter) Nmap(ctx context.Context, nmap model.Nmap) *model.Detection {
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "N/A"
-	}
-
 	compos, deps, services, err := c.parseNmap(ctx, nmap)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to parse nmap", "error", err)
@@ -108,7 +99,6 @@ func (c Converter) Nmap(ctx context.Context, nmap model.Nmap) *model.Detection {
 	return &model.Detection{
 		Source:       "NMAP",
 		Type:         model.DetectionTypePort,
-		Location:     hostname,
 		Components:   compos,
 		Dependencies: deps,
 		Services:     services,
@@ -139,6 +129,7 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 			getPublicKeyAlgorithm(pubKey),
 			pubKey,
 			nil,
+			bundle.Location,
 		)
 		_, pubKeyID, _ := strings.Cut(pubKeyCompo.BOMRef, "@")
 		privKeyAlgo, privKeyCompo := c.PrivateKey(ctx, pubKeyID, privKey)
@@ -168,7 +159,6 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 	return &model.Detection{
 		Source:       "PEM",
 		Type:         model.DetectionTypePort,
-		Location:     bundle.Location,
 		Components:   compos,
 		Dependencies: deps,
 	}

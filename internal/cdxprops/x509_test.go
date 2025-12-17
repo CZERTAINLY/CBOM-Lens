@@ -25,6 +25,7 @@ func TestConverter_CertHit(t *testing.T) {
 		wantDepCount       int
 		wantType           model.DetectionType
 		wantSource         string
+		wantOccurrences    int
 		wantLocation       string
 	}{
 		{
@@ -39,6 +40,7 @@ func TestConverter_CertHit(t *testing.T) {
 			wantDepCount:       1,
 			wantType:           model.DetectionTypeCertificate,
 			wantSource:         "PEM",
+			wantOccurrences:    1,
 			wantLocation:       "/test/cert.pem",
 		},
 	}
@@ -58,10 +60,13 @@ func TestConverter_CertHit(t *testing.T) {
 			require.Equal(t, tt.wantDepCount, len(detection.Dependencies))
 			require.Equal(t, tt.wantType, detection.Type)
 			require.Equal(t, tt.wantSource, detection.Source)
-			require.Equal(t, tt.wantLocation, detection.Location)
 
-			// Verify the first component (main certificate) has a BOM ref
+			// Verify the first component (main certificate) has a BOM ref and correct location
 			require.NotEmpty(t, detection.Components[0].BOMRef)
+			require.NotNil(t, detection.Components[0].Evidence)
+			require.NotNil(t, detection.Components[0].Evidence.Occurrences)
+			require.Len(t, *detection.Components[0].Evidence.Occurrences, tt.wantOccurrences)
+			require.Equal(t, tt.wantLocation, (*detection.Components[0].Evidence.Occurrences)[0].Location)
 		})
 	}
 }

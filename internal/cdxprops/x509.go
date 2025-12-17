@@ -97,6 +97,7 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 		hit.Cert.PublicKeyAlgorithm,
 		hit.Cert.PublicKey,
 		hit.Cert,
+		hit.Location,
 	)
 	certificateRelatedProperties(&mainCertCompo, hit.Cert)
 	mainCertCompo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef = cdx.BOMReference(signatureAlgCompo.BOMRef)
@@ -160,6 +161,14 @@ func (c Converter) certComponent(_ context.Context, hit model.CertHit) cdx.Compo
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType:             cdx.CryptoAssetTypeCertificate,
 			CertificateProperties: &certProps,
+		},
+
+		Evidence: &cdx.Evidence{
+			Occurrences: &[]cdx.EvidenceOccurrence{
+				{
+					Location: hit.Location,
+				},
+			},
 		},
 	}
 
