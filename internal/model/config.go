@@ -162,22 +162,6 @@ func (c Service) IsZero() bool {
 	return isZero(c)
 }
 
-func (s *Scan) Merge(newCfg Scan) {
-	if !newCfg.Containers.Config.IsZero() {
-		s.Containers.Config = newCfg.Containers.Config
-		fixContainersConfig(s.Containers.Config)
-	}
-	if !newCfg.Filesystem.IsZero() {
-		s.Filesystem = newCfg.Filesystem
-	}
-	if !newCfg.Ports.IsZero() {
-		s.Ports = newCfg.Ports
-	}
-	if !isZero(newCfg.Service) {
-		s.Service = newCfg.Service
-	}
-}
-
 func expandEnv[PT configPT](pt PT) {
 	var v any = pt
 	rv := reflect.ValueOf(v)
