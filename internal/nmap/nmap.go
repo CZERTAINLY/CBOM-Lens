@@ -282,10 +282,8 @@ func sshHostKey(_ context.Context, s nmap.Script, location string) []model.SSHHo
 }
 
 func getNmapAddress(addresses []nmap.Address) string {
-	for _, address := range addresses {
-		if address.Addr != "127.0.0.1" && address.Addr != "0:0:0:0:0:0:0:1" && address.Addr != "localhost" {
-			return address.Addr
-		}
+	if len(addresses) > 0 {
+		return addresses[0].Addr
 	}
 
 	if hostname, err := os.Hostname(); err == nil {
