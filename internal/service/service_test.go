@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ func TestMain(m *testing.M) {
 	// Hidden service code unit testing protocol.
 	// If _LENS_PRINT_STDOUT or _LENS_PRINT_STDERR are set, emit their values to the
 	// respective stream and return immediately.
+	// If _LENS_PRINT_STDIN is set, then the content of stdin is printed to stdout
 	// Used by test harnesses to exercise process spawning, stdout/stderr capture
 	var testingCode bool
 	if x := os.Getenv("_LENS_PRINT_STDOUT"); x != "" {
@@ -29,6 +31,13 @@ func TestMain(m *testing.M) {
 	}
 	if x := os.Getenv("_LENS_PRINT_STDERR"); x != "" {
 		fmt.Fprintln(os.Stderr, x)
+		testingCode = true
+	}
+	if x := os.Getenv("_LENS_PRINT_STDIN"); x != "" {
+		_, err := io.Copy(os.Stdout, os.Stdin)
+		if err != nil {
+			panic(err)
+		}
 		testingCode = true
 	}
 	if testingCode {
@@ -140,6 +149,67 @@ service:
 		stdout := buf.String()
 		require.NotEmpty(t, stdout)
 		require.Equal(t, "stdout\n", stdout)
+	})
+
+	t.Run("config override", func(t *testing.T) {
+		t.Parallel()
+		var cfg = model.Config{
+			Version: 0,
+			Service: model.Service{
+				Mode: model.ServiceModeTimer,
+				Schedule: &model.TimerSchedule{
+					Cron: "@every 1s",
+				},
+			},
+		}
+		var buf bytes.Buffer
+		u := service.NewWriteUploader(&buf)
+		supervisor, err := service.NewSupervisor(t.Context(), cfg)
+		require.NoError(t, err)
+		supervisor = supervisor.WithUploaders(t.Context(), u)
+
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		t.Cleanup(cancel)
+
+		var g sync.WaitGroup
+		g.Go(func() {
+			err := supervisor.Do(ctx)
+			require.NoError(t, err)
+		})
+		// wait a little to let the supervisor to settle
+		time.Sleep(200 * time.Millisecond)
+		var dflt = model.Scan{
+			Filesystem: model.Filesystem{
+				Enabled: true,
+				Paths:   []string{"default1", "default2"},
+			},
+		}
+		//Third parameter causes a subprocess to print the stdin and exit.
+		//Because scan config is passed to a subprocess via stdin, this
+		//is enough to validate the override
+		supervisor.AddJob(t.Context(), t.Name(), dflt, "", "", "print-stdin")
+
+		var override = model.Scan{
+			Filesystem: model.Filesystem{
+				Enabled: true,
+				Paths:   []string{"override1", "override2"},
+			},
+		}
+		supervisor.ConfigureJob(t.Context(), t.Name(), override)
+
+
+		g.Wait()
+		stdout := buf.String()
+
+		// Verify that "override1" and "override2" each appear exactly once in the output,
+		// indicating the overrides were applied for a single execution.
+		// Also check that "default1" and "default2" appear at least twice,
+		// confirming that subsequent executions used the default configuration.
+		require.Equal(t, 1, strings.Count(stdout, "override1"))
+		require.Equal(t, 1, strings.Count(stdout, "override2"))
+
+		require.GreaterOrEqual(t, strings.Count(stdout, "default1"), 2)
+		require.GreaterOrEqual(t, strings.Count(stdout, "default2"), 2)
 	})
 }
 
