@@ -41,7 +41,7 @@ func TestScanner(t *testing.T) {
 				scanner:  scanner,
 			},
 			then: model.Nmap{
-				Address: "127.0.0.1",
+				Address: "192.168.0.1",
 				Status:  "up",
 				Ports: []model.NmapPort{
 					{
@@ -61,7 +61,7 @@ func TestScanner(t *testing.T) {
 				scanner:  scanner,
 			},
 			then: model.Nmap{
-				Address: "::1",
+				Address: "fd00:1234:5678::1",
 				Status:  "up",
 				Ports: []model.NmapPort{
 					{
@@ -81,7 +81,7 @@ func TestScanner(t *testing.T) {
 				scanner:  scanner,
 			},
 			then: model.Nmap{
-				Address: "127.0.0.1",
+				Address: "198.51.100.1",
 				Status:  "up",
 				Ports: []model.NmapPort{
 					{

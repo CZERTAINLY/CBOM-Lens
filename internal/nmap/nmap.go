@@ -287,6 +287,7 @@ func getNmapAddress(addresses []nmap.Address) string {
 			return address.Addr
 		}
 	}
+
 	if hostname, err := os.Hostname(); err == nil {
 		return hostname
 	}
