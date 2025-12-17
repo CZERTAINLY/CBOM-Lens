@@ -22,13 +22,10 @@ type Detection struct {
 	// Source is the scanner or crypto type
 	// can be "PEM", "LEAKS", "DER", "NMAP", ...
 	Source string
-	// Type identifies the type of a crypto material
+	// Type identifies the type of crypto material
 	// can be the rule-id for gitleaks
 	// or private-key or pem-bundle in a case of other scanners
-	Type DetectionType
-	// Location is an identifier of the source data
-	// eg /path/to/cert.pem, unix:///var/run/docker.sock:image:/path/to/cert.pem
-	Location     string
+	Type         DetectionType
 	Components   []cdx.Component
 	Dependencies []cdx.Dependency
 	Services     []cdx.Service

@@ -31,17 +31,23 @@ type SSHHostKey struct {
 	Type        string
 	Bits        string
 	Fingerprint string
+	Location    string // identifier of the data source, such as /path/to/cert.pem, unix:///var/run/docker.sock:image:/path/to/cert.pem
+	Source      string
 }
 
 // SSLEnumCiphers is an output of `ssl-enum-ciphers` script of nmap
 type SSLEnumCiphers struct {
-	Name    string
-	Ciphers []SSLCipher
+	Name     string
+	Ciphers  []SSLCipher
+	Location string // identifier of the data source, such as /path/to/cert.pem, unix:///var/run/docker.sock:image:/path/to/cert.pem
+	Source   string
 }
 
 type SSLCipher struct {
-	Name    string // eg TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-	KexInfo string // eg secp256r1
+	Name     string // eg TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+	KexInfo  string // eg secp256r1
+	Location string // identifier of the data source, such as /path/to/cert.pem, unix:///var/run/docker.sock:image:/path/to/cert.pem
+	Source   string
 }
 
 // NmapScript is a raw output of nmap script, which is not

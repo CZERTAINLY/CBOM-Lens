@@ -87,10 +87,10 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 		}
 		stored, ok := b.components[compo.BOMRef]
 		if ok {
-			addEvidenceLocation(stored, detection.Location)
+			addEvidenceLocations(stored, compo.Evidence)
 			continue
 		}
-		addEvidenceLocation(&compo, detection.Location)
+		addEvidenceLocations(&compo, compo.Evidence)
 		b.components[compo.BOMRef] = &compo
 	}
 }
@@ -157,12 +157,22 @@ func (b *Builder) AsJSON(w io.Writer) error {
 	return cdx.NewBOMEncoder(w, cdx.BOMFileFormatJSON).SetPretty(true).Encode(&bom)
 }
 
-// Add (append) an evidence.occurrence location if non-empty.
-// ensures location is present only once
-func addEvidenceLocation(c *cdx.Component, locations ...string) {
-	if c == nil || locations == nil {
+// Adds (appends) an evidence.occurrence locations if non-empty.
+// Ensures locations are unique for component `c`.
+func addEvidenceLocations(c *cdx.Component, evidence *cdx.Evidence) {
+	if c == nil || evidence == nil || evidence.Occurrences == nil || len(*evidence.Occurrences) == 0 {
 		return
 	}
+
+	var locations []string
+	for _, o := range *evidence.Occurrences {
+		locations = append(locations, o.Location)
+	}
+
+	if len(locations) == 0 {
+		return
+	}
+
 	if c.Evidence == nil {
 		c.Evidence = &cdx.Evidence{}
 	}
@@ -182,12 +192,12 @@ func addEvidenceLocation(c *cdx.Component, locations ...string) {
 		return
 	}
 
-	occurences := make([]cdx.EvidenceOccurrence, 0, len(stored))
+	newOccurrences := make([]cdx.EvidenceOccurrence, 0, len(stored))
 	for _, loc := range slices.Sorted(maps.Keys(stored)) {
-		occurences = append(occurences, cdx.EvidenceOccurrence{
+		newOccurrences = append(newOccurrences, cdx.EvidenceOccurrence{
 			Location: loc,
 		})
 	}
 
-	c.Evidence.Occurrences = &occurences
+	c.Evidence.Occurrences = &newOccurrences
 }

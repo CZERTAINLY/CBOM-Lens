@@ -54,9 +54,8 @@ func TestLeakToComponent(t *testing.T) {
 				},
 			},
 			then: &model.Detection{
-				Source:   "LEAKS",
-				Type:     "PRIVATE-KEY",
-				Location: "/path/to/file",
+				Source: "LEAKS",
+				Type:   "PRIVATE-KEY",
 			},
 		},
 		{
@@ -73,9 +72,8 @@ func TestLeakToComponent(t *testing.T) {
 				},
 			},
 			then: &model.Detection{
-				Source:   "LEAKS",
-				Type:     "TOKEN",
-				Location: "/path/to/file",
+				Source: "LEAKS",
+				Type:   "TOKEN",
 				Components: []cdx.Component{
 					{
 						BOMRef:      "crypto/token/" + cksum(jwtToken),
@@ -114,9 +112,8 @@ func TestLeakToComponent(t *testing.T) {
 				},
 			},
 			then: &model.Detection{
-				Source:   "LEAKS",
-				Type:     "KEY",
-				Location: "/path/to/file",
+				Source: "LEAKS",
+				Type:   "KEY",
 				Components: []cdx.Component{
 					{
 						BOMRef:      "crypto/key/" + cksum(apiKey),
@@ -155,9 +152,8 @@ func TestLeakToComponent(t *testing.T) {
 				},
 			},
 			then: &model.Detection{
-				Source:   "LEAKS",
-				Type:     "PASSWORD",
-				Location: "/path/to/file",
+				Source: "LEAKS",
+				Type:   "PASSWORD",
 				Components: []cdx.Component{
 					{
 						BOMRef:      "crypto/password/" + cksum(passwd),
@@ -195,9 +191,8 @@ func TestLeakToComponent(t *testing.T) {
 				},
 			},
 			then: &model.Detection{
-				Source:   "LEAKS",
-				Type:     "UNKNOWN",
-				Location: "/path/to/file",
+				Source: "LEAKS",
+				Type:   "UNKNOWN",
 				Components: []cdx.Component{
 					{
 						BOMRef:      "crypto/unknown/sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
