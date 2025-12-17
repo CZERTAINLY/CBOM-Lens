@@ -241,7 +241,7 @@ func sslCerts(ctx context.Context, s nmap.Script, location string) []model.CertH
 			}
 
 			// Override the certificate source.
-			for ii, _ := range bundle.Certificates {
+			for ii := range bundle.Certificates {
 				bundle.Certificates[ii].Source = nmapSource
 			}
 
