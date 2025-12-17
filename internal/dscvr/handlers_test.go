@@ -127,12 +127,23 @@ func TestServer_listAttributeDefinitions(t *testing.T) {
 	var result listAttributeDefinitionsResponse
 	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
-	require.Len(t, result, 1)
-	require.Equal(t, lensConfigurationAttrUUID, result[0].UUID)
-	require.Equal(t, lensConfigurationAttrName, result[0].Name)
-	require.Equal(t, 1, len(result[0].Content))
-	require.Equal(t, "yaml", result[0].Content[0].Data.Language)
-	require.Equal(t, "dmVyc2lvbjogMApmaWxlc3lzdGVtOgogICAgZW5hYmxlZDogdHJ1ZQogICAgcGF0aHM6CiAgICAgICAgLSAvdGVzdApjb250YWluZXJzOgogICAgZW5hYmxlZDogZmFsc2UKICAgIGNvbmZpZzogW10KcG9ydHM6CiAgICBlbmFibGVkOiBmYWxzZQogICAgYmluYXJ5OiAiIgogICAgcG9ydHM6ICIiCiAgICBpcHY0OiBmYWxzZQogICAgaXB2NjogZmFsc2UKc2VydmljZToKICAgIHZlcmJvc2U6IGZhbHNlCiAgICBsb2c6ICIiCmNib206CiAgICB2ZXJzaW9uOiAiIgogICAgZXh0ZW5zaW9uczogW10K", result[0].Content[0].Data.Code)
+	require.Len(t, result, 2)
+
+	// info attribute
+	info := result[0]
+	require.Equal(t, lensConfigurationInfoAttrUUID, info.UUID)
+	require.Len(t, info.Content, 1)
+	require.Equal(t, lensConfigurationInfoData, info.Content[0].Data)
+
+	// data attribute
+	data := result[1]
+	require.Equal(t, lensConfigurationAttrUUID, data.UUID)
+	require.Equal(t, lensConfigurationAttrName, data.Name)
+	require.Equal(t, 1, len(data.Content))
+	block, ok := data.Content[0].Data.(attrCodeblockContentData)
+	require.True(t, ok)
+	require.Equal(t, "yaml", block.Language)
+	require.Equal(t, "dmVyc2lvbjogMApmaWxlc3lzdGVtOgogICAgZW5hYmxlZDogdHJ1ZQogICAgcGF0aHM6CiAgICAgICAgLSAvdGVzdApjb250YWluZXJzOgogICAgZW5hYmxlZDogZmFsc2UKICAgIGNvbmZpZzogW10KcG9ydHM6CiAgICBlbmFibGVkOiBmYWxzZQogICAgYmluYXJ5OiAiIgogICAgcG9ydHM6ICIiCiAgICBpcHY0OiBmYWxzZQogICAgaXB2NjogZmFsc2UKc2VydmljZToKICAgIHZlcmJvc2U6IGZhbHNlCiAgICBsb2c6ICIiCmNib206CiAgICB2ZXJzaW9uOiAiIgogICAgZXh0ZW5zaW9uczogW10K", block.Code)
 }
 
 func TestServer_listAttributeDefinitions_ConfigError(t *testing.T) {
@@ -173,6 +184,7 @@ func TestServer_validateAttributes(t *testing.T) {
 		{
 			UUID:        lensConfigurationAttrUUID,
 			Name:        lensConfigurationAttrName,
+			Type:        ptrString(lensConfigurationAttrType),
 			ContentType: ptrString(lensConfigurationAttrContentType),
 			Content: []attrCodeblockContent{
 				{
@@ -209,7 +221,7 @@ func TestServer_validateAttributes_InvalidJSON(t *testing.T) {
 	s.validateAttributes(w, req)
 
 	resp := w.Result()
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 }
 
 func TestServer_validateAttributes_ValidationError(t *testing.T) {
@@ -272,7 +284,6 @@ func TestServer_discoverCertificate(t *testing.T) {
 
 func TestServer_discoverCertificate_WithAttributes(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
 
 	mockSv := mock.NewMockSupervisorContract(ctrl)
 	s := setupTestServerWithSupervisor(t, mockSv)

@@ -2,6 +2,7 @@ package dscvr
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
@@ -116,8 +117,9 @@ type attrCodeblock struct {
 }
 
 type attrCodeblockContent struct {
-	Reference *string                  `json:"reference,omitempty"`
-	Data      attrCodeblockContentData `json:"data"`
+	Reference *string         `json:"reference,omitempty"`
+	RawData   json.RawMessage `json:"data"`
+	Data      any             `json:"-"`
 }
 
 type attrCodeblockContentData struct {
@@ -128,6 +130,69 @@ type attrCodeblockContentData struct {
 type attrProperties struct {
 	Label   string `json:"label"`
 	Visible bool   `json:"visible"`
+}
+
+func (a *attrCodeblock) UnmarshalJSON(b []byte) error {
+	type auxBlock attrCodeblock
+	var aux auxBlock
+	err := json.Unmarshal(b, &aux)
+	if err != nil {
+		return err
+	}
+
+	var typ string
+	if aux.Type == nil {
+		typ = "data"
+	} else {
+		typ = *aux.Type
+	}
+
+	switch typ {
+	case "", "data":
+		for i, content := range aux.Content {
+			var data attrCodeblockContentData
+			err := json.Unmarshal(content.RawData, &data)
+			if err != nil {
+				return err
+			}
+			aux.Content[i].Data = data
+		}
+	case "info":
+		for i, content := range aux.Content {
+			var data string
+			err := json.Unmarshal(content.RawData, &data)
+			if err != nil {
+				return err
+			}
+			aux.Content[i].Data = data
+		}
+	default:
+		return fmt.Errorf("unsupported attribute type %s: expected \"data\" or \"info\"", *aux.Type)
+	}
+
+	a.Version = aux.Version
+	a.UUID = aux.UUID
+	a.Name = aux.Name
+	a.Description = aux.Description
+	a.Type = aux.Type
+	a.ContentType = aux.ContentType
+	a.Content = aux.Content
+	a.Properties = aux.Properties
+	return nil
+}
+
+func (a attrCodeblock) MarshalJSON() ([]byte, error) {
+	type auxBlock attrCodeblock
+	var aux = auxBlock(a)
+
+	for i, content := range a.Content {
+		raw, err := json.Marshal(content.Data)
+		if err != nil {
+			return nil, err
+		}
+		aux.Content[i].RawData = raw
+	}
+	return json.Marshal(aux)
 }
 
 func validateAttr(attrs []attrCodeblock) error {
@@ -145,19 +210,25 @@ func validateAttr(attrs []attrCodeblock) error {
 				return fmt.Errorf("attribute uuid: %q, name: %q has unexpected number of items in `Content` array, expected: 1, actual: %d",
 					cpy.UUID, cpy.Name, len(cpy.Content))
 			}
-			if cpy.Content[0].Data.Language != "yaml" {
-				return fmt.Errorf("attribute uuid: %q, name: %q defines unexpected language, expected: 'yaml', actual: %q", cpy.UUID, cpy.Name, cpy.Content[0].Data.Language)
+			data, ok := cpy.Content[0].Data.(attrCodeblockContentData)
+			if !ok {
+				return fmt.Errorf("attribute uuid: %q, name: %q wrong type of `Content[0].Data` array, expected: attrCodeblockContent, actual: %T",
+					cpy.UUID, cpy.Name, cpy.Content[0].Data)
 			}
-			dd, err := base64.StdEncoding.DecodeString(cpy.Content[0].Data.Code)
+			if data.Language != "yaml" {
+				return fmt.Errorf("attribute uuid: %q, name: %q defines unexpected language, expected: 'yaml', actual: %q", cpy.UUID, cpy.Name, data.Language)
+			}
+			dd, err := base64.StdEncoding.DecodeString(data.Code)
 			if err != nil {
-				return fmt.Errorf("attribute uuid: %q, name: %q contains an unexpected base64 encoded value: %q: %s", cpy.UUID, cpy.Name, cpy.Content[0].Data.Code, err)
+				return fmt.Errorf("attribute uuid: %q, name: %q contains an unexpected base64 encoded value: %q: %s", cpy.UUID, cpy.Name, data.Code, err)
 			}
 			var m model.Scan
 			err = yaml.Unmarshal(dd, &m)
 			if err != nil {
 				return fmt.Errorf("attribute uuid: %q, name: %q is not a valid yaml cbom-lens scan configuration: %s", cpy.UUID, cpy.Name, err)
 			}
-
+		case lensConfigurationInfoAttrUUID:
+			return nil
 		default:
 			return fmt.Errorf("unknown attribute uuid: %q name: %q", cpy.UUID, cpy.Name)
 		}

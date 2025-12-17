@@ -200,7 +200,14 @@ func (s *Server) discoverCertificate(w http.ResponseWriter, r *http.Request) {
 			toJsonErr(r.Context(), w, generalErrMsgResp{Message: "Decoding attribute failed."}, http.StatusBadRequest)
 			return
 		}
-		decodedAttr, err := base64.StdEncoding.DecodeString(req.Attributes[0].Content[0].Data.Code)
+
+		data, ok := req.Attributes[0].Content[0].Data.(attrCodeblockContentData)
+		if !ok {
+			toJsonErr(r.Context(), w, generalErrMsgResp{Message: "Decoding attribute data failed: not expected type."}, http.StatusBadRequest)
+			return
+		}
+
+		decodedAttr, err := base64.StdEncoding.DecodeString(data.Code)
 		if err != nil {
 			slog.DebugContext(ctx, "Decoding attribute failed.", slog.String("error", err.Error()))
 			toJsonErr(r.Context(), w, generalErrMsgResp{Message: "Decoding attribute failed."}, http.StatusBadRequest)
@@ -279,7 +286,7 @@ func (s *Server) validateAttributes(w http.ResponseWriter, r *http.Request) {
 	var attrs []attrCodeblock
 	if err := json.Unmarshal(b, &attrs); err != nil {
 		slog.DebugContext(ctx, "Calling `json.Unmarshal()` failed", slog.String("error", err.Error()))
-		toJsonErr(r.Context(), w, generalErrMsgResp{Message: fmt.Sprintf("Failed to unmarshal request: %s", err)}, http.StatusBadRequest)
+		toJsonErr(r.Context(), w, generalErrMsgResp{Message: "Request body contains invalid JSON."}, http.StatusUnprocessableEntity)
 		return
 	}
 	type validationErrResp []string
@@ -310,8 +317,25 @@ func (s *Server) listAttributeDefinitions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var resp listAttributeDefinitionsResponse
-	resp = append(resp, attrCodeblock{
+	info := attrCodeblock{
+		Version:     ptrInt(2),
+		UUID:        lensConfigurationInfoAttrUUID,
+		Name:        lensConfigurationInfoAttrName,
+		Description: ptrString("Describe configuration options for scanning."),
+		Type:        ptrString(lensConfigurationInfoAttrType),
+		ContentType: ptrString(lensConfigurationInfoAttrContentType),
+		Properties: &attrProperties{
+			Label:   "CBOM-Lens scan configuration.",
+			Visible: true,
+		},
+		Content: []attrCodeblockContent{
+			{
+				Data: lensConfigurationInfoData,
+			},
+		},
+	}
+
+	config := attrCodeblock{
 		Version:     ptrInt(2),
 		UUID:        lensConfigurationAttrUUID,
 		Name:        lensConfigurationAttrName,
@@ -330,7 +354,8 @@ func (s *Server) listAttributeDefinitions(w http.ResponseWriter, r *http.Request
 				},
 			},
 		},
-	})
+	}
+	var resp = listAttributeDefinitionsResponse{info, config}
 
 	toJson(r.Context(), w, resp)
 }
