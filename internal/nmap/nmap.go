@@ -163,9 +163,9 @@ func HostToModel(ctx context.Context, host nmap.Host) model.Nmap {
 
 func portToModel(ctx context.Context, port nmap.Port) model.NmapPort {
 	ret := model.NmapPort{
-		ID:       int(port.ID),
-		State:    port.State.State,
-		Protocol: port.Protocol,
+		PortNumber: int(port.ID),
+		State:      port.State.State,
+		Protocol:   port.Protocol,
 		Service: model.NmapService{
 			Name:    port.Service.Name,
 			Product: port.Service.Product,

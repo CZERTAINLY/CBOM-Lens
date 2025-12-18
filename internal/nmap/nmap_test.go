@@ -115,7 +115,7 @@ func TestScanner(t *testing.T) {
 			require.Len(t, got.Ports, 1)
 			gotPort := got.Ports[0]
 			expPort := tc.then.Ports[0]
-			require.NotZero(t, gotPort.ID)
+			require.NotZero(t, gotPort.PortNumber)
 			require.Equal(t, expPort.State, gotPort.State)
 			require.Equal(t, expPort.Protocol, gotPort.Protocol)
 			require.Equal(t, expPort.Service.Name, gotPort.Service.Name)
@@ -126,7 +126,7 @@ func TestScanner(t *testing.T) {
 				gotHit := gotPort.TLSCerts[0]
 				require.NotNil(t, gotHit.Cert)
 				require.NotEmpty(t, gotHit.Location)
-				require.Equal(t, got.Address+":"+strconv.Itoa(gotPort.ID), gotHit.Location)
+				require.Equal(t, got.Address+":"+strconv.Itoa(gotPort.PortNumber), gotHit.Location)
 				require.Equal(t, "NMAP", gotHit.Source)
 			}
 
@@ -157,7 +157,7 @@ func TestHostToModel(t *testing.T) {
 	// Ports
 	require.Len(t, got.Ports, 1)
 	p := got.Ports[0]
-	require.Equal(t, 443, p.ID)
+	require.Equal(t, 443, p.PortNumber)
 	require.Equal(t, "open", p.State)
 	require.Equal(t, "tcp", p.Protocol)
 

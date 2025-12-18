@@ -9,7 +9,7 @@ type Nmap struct {
 
 // NmapPort contains nmap output for a given port
 type NmapPort struct {
-	ID          int
+	PortNumber  int
 	State       string
 	Protocol    string
 	Service     NmapService

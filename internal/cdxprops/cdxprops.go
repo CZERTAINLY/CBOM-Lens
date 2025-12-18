@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
@@ -92,27 +93,33 @@ func (c Converter) CertHit(ctx context.Context, hit model.CertHit) *model.Detect
 	}
 }
 
-func (c Converter) Nmap(ctx context.Context, nmap model.Nmap) *model.Detection {
+func (c Converter) Nmap(ctx context.Context, nmap model.Nmap) []model.Detection {
 
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "N/A"
 	}
 
-	compos, deps, services, err := c.parseNmap(ctx, nmap)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to parse nmap", "error", err)
-		return nil
+	var detections []model.Detection
+	for _, port := range nmap.Ports {
+		compos, deps, services, err := c.parseNmap(ctx, port)
+
+		if err != nil {
+			slog.WarnContext(ctx, "failed to parse nmap", "error", err)
+			return nil
+		}
+
+		detections = append(detections, model.Detection{
+			Source:       "NMAP",
+			Type:         model.DetectionTypePort,
+			Location:     hostname + ":" + strconv.Itoa(port.PortNumber),
+			Components:   compos,
+			Dependencies: deps,
+			Services:     services,
+		})
 	}
 
-	return &model.Detection{
-		Source:       "NMAP",
-		Type:         model.DetectionTypePort,
-		Location:     hostname,
-		Components:   compos,
-		Dependencies: deps,
-		Services:     services,
-	}
+	return detections
 }
 
 func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model.Detection {

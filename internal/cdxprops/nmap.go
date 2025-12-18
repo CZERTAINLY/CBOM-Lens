@@ -53,19 +53,17 @@ type TLSInfo struct {
 	OID     string
 }
 
-func (c Converter) parseNmap(ctx context.Context, nmap model.Nmap) (compos []cdx.Component, deps []cdx.Dependency, services []cdx.Service, err error) {
-	for _, port := range nmap.Ports {
-		switch port.Service.Name {
-		case "ssh":
-			compos = append(compos, c.sshToCompos(ctx, port)...)
-		case "ssl", "http", "https":
-			c := c.tlsToCompos(ctx, port)
-			compos = append(compos, c...)
-		default:
-			slog.WarnContext(ctx, "can't parse unsupported nmap service: ignoring", "service", port.Service.Name)
-			continue
-		}
+func (c Converter) parseNmap(ctx context.Context, port model.NmapPort) (compos []cdx.Component, deps []cdx.Dependency, services []cdx.Service, err error) {
+	switch port.Service.Name {
+	case "ssh":
+		compos = append(compos, c.sshToCompos(ctx, port)...)
+	case "ssl", "http", "https":
+		c := c.tlsToCompos(ctx, port)
+		compos = append(compos, c...)
+	default:
+		slog.WarnContext(ctx, "can't parse unsupported nmap service: ignoring", "service", port.Service.Name)
 	}
+
 	// FIXME: handle cdx services too
 	return
 }
