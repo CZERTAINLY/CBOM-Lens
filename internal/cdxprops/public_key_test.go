@@ -23,7 +23,7 @@ func TestConverter_publicKeyComponents(t *testing.T) {
 	require.NoError(t, err)
 
 	c := NewConverter()
-	algo, key := c.publicKeyComponents(t.Context(), -1, cert.PublicKey, cert, "")
+	algo, key := c.publicKeyComponents(t.Context(), -1, cert.PublicKey, cert)
 
 	require.Equal(t, "ML-DSA-65", algo.Name)
 	require.Equal(t, "ML-DSA-65", key.Name)

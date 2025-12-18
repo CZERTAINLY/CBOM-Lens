@@ -271,13 +271,6 @@ func (c Converter) tlsCipherToCompos(ctx context.Context, cipher model.SSLEnumCi
 			},
 			OID: info.OID,
 		},
-		Evidence: &cdx.Evidence{
-			Occurrences: &[]cdx.EvidenceOccurrence{
-				{
-					Location: cipher.Location,
-				},
-			},
-		},
 	}
 	return append([]cdx.Component{protoCompo}, compos...)
 }
@@ -307,13 +300,6 @@ func (c Converter) ParseSSHHostKey(key model.SSHHostKey) cdx.Component {
 			AssetType:           cdx.CryptoAssetTypeAlgorithm,
 			AlgorithmProperties: &algoProp,
 			OID:                 algoProp.ParameterSetIdentifier,
-		},
-		Evidence: &cdx.Evidence{
-			Occurrences: &[]cdx.EvidenceOccurrence{
-				{
-					Location: key.Location,
-				},
-			},
 		},
 	}
 

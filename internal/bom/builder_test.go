@@ -38,18 +38,14 @@ func TestBuilder_AppendDetections(t *testing.T) {
 			name: "single detection with one component",
 			detections: []model.Detection{
 				{
-					Source: "PEM",
-					Type:   model.DetectionTypeCertificate,
+					Source:   "PEM",
+					Type:     model.DetectionTypeCertificate,
+					Location: "/test/cert.pem",
 					Components: []cdx.Component{
 						{
 							Type:   cdx.ComponentTypeCryptographicAsset,
 							Name:   "Test-Cert",
 							BOMRef: "crypto/cert/test@123",
-							Evidence: &cdx.Evidence{
-								Occurrences: &[]cdx.EvidenceOccurrence{
-									{Location: "/test/cert.pem"},
-								},
-							},
 						},
 					},
 					Dependencies: []cdx.Dependency{
@@ -82,18 +78,14 @@ func TestBuilder_AppendDetections(t *testing.T) {
 			name: "multiple detections with same component from different locations",
 			detections: []model.Detection{
 				{
-					Source: "PEM",
-					Type:   model.DetectionTypeCertificate,
+					Source:   "PEM",
+					Type:     model.DetectionTypeCertificate,
+					Location: "/test/cert1.pem",
 					Components: []cdx.Component{
 						{
 							Type:   cdx.ComponentTypeCryptographicAsset,
 							Name:   "Test-Cert",
 							BOMRef: "crypto/cert/test@123",
-							Evidence: &cdx.Evidence{
-								Occurrences: &[]cdx.EvidenceOccurrence{
-									{Location: "/test/cert1.pem"},
-								},
-							},
 						},
 					},
 					Dependencies: []cdx.Dependency{
@@ -104,18 +96,14 @@ func TestBuilder_AppendDetections(t *testing.T) {
 					},
 				},
 				{
-					Source: "PEM",
-					Type:   model.DetectionTypeCertificate,
+					Source:   "PEM",
+					Type:     model.DetectionTypeCertificate,
+					Location: "/test/cert2.pem",
 					Components: []cdx.Component{
 						{
 							Type:   cdx.ComponentTypeCryptographicAsset,
 							Name:   "Test-Cert",
 							BOMRef: "crypto/cert/test@123",
-							Evidence: &cdx.Evidence{
-								Occurrences: &[]cdx.EvidenceOccurrence{
-									{Location: "/test/cert2.pem"},
-								},
-							},
 						},
 					},
 					Dependencies: []cdx.Dependency{
@@ -152,18 +140,14 @@ func TestBuilder_AppendDetections(t *testing.T) {
 			name: "multiple detections with different components",
 			detections: []model.Detection{
 				{
-					Source: "PEM",
-					Type:   model.DetectionTypeCertificate,
+					Source:   "PEM",
+					Type:     model.DetectionTypeCertificate,
+					Location: "/test/cert1.pem",
 					Components: []cdx.Component{
 						{
 							Type:   cdx.ComponentTypeCryptographicAsset,
 							Name:   "Test-Cert-1",
 							BOMRef: "crypto/cert/test1@123",
-							Evidence: &cdx.Evidence{
-								Occurrences: &[]cdx.EvidenceOccurrence{
-									{Location: "/test/cert1.pem"},
-								},
-							},
 						},
 					},
 					Dependencies: []cdx.Dependency{
@@ -174,18 +158,14 @@ func TestBuilder_AppendDetections(t *testing.T) {
 					},
 				},
 				{
-					Source: "PEM",
-					Type:   model.DetectionTypeCertificate,
+					Source:   "PEM",
+					Type:     model.DetectionTypeCertificate,
+					Location: "/test/cert2.pem",
 					Components: []cdx.Component{
 						{
 							Type:   cdx.ComponentTypeCryptographicAsset,
 							Name:   "Test-Cert-2",
 							BOMRef: "crypto/cert/test2@456",
-							Evidence: &cdx.Evidence{
-								Occurrences: &[]cdx.EvidenceOccurrence{
-									{Location: "/test/cert2.pem"},
-								},
-							},
 						},
 					},
 					Dependencies: []cdx.Dependency{
@@ -229,18 +209,14 @@ func TestBuilder_BOM(t *testing.T) {
 	require.NoError(t, err)
 
 	detection := model.Detection{
-		Source: "PEM",
-		Type:   model.DetectionTypeCertificate,
+		Source:   "PEM",
+		Type:     model.DetectionTypeCertificate,
+		Location: "/test/cert.pem",
 		Components: []cdx.Component{
 			{
 				Type:   cdx.ComponentTypeCryptographicAsset,
 				Name:   "Test-Cert",
 				BOMRef: "crypto/cert/test@123",
-				Evidence: &cdx.Evidence{
-					Occurrences: &[]cdx.EvidenceOccurrence{
-						{Location: "/test/cert.pem"},
-					},
-				},
 			},
 		},
 		Dependencies: []cdx.Dependency{
@@ -284,18 +260,14 @@ func TestBuilder_AsJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	detection := model.Detection{
-		Source: "PEM",
-		Type:   model.DetectionTypeCertificate,
+		Source:   "PEM",
+		Type:     model.DetectionTypeCertificate,
+		Location: "/test/cert.pem",
 		Components: []cdx.Component{
 			{
 				Type:   cdx.ComponentTypeCryptographicAsset,
 				Name:   "Test-Cert",
 				BOMRef: "crypto/cert/test@123",
-				Evidence: &cdx.Evidence{
-					Occurrences: &[]cdx.EvidenceOccurrence{
-						{Location: "/test/cert.pem"},
-					},
-				},
 			},
 		},
 		Dependencies: []cdx.Dependency{

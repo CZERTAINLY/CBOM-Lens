@@ -17,7 +17,7 @@ import (
 )
 
 // publicKeyAlgComponent creates a CycloneDX component for a public key algorithm
-func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate, location string) (algo, key cdx.Component) {
+func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate) (algo, key cdx.Component) {
 	info := publicKeyAlgorithmInfo(pubKeyAlg, pubKey)
 
 	if info.oid == "0.0.0.0" && cert != nil {
@@ -81,13 +81,6 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 			AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,
 			OID:                             info.oid,
 			RelatedCryptoMaterialProperties: relatedProps,
-		},
-		Evidence: &cdx.Evidence{
-			Occurrences: &[]cdx.EvidenceOccurrence{
-				{
-					Location: location,
-				},
-			},
 		},
 	}
 	return

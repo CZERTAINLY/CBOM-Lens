@@ -21,7 +21,7 @@ import (
 type Scanner struct{}
 
 // Scan parses all PEM blocks and returns a comprehensive bundle containing certificates, keys, and other cryptographic materials
-func (d Scanner) Scan(ctx context.Context, b []byte, location string) (model.PEMBundle, error) {
+func (d Scanner) Scan(ctx context.Context, b []byte, path string) (model.PEMBundle, error) {
 	slog.DebugContext(ctx, "Detecting ALL PEM blocks anywhere in the blob (handles leading text)")
 
 	hits := func(certs []*x509.Certificate, source string) []model.CertHit {
@@ -30,7 +30,7 @@ func (d Scanner) Scan(ctx context.Context, b []byte, location string) (model.PEM
 			ret[idx] = model.CertHit{
 				Cert:     c,
 				Source:   source,
-				Location: location,
+				Location: path,
 			}
 		}
 		return ret
@@ -185,7 +185,7 @@ func (d Scanner) Scan(ctx context.Context, b []byte, location string) (model.PEM
 		return bundle, model.ErrNoMatch
 	}
 
-	bundle.Location = location
+	bundle.Location = path
 	if len(bundle.ParseErrors) == 0 {
 		bundle.ParseErrors = nil
 	}

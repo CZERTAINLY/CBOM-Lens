@@ -6,7 +6,6 @@ import (
 	"html"
 	"log/slog"
 	"net/netip"
-	"os"
 	"strconv"
 	"time"
 
@@ -15,10 +14,6 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
 	"github.com/Ullaakut/nmap/v3"
-)
-
-const (
-	nmapSource = "NMAP"
 )
 
 // Scanner is a wrapper on top of "github.com/Ullaakut/nmap/v3" Scanner
@@ -143,13 +138,19 @@ func scan(ctx context.Context, options []nmap.Option) (*nmap.Run, error) {
 }
 
 func HostToModel(ctx context.Context, host nmap.Host) model.Nmap {
-	address := getNmapAddress(host.Addresses)
+	var address = "unknown"
+	if len(host.Addresses) > 0 {
+		address = host.Addresses[0].Addr
+	}
 	var status = host.Status.State
 
 	ports := make([]model.NmapPort, len(host.Ports))
 	for i, port := range host.Ports {
-		location := address + ":" + strconv.Itoa(int(port.ID))
-		m := portToModel(ctx, port, location)
+		m := portToModel(ctx, port)
+		for ii := range m.TLSCerts {
+			m.TLSCerts[ii].Location = address + ":" + strconv.Itoa(int(port.ID))
+			m.TLSCerts[ii].Source = "NMAP"
+		}
 		ports[i] = m
 	}
 
@@ -160,7 +161,7 @@ func HostToModel(ctx context.Context, host nmap.Host) model.Nmap {
 	}
 }
 
-func portToModel(ctx context.Context, port nmap.Port, location string) model.NmapPort {
+func portToModel(ctx context.Context, port nmap.Port) model.NmapPort {
 	ret := model.NmapPort{
 		ID:       int(port.ID),
 		State:    port.State.State,
@@ -171,19 +172,19 @@ func portToModel(ctx context.Context, port nmap.Port, location string) model.Nma
 			Version: port.Service.Version,
 		},
 	}
-	parseScripts(ctx, port.Scripts, location, &ret)
+	parseScripts(ctx, port.Scripts, &ret)
 	return ret
 }
 
-func parseScripts(ctx context.Context, scripts []nmap.Script, location string, out *model.NmapPort) {
+func parseScripts(ctx context.Context, scripts []nmap.Script, out *model.NmapPort) {
 	for _, s := range scripts {
 		switch s.ID {
 		case "ssl-enum-ciphers":
-			out.Ciphers = append(out.Ciphers, sslEnumCiphers(ctx, s, location)...)
+			out.Ciphers = append(out.Ciphers, sslEnumCiphers(ctx, s)...)
 		case "ssl-cert":
-			out.TLSCerts = append(out.TLSCerts, sslCerts(ctx, s, location)...)
+			out.TLSCerts = append(out.TLSCerts, sslCerts(ctx, s)...)
 		case "ssh-hostkey":
-			out.SSHHostKeys = append(out.SSHHostKeys, sshHostKey(ctx, s, location)...)
+			out.SSHHostKeys = append(out.SSHHostKeys, sshHostKey(ctx, s)...)
 		default:
 			out.Scripts = append(out.Scripts, model.NmapScript{
 				ID:    s.ID,
@@ -193,27 +194,27 @@ func parseScripts(ctx context.Context, scripts []nmap.Script, location string, o
 	}
 }
 
-func sslEnumCiphers(ctx context.Context, s nmap.Script, location string) []model.SSLEnumCiphers {
+func sslEnumCiphers(ctx context.Context, s nmap.Script) []model.SSLEnumCiphers {
 	ciphers := make([]model.SSLEnumCiphers, len(s.Tables))
 
 	for idx, row := range s.Tables {
 		ciphers[idx] = model.SSLEnumCiphers{
 			Name:    row.Key,
-			Ciphers: cipherSuites(ctx, row.Tables, location),
+			Ciphers: cipherSuites(ctx, row.Tables),
 		}
 	}
 
 	return ciphers
 }
 
-func cipherSuites(_ context.Context, tables []nmap.Table, location string) []model.SSLCipher {
+func cipherSuites(_ context.Context, tables []nmap.Table) []model.SSLCipher {
 	var ret []model.SSLCipher
 	for _, row := range tables {
 		if row.Key != "ciphers" {
 			continue
 		}
 		for _, cipher := range row.Tables {
-			item := model.SSLCipher{Location: location, Source: nmapSource}
+			var item model.SSLCipher
 			for _, element := range cipher.Elements {
 				if element.Key == "name" {
 					item.Name = element.Value
@@ -228,30 +229,25 @@ func cipherSuites(_ context.Context, tables []nmap.Table, location string) []mod
 	return ret
 }
 
-func sslCerts(ctx context.Context, s nmap.Script, location string) []model.CertHit {
+func sslCerts(ctx context.Context, s nmap.Script) []model.CertHit {
 	certs := make([]model.CertHit, 0, len(s.Elements))
 
 	for _, row := range s.Elements {
 		if row.Key == "pem" {
 			val := html.UnescapeString(row.Value)
-			bundle, err := pem.Scanner{}.Scan(ctx, []byte(val), location)
+			// empty path is fine, this will be added in a upper layer
+			bundle, err := pem.Scanner{}.Scan(ctx, []byte(val), "")
 			if err != nil {
 				slog.WarnContext(ctx, "failed to scan PEM data: ignoring", "error", err)
 				continue
 			}
-
-			// Override the certificate source.
-			for ii := range bundle.Certificates {
-				bundle.Certificates[ii].Source = nmapSource
-			}
-
 			certs = append(certs, bundle.Certificates...)
 		}
 	}
 	return certs
 }
 
-func sshHostKey(_ context.Context, s nmap.Script, location string) []model.SSHHostKey {
+func sshHostKey(_ context.Context, s nmap.Script) []model.SSHHostKey {
 	hostKeys := make([]model.SSHHostKey, len(s.Tables))
 
 	for idx, table := range s.Tables {
@@ -273,21 +269,8 @@ func sshHostKey(_ context.Context, s nmap.Script, location string) []model.SSHHo
 			Type:        typ,
 			Bits:        bits,
 			Fingerprint: fingerprint,
-			Location:    location,
-			Source:      nmapSource,
 		}
 	}
 
 	return hostKeys
-}
-
-func getNmapAddress(addresses []nmap.Address) string {
-	if len(addresses) > 0 {
-		return addresses[0].Addr
-	}
-
-	if hostname, err := os.Hostname(); err == nil {
-		return hostname
-	}
-	return "unknown"
 }

@@ -40,7 +40,7 @@ func TestScanner_Do(t *testing.T) {
 	noMatch := NewMockDetector(t)
 
 	isScript.On("Detect", mock.Anything, []byte("#!/bin/sh"), "fstest::/is-script").
-		Return([]model.Detection{{Source: "fstest::/is-script"}}, nil).
+		Return([]model.Detection{{Location: "fstest::/is-script"}}, nil).
 		Once()
 	isScript.On("Detect", mock.Anything, []byte("not a script"), "fstest::/dir/not-a-script").
 		Return(nil, model.ErrNoMatch).
@@ -63,7 +63,7 @@ func TestScanner_Do(t *testing.T) {
 	}
 
 	require.Len(t, detections, 1)
-	require.Equal(t, "fstest::/is-script", detections[0].Source)
+	require.Equal(t, "fstest::/is-script", detections[0].Location)
 	stats := scanner.Stats()
 	require.NotNil(t, stats)
 }
