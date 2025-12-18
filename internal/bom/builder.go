@@ -33,6 +33,7 @@ type Builder struct {
 	components   map[string]*cdx.Component
 	dependencies map[string]*[]string
 	properties   []cdx.Property
+	counter      model.Stats
 }
 
 func NewBuilder(config model.CBOM) (*Builder, error) {
@@ -59,6 +60,11 @@ func NewBuilder(config model.CBOM) (*Builder, error) {
 		dependencies: make(map[string]*[]string),
 		properties:   []cdx.Property{},
 	}, nil
+}
+
+func (b *Builder) WithCounter(counter model.Stats) *Builder {
+	b.counter = counter
+	return b
 }
 
 func (b *Builder) AppendDetections(ctx context.Context, detections ...model.Detection) *Builder {
@@ -114,6 +120,11 @@ func (b *Builder) BOM() cdx.BOM {
 		dependencies = append(dependencies, dep)
 	}
 
+	var statistics []cdx.Property
+	if b.counter != nil {
+		statistics = bomStatistics(b.counter)
+	}
+
 	bom := cdx.BOM{
 		JSONSchema:   "https://cyclonedx.org/schema/bom-1.6.schema.json",
 		BOMFormat:    "CycloneDX",
@@ -143,6 +154,7 @@ func (b *Builder) BOM() cdx.BOM {
 					},
 				},
 			},
+			Properties: &statistics,
 		},
 		Components:   &components,
 		Dependencies: &dependencies,
@@ -190,4 +202,15 @@ func addEvidenceLocation(c *cdx.Component, locations ...string) {
 	}
 
 	c.Evidence.Occurrences = &occurences
+}
+
+func bomStatistics(counter model.Stats) []cdx.Property {
+	var props = []cdx.Property{}
+	for name, value := range counter.Stats() {
+		props = append(props, cdx.Property{
+			Name:  name,
+			Value: value,
+		})
+	}
+	return props
 }

@@ -8,13 +8,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 )
 
 // Roots is a convenience wrapper around FS for os.Root. See FS for details.
-func Roots(ctx context.Context, roots ...*os.Root) iter.Seq2[Entry, error] {
+func Roots(ctx context.Context, counter model.Stats, roots ...*os.Root) iter.Seq2[Entry, error] {
 	return func(yield func(Entry, error) bool) {
 		for _, root := range roots {
-			for entry, err := range FS(ctx, root.FS(), root.Name()) {
+			for entry, err := range FS(ctx, counter, root.FS(), root.Name()) {
 				if !yield(entry, err) {
 					return
 				}
@@ -27,7 +29,7 @@ func Roots(ctx context.Context, roots ...*os.Root) iter.Seq2[Entry, error] {
 // Or an error if file information retrieval fails.
 // Each Entry's Path() is prefixed with name of a filesystem. In most cases it'll be an absolute
 // path to the file. It does not follow symlinks.
-func FS(ctx context.Context, root fs.FS, name string) iter.Seq2[Entry, error] {
+func FS(ctx context.Context, counter model.Stats, root fs.FS, name string) iter.Seq2[Entry, error] {
 	if root == nil {
 		slog.WarnContext(ctx, "root is nil: not iterating")
 		return nil
@@ -37,6 +39,9 @@ func FS(ctx context.Context, root fs.FS, name string) iter.Seq2[Entry, error] {
 		fn := func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return fs.SkipAll
+			}
+			if !d.IsDir() {
+				counter.IncFiles()
 			}
 			var entry = fsEntry{
 				root:    root,
@@ -49,10 +54,14 @@ func FS(ctx context.Context, root fs.FS, name string) iter.Seq2[Entry, error] {
 			} else {
 				info, err := d.Info()
 				if err != nil {
+					counter.IncExcludedFiles()
 					entry.infoErr = err
 					yieldErr = err
 				} else {
 					if !info.Mode().IsRegular() {
+						if !info.IsDir() {
+							counter.IncExcludedFiles()
+						}
 						return nil
 					}
 					entry.info = info

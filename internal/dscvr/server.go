@@ -1,3 +1,4 @@
+//go:generate go tool go.uber.org/mock/mockgen -destination=./mock/supervisor.go -package=mock github.com/CZERTAINLY/CBOM-lens/internal/dscvr SupervisorContract
 package dscvr
 
 import (
@@ -22,7 +23,6 @@ import (
 
 const defaultCallbackStoreTimeout = 10 * time.Second
 
-//go:generate mockgen -destination=./mock/supervisor.go -package=mock github.com/CZERTAINLY/CBOM-lens/internal/dscvr SupervisorContract
 type SupervisorContract interface {
 	ConfigureJob(ctx context.Context, name string, cfg model.Scan)
 	JobConfiguration(ctx context.Context, name string) (model.Scan, error)

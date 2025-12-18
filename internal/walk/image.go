@@ -23,7 +23,7 @@ import (
 
 // FS recursively walks the squashed layers of an OCI image.
 // Each Entry's Path() is a real path of file inside.
-func Image(ctx context.Context, image *image.Image) iter.Seq2[Entry, error] {
+func Image(ctx context.Context, counter model.Stats, image *image.Image) iter.Seq2[Entry, error] {
 	if image == nil {
 		return func(yield func(Entry, error) bool) {
 			yield(nil, errors.New("image is nil"))
@@ -33,7 +33,9 @@ func Image(ctx context.Context, image *image.Image) iter.Seq2[Entry, error] {
 	return func(yield func(Entry, error) bool) {
 		done := make(chan struct{})
 		fn := func(path file.Path, node filenode.FileNode) error {
+			counter.IncFiles()
 			if node.FileType != file.TypeRegular {
+				counter.IncExcludedFiles()
 				return nil
 			}
 			if !yield(dentry{node: node, image: image}, nil) {
@@ -65,12 +67,14 @@ func Image(ctx context.Context, image *image.Image) iter.Seq2[Entry, error] {
 }
 
 // Images traverse through all defined containers and their images and all files inside
-func Images(parentContext context.Context, configs model.ContainersConfig) iter.Seq2[Entry, error] {
+func Images(parentContext context.Context, counter model.Stats, configs model.ContainersConfig) iter.Seq2[Entry, error] {
 	return func(yield func(Entry, error) bool) {
 		for _, cc := range configs {
+			counter.IncSources()
 			ctx := log.ContextAttrs(parentContext, slog.String("host", cc.Host))
 			cli, err := newClient(ctx, cc)
 			if err != nil {
+				counter.IncSkippedSources()
 				slog.WarnContext(ctx, "can't connect to container host, skipping", "error", err)
 				if !yield(nil, err) {
 					return
@@ -97,7 +101,7 @@ func Images(parentContext context.Context, configs model.ContainersConfig) iter.
 				}
 
 				slog.DebugContext(ctx, "scanning", "image", ident)
-				for entry, err := range Image(ctx, img) {
+				for entry, err := range Image(ctx, counter, img) {
 					if !yield(entry, err) {
 						return
 					}

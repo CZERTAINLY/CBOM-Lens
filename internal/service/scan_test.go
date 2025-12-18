@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	scan "github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"github.com/stretchr/testify/mock"
@@ -51,10 +53,10 @@ func TestScanner_Do(t *testing.T) {
 		Times(2)
 
 	detectors := []scan.Detector{noMatch, isScript}
-	scanner := scan.New(4, detectors)
-
+	counter := stats.New(t.Name())
+	scanner := scan.New(4, counter, detectors)
 	detections := make([]model.Detection, 0, 10)
-	for detection, err := range scanner.Do(t.Context(), walk.FS(t.Context(), root, "fstest::")) {
+	for detection, err := range scanner.Do(t.Context(), walk.FS(t.Context(), counter, root, "fstest::")) {
 		if errors.Is(err, model.ErrNoMatch) {
 			continue
 		}
@@ -64,8 +66,10 @@ func TestScanner_Do(t *testing.T) {
 
 	require.Len(t, detections, 1)
 	require.Equal(t, "fstest::/is-script", detections[0].Location)
-	stats := scanner.Stats()
-	require.NotNil(t, stats)
+	istats := scanner.Stats()
+	require.NotNil(t, istats)
+	stats := maps.Collect(counter.Stats())
+	t.Logf("stats=%+v", stats)
 }
 
 type MockDetector struct {

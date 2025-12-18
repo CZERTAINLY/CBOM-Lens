@@ -45,6 +45,7 @@ type Scan struct {
 	limit             int
 	skipIfBigger      int64
 	detectors         []Detector
+	counter           model.Stats
 	pool              sync.Pool
 	poolNewCounter    atomic.Int32
 	poolPutCounter    atomic.Int32
@@ -57,9 +58,10 @@ type Stats struct {
 	PoolPutErrCounter int
 }
 
-func New(limit int, detectors []Detector) *Scan {
+func New(limit int, counter model.Stats, detectors []Detector) *Scan {
 	const skipIfBigger = 10 * 1024 * 1024
 	s := &Scan{
+		counter:      counter,
 		limit:        limit,
 		skipIfBigger: skipIfBigger,
 		detectors:    detectors,
@@ -91,15 +93,18 @@ func (s *Scan) scan(ctx context.Context, entry walk.Entry) ([]model.Detection, e
 	}
 	info, err := entry.Stat()
 	if err != nil {
+		s.counter.IncSkippedFiles()
 		return nil, fmt.Errorf("scan Stat: %w", err)
 	}
 	if info.Size() > s.skipIfBigger {
-		slog.DebugContext(ctx, "scanning skiped, too big file", "size", info.Size())
+		slog.DebugContext(ctx, "excluded to big", "path", entry.Path(), "size", info.Size())
+		s.counter.IncExcludedFiles()
 		return nil, fmt.Errorf("entry too big (%d bytes): %w", info.Size(), model.ErrTooBig)
 	}
 
 	f, err := entry.Open()
 	if err != nil {
+		s.counter.IncSkippedFiles()
 		return nil, fmt.Errorf("scan Open: %w", err)
 	}
 	defer func() {
@@ -111,6 +116,7 @@ func (s *Scan) scan(ctx context.Context, entry walk.Entry) ([]model.Detection, e
 	clear(buf)
 	n, err := f.Read(buf)
 	if err != nil {
+		s.counter.IncSkippedFiles()
 		s.poolPutErrCounter.Add(1)
 		s.pool.Put(bp)
 		return nil, fmt.Errorf("scan ReadAll: %w", err)

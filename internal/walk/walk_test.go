@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/log"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"github.com/anchore/stereoscope"
@@ -24,7 +26,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func TestFS(t *testing.T) {
+func TestFstest(t *testing.T) {
 	t.Parallel()
 	root := fstest.MapFS{
 		"a": &fstest.MapFile{
@@ -41,10 +43,15 @@ func TestFS(t *testing.T) {
 			Mode:    0644,
 			ModTime: time.Now(),
 		},
+		"b/foo.sock": &fstest.MapFile{
+			Mode:    0644 | fs.ModeSocket,
+			ModTime: time.Now(),
+		},
 	}
 
-	actual := make([]then, 0, 10)
-	for entry, err := range walk.FS(t.Context(), root, "fstest://") {
+	actual := make([]then, 0, 2)
+	counter := stats.New(t.Name())
+	for entry, err := range walk.FS(t.Context(), counter, root, "fstest://") {
 		actual = append(actual, testEntry(t, entry, err))
 	}
 
@@ -57,6 +64,18 @@ func TestFS(t *testing.T) {
 		actual,
 	)
 
+	// three files examined (directory does not count)
+	// one - the socket type - is excluded
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		switch {
+		case strings.HasSuffix(key, model.StatsFilesExcluded):
+			exp = "1"
+		case strings.HasSuffix(key, model.StatsFilesTotal):
+			exp = "3"
+		}
+		require.Equal(t, exp, value)
+	}
 }
 
 func TestRoot(t *testing.T) {
@@ -89,7 +108,8 @@ func TestRoot(t *testing.T) {
 		})
 
 	actual := make([]then, 0, 10)
-	for entry, err := range walk.Roots(t.Context(), root) {
+	counter := stats.New(t.Name())
+	for entry, err := range walk.Roots(t.Context(), counter, root) {
 		actual = append(actual, testEntry(t, entry, err))
 	}
 
@@ -105,6 +125,9 @@ func TestRoot(t *testing.T) {
 		},
 		actual,
 	)
+
+	stats := maps.Collect(counter.Stats())
+	t.Logf("stats=%+v", stats)
 }
 
 func TestImage(t *testing.T) {
@@ -179,7 +202,8 @@ RUN echo "this is a new layer, longer content is 42" > /a/c/c.txt
 		require.NoError(t, err)
 
 		actual := make([]then, 0, 10)
-		for entry, err := range walk.Image(t.Context(), ociImage) {
+		counter := stats.New(t.Name())
+		for entry, err := range walk.Image(t.Context(), counter, ociImage) {
 			if strings.HasPrefix(entry.Path(), "/a") {
 				actual = append(actual, testEntry(t, entry, err))
 			}
@@ -193,6 +217,8 @@ RUN echo "this is a new layer, longer content is 42" > /a/c/c.txt
 			},
 			actual,
 		)
+		stats := maps.Collect(counter.Stats())
+		t.Logf("stats=%+v", stats)
 	})
 
 	host := os.Getenv("DOCKER_HOST")
@@ -218,7 +244,8 @@ RUN echo "this is a new layer, longer content is 42" > /a/c/c.txt
 				},
 			},
 		}
-		for entry, err := range walk.Images(t.Context(), cfg.Config) {
+		counter := stats.New(t.Name())
+		for entry, err := range walk.Images(t.Context(), counter, cfg.Config) {
 			if err != nil {
 				t.Logf("err=%+v", err)
 				continue
@@ -231,6 +258,9 @@ RUN echo "this is a new layer, longer content is 42" > /a/c/c.txt
 		require.GreaterOrEqual(t, len(actual), 2)
 		require.Contains(t, actual, then{path: "/a/a.txt", size: 12})
 		require.Contains(t, actual, then{path: "/a/c/c.txt", size: 42})
+
+		stats := maps.Collect(counter.Stats())
+		t.Logf("stats=%+v", stats)
 	})
 }
 
