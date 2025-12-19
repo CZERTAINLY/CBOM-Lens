@@ -16,15 +16,27 @@ import (
 )
 
 // Job is a unit of work executed by supervisor
+//
+// Job configuration
+// Each Job has a default configuration loaded from a YAML file.
+// This configuration can be temporarily overridden via the discovery protocol,
+// allowing the job to start with a different set of values for a single run.
+// After being used once, the override is cleared at the beginning of the next Start call,
+// ensuring subsequent runs revert to the default configuration unless a new override is set.
+// The configOverride field holds the temporary override, and overrideUsed tracks if it was applied.
 type Job struct {
 	name        string
 	oneshot     bool
 	cmd         Command
 	runner      *Runner
-	start       chan struct{}
+	start       chan model.Scan
 	cfgMx       sync.Mutex
-	config      model.Scan
 	resultsChan chan<- Result
+
+	// Job configuration
+	config         model.Scan
+	configOverride *model.Scan
+	overrideUsed   bool
 }
 
 func NewJob(name string, oneshot bool, config model.Scan, results chan<- Result) (*Job, error) {
@@ -59,7 +71,7 @@ func NewJob(name string, oneshot bool, config model.Scan, results chan<- Result)
 		oneshot:     oneshot,
 		cmd:         cmd,
 		runner:      NewRunner(nil),
-		start:       make(chan struct{}, 1),
+		start:       make(chan model.Scan, 1),
 		config:      config,
 		resultsChan: results,
 	}, nil
@@ -76,6 +88,12 @@ func (j *Job) WithTestData(stdout, stderr string) {
 			"_LENS_PRINT_STDERR="+stderr,
 		)
 	}
+}
+
+func (j *Job) WithPrintStdin() {
+	j.cmd.Env = append(j.cmd.Env,
+		"_LENS_PRINT_STDIN=1",
+	)
 }
 
 func (j *Job) Close() {
@@ -98,13 +116,29 @@ func (j *Job) Start() {
 		slog.Error("Run can't be called after Close: ignoring", "job_name", j.name)
 		return
 	}
-	j.start <- struct{}{}
-}
 
-func (j *Job) MergeConfig(cfg model.Scan) {
 	j.cfgMx.Lock()
 	defer j.cfgMx.Unlock()
-	j.config.Merge(cfg)
+	config := j.config
+
+	if j.overrideUsed {
+		j.configOverride = nil
+		j.overrideUsed = false
+	}
+	if j.configOverride != nil {
+		slog.Info("overriding config", "job_name", j.name, "override", *j.configOverride)
+		config = *j.configOverride
+		j.overrideUsed = true
+	}
+
+	j.start <- config
+}
+
+func (j *Job) ConfigOverride(cfg model.Scan) {
+	j.cfgMx.Lock()
+	defer j.cfgMx.Unlock()
+	j.configOverride = &cfg
+	j.overrideUsed = false
 }
 
 // Config returns a copy of the current job configuration.
@@ -112,7 +146,11 @@ func (j *Job) Config() model.Scan {
 	var cpy model.Scan
 
 	j.cfgMx.Lock()
-	cpy = j.config
+	if j.configOverride != nil {
+		cpy = *j.configOverride
+	} else {
+		cpy = j.config
+	}
 	j.cfgMx.Unlock()
 
 	return cpy
@@ -144,9 +182,9 @@ func (j *Job) Activate(ctx context.Context) error {
 			if j.oneshot {
 				return nil
 			}
-		case <-j.start:
+		case config := <-j.start:
 			slog.DebugContext(ctx, "about to start")
-			if err := j.callStart(ctx); err != nil {
+			if err := j.callStart(ctx, config); err != nil {
 				r := j.runner.LastResult()
 				r.Err = err
 				j.resultsChan <- r
@@ -158,12 +196,10 @@ func (j *Job) Activate(ctx context.Context) error {
 	}
 }
 
-func (j *Job) callStart(ctx context.Context) error {
-	j.cfgMx.Lock()
-	defer j.cfgMx.Unlock()
+func (j *Job) callStart(ctx context.Context, config model.Scan) error {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
-	err := enc.Encode(j.config)
+	err := enc.Encode(config)
 	if err != nil {
 		return fmt.Errorf("encoding configuration for scan: %w", err)
 	}
