@@ -3,18 +3,18 @@ package model
 import "iter"
 
 const (
-	StatsSourcesTotal   = "/sources/total"
-	StatsSourcesSkipped = "/sources/skipped"
-	StatsFilesTotal     = "/files/total"
-	StatsFilesExcluded  = "/files/excluded"
-	StatsFilesSkipped   = "/files/skipped"
+	StatsSourcesTotal  = "/sources/total"
+	StatsErrSkipped    = "/sources/err"
+	StatsFilesTotal    = "/files/total"
+	StatsFilesExcluded = "/files/excluded"
+	StatsFilesErr      = "/files/err"
 )
 
 type Stats interface {
 	IncSources()
-	IncSkippedSources()
+	IncErrSources()
 	IncFiles()
 	IncExcludedFiles()
-	IncSkippedFiles()
+	IncErrFiles()
 	Stats() iter.Seq2[string, string]
 }

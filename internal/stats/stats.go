@@ -14,17 +14,17 @@ import (
 // these values are available at /debug/vars.
 //
 // - /cbom-lens/sources/total — count of all top-level sources (filesystem roots, Docker engines, Nmap)
-// - /cbom-lens/sources/skipped — top-level sources that could not be accessed (e.g., Nmap scan failure)
+// - /cbom-lens/sources/err — top-level sources that could not be accessed (e.g., Nmap scan failure)
 // - /cbom-lens/files/total — total file paths considered across all sources
 // - /cbom-lens/files/excluded — files successfully accessed but excluded (e.g., size limit, ignore rules)
-// - /cbom-lens/files/skipped — files that could not be accessed (e.g., open/read/permission errors)
+// - /cbom-lens/files/errors — files that could not be accessed (e.g., open/read/permission errors)
 type Stats struct {
-	prefix         string
-	totalSources   *expvar.Int
-	skippedSources *expvar.Int
-	totalFiles     *expvar.Int
-	skippedFiles   *expvar.Int
-	excludedFiles  *expvar.Int
+	prefix        string
+	totalSources  *expvar.Int
+	errSources    *expvar.Int
+	totalFiles    *expvar.Int
+	errFiles      *expvar.Int
+	excludedFiles *expvar.Int
 }
 
 var _ model.Stats = (*Stats)(nil)
@@ -32,20 +32,20 @@ var _ model.Stats = (*Stats)(nil)
 // New publishes new set of metrics. Registering the same metrics twice causes panic, so for tests, the prefix should be unique.
 func New(prefix string) *Stats {
 	return &Stats{
-		prefix:         prefix,
-		totalSources:   expvar.NewInt(prefix + model.StatsSourcesTotal),
-		skippedSources: expvar.NewInt(prefix + model.StatsSourcesSkipped),
-		totalFiles:     expvar.NewInt(prefix + model.StatsFilesTotal),
-		excludedFiles:  expvar.NewInt(prefix + model.StatsFilesExcluded),
-		skippedFiles:   expvar.NewInt(prefix + model.StatsFilesSkipped),
+		prefix:        prefix,
+		totalSources:  expvar.NewInt(prefix + model.StatsSourcesTotal),
+		errSources:    expvar.NewInt(prefix + model.StatsErrSkipped),
+		totalFiles:    expvar.NewInt(prefix + model.StatsFilesTotal),
+		excludedFiles: expvar.NewInt(prefix + model.StatsFilesExcluded),
+		errFiles:      expvar.NewInt(prefix + model.StatsFilesErr),
 	}
 }
 
 func (s *Stats) IncSources() {
 	s.totalSources.Add(1)
 }
-func (s *Stats) IncSkippedSources() {
-	s.skippedSources.Add(1)
+func (s *Stats) IncErrSources() {
+	s.errSources.Add(1)
 }
 func (s *Stats) IncFiles() {
 	s.totalFiles.Add(1)
@@ -53,8 +53,8 @@ func (s *Stats) IncFiles() {
 func (s *Stats) IncExcludedFiles() {
 	s.excludedFiles.Add(1)
 }
-func (s *Stats) IncSkippedFiles() {
-	s.skippedFiles.Add(1)
+func (s *Stats) IncErrFiles() {
+	s.errFiles.Add(1)
 }
 
 // Stats returns a name, value iterator across registered metrics. This uses expvar.Do under the hood, so is safe to be called concurrently.
@@ -62,7 +62,7 @@ func (s Stats) Stats() iter.Seq2[string, string] {
 	var doBreak bool
 	return func(yield func(string, string) bool) {
 		expvar.Do(func(kv expvar.KeyValue) {
-			if doBreak || !strings.HasPrefix(kv.Key, s.prefix) {
+			if doBreak || !strings.HasPrefix(kv.Key, s.prefix+"/") {
 				return
 			}
 			if !yield(kv.Key, kv.Value.String()) {

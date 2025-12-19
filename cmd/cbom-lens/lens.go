@@ -27,8 +27,8 @@ import (
 type Lens struct {
 	config      model.Scan
 	detectors   []service.Detector
-	filesystems iter.Seq2[walk.Entry, error]
-	containers  iter.Seq2[walk.Entry, error]
+	filesystems iter.Seq2[model.Entry, error]
+	containers  iter.Seq2[model.Entry, error]
 	nmaps       []nmap.Scanner
 	ips         []netip.Addr
 	converter   cdxprops.Converter
@@ -159,7 +159,7 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 	return nil
 }
 
-func goScan(ctx context.Context, scanner *service.Scan, seq iter.Seq2[walk.Entry, error], detections chan<- model.Detection) {
+func goScan(ctx context.Context, scanner *service.Scan, seq iter.Seq2[model.Entry, error], detections chan<- model.Detection) {
 	for results, err := range scanner.Do(ctx, seq) {
 		if err != nil {
 			slog.DebugContext(ctx, "error on filesystem scan", "error", err)
@@ -176,7 +176,7 @@ func (s Lens) nmapScan(ctx context.Context, scanner nmap.Scanner, ip netip.Addr,
 	nmapScan, err := scanner.Scan(ctx, ip)
 	if err != nil {
 		slog.ErrorContext(ctx, "nmap scan failed", "error", err)
-		s.counter.IncSkippedSources()
+		s.counter.IncErrSources()
 		return
 	}
 	d := c.Nmap(ctx, nmapScan)
@@ -187,8 +187,8 @@ func (s Lens) nmapScan(ctx context.Context, scanner nmap.Scanner, ip netip.Addr,
 	detections <- *d
 }
 
-func filesystems(ctx context.Context, counter model.Stats, cfg model.Filesystem) (iter.Seq2[walk.Entry, error], error) {
-	var filesystems iter.Seq2[walk.Entry, error]
+func filesystems(ctx context.Context, counter model.Stats, cfg model.Filesystem) (iter.Seq2[model.Entry, error], error) {
+	var filesystems iter.Seq2[model.Entry, error]
 	if !cfg.Enabled {
 		return filesystems, nil
 	}
@@ -208,7 +208,7 @@ func filesystems(ctx context.Context, counter model.Stats, cfg model.Filesystem)
 		root, err := os.OpenRoot(path)
 		if err != nil {
 			slog.WarnContext(ctx, "can't open dir, skipping", "dir", path, "error", err)
-			counter.IncSkippedSources()
+			counter.IncErrSources()
 			continue
 		}
 		roots = append(roots, root)
@@ -217,7 +217,7 @@ func filesystems(ctx context.Context, counter model.Stats, cfg model.Filesystem)
 	return ret, nil
 }
 
-func containers(ctx context.Context, counter model.Stats, config model.Containers) iter.Seq2[walk.Entry, error] {
+func containers(ctx context.Context, counter model.Stats, config model.Containers) iter.Seq2[model.Entry, error] {
 	if !config.Enabled {
 		return nil
 	}

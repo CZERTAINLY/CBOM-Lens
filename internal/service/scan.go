@@ -12,7 +12,6 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/log"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/parallel"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 )
 
 // Detector provides content analysis for a single file.
@@ -81,11 +80,11 @@ func New(limit int, counter model.Stats, detectors []Detector) *Scan {
 // 2. If is bigger than 10MB, it's ignored and ErrTooBig is returned
 // 3. Otherwise the data are passed to the worker pool for running a detections
 // 4. Returns an iterator with a detections or Open/Read error or a ErrNoMatch if not match is found
-func (s *Scan) Do(parentCtx context.Context, seq iter.Seq2[walk.Entry, error]) iter.Seq2[[]model.Detection, error] {
+func (s *Scan) Do(parentCtx context.Context, seq iter.Seq2[model.Entry, error]) iter.Seq2[[]model.Detection, error] {
 	return parallel.NewMap(parentCtx, s.limit, s.scan).Iter(seq)
 }
 
-func (s *Scan) scan(ctx context.Context, entry walk.Entry) ([]model.Detection, error) {
+func (s *Scan) scan(ctx context.Context, entry model.Entry) ([]model.Detection, error) {
 	ctx = log.ContextAttrs(ctx, slog.String("path", entry.Path()))
 	slog.DebugContext(ctx, "scanning")
 	if ctx.Err() != nil {
@@ -93,7 +92,7 @@ func (s *Scan) scan(ctx context.Context, entry walk.Entry) ([]model.Detection, e
 	}
 	info, err := entry.Stat()
 	if err != nil {
-		s.counter.IncSkippedFiles()
+		s.counter.IncErrFiles()
 		return nil, fmt.Errorf("scan Stat: %w", err)
 	}
 	if info.Size() > s.skipIfBigger {
@@ -104,7 +103,7 @@ func (s *Scan) scan(ctx context.Context, entry walk.Entry) ([]model.Detection, e
 
 	f, err := entry.Open()
 	if err != nil {
-		s.counter.IncSkippedFiles()
+		s.counter.IncErrFiles()
 		return nil, fmt.Errorf("scan Open: %w", err)
 	}
 	defer func() {
@@ -116,7 +115,7 @@ func (s *Scan) scan(ctx context.Context, entry walk.Entry) ([]model.Detection, e
 	clear(buf)
 	n, err := f.Read(buf)
 	if err != nil {
-		s.counter.IncSkippedFiles()
+		s.counter.IncErrFiles()
 		s.poolPutErrCounter.Add(1)
 		s.pool.Put(bp)
 		return nil, fmt.Errorf("scan ReadAll: %w", err)

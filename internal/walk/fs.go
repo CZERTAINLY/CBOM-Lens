@@ -13,8 +13,8 @@ import (
 )
 
 // Roots is a convenience wrapper around FS for os.Root. See FS for details.
-func Roots(ctx context.Context, counter model.Stats, roots ...*os.Root) iter.Seq2[Entry, error] {
-	return func(yield func(Entry, error) bool) {
+func Roots(ctx context.Context, counter model.Stats, roots ...*os.Root) iter.Seq2[model.Entry, error] {
+	return func(yield func(model.Entry, error) bool) {
 		for _, root := range roots {
 			for entry, err := range FS(ctx, counter, root.FS(), root.Name()) {
 				if !yield(entry, err) {
@@ -27,15 +27,15 @@ func Roots(ctx context.Context, counter model.Stats, roots ...*os.Root) iter.Seq
 
 // FS recursively walks the filesystem rooted at root and return a handle for every regular file found.
 // Or an error if file information retrieval fails.
-// Each Entry's Path() is prefixed with name of a filesystem. In most cases it'll be an absolute
+// Each model.Entry's Path() is prefixed with name of a filesystem. In most cases it'll be an absolute
 // path to the file. It does not follow symlinks.
-func FS(ctx context.Context, counter model.Stats, root fs.FS, name string) iter.Seq2[Entry, error] {
+func FS(ctx context.Context, counter model.Stats, root fs.FS, name string) iter.Seq2[model.Entry, error] {
 	if root == nil {
 		slog.WarnContext(ctx, "root is nil: not iterating")
 		return nil
 	}
 
-	return func(yield func(Entry, error) bool) {
+	return func(yield func(model.Entry, error) bool) {
 		fn := func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return fs.SkipAll
@@ -54,7 +54,7 @@ func FS(ctx context.Context, counter model.Stats, root fs.FS, name string) iter.
 			} else {
 				info, err := d.Info()
 				if err != nil {
-					counter.IncExcludedFiles()
+					counter.IncErrFiles()
 					entry.infoErr = err
 					yieldErr = err
 				} else {
@@ -78,7 +78,7 @@ func FS(ctx context.Context, counter model.Stats, root fs.FS, name string) iter.
 	}
 }
 
-// fsEntry implements Entry for a filesystem
+// fsEntry implements model.Entry for a filesystem
 // it uses root.Open to open the file
 type fsEntry struct {
 	root    fs.FS
