@@ -96,7 +96,7 @@ func (s *Scan) scan(ctx context.Context, entry model.Entry) ([]model.Detection, 
 		return nil, fmt.Errorf("scan Stat: %w", err)
 	}
 	if info.Size() > s.skipIfBigger {
-		slog.DebugContext(ctx, "excluded to big", "path", entry.Path(), "size", info.Size())
+		slog.DebugContext(ctx, "excluded too big", "path", entry.Path(), "size", info.Size())
 		s.counter.IncExcludedFiles()
 		return nil, fmt.Errorf("entry too big (%d bytes): %w", info.Size(), model.ErrTooBig)
 	}

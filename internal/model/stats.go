@@ -4,7 +4,7 @@ import "iter"
 
 const (
 	StatsSourcesTotal  = "/sources/total"
-	StatsErrSkipped    = "/sources/err"
+	StatsErrSources    = "/sources/err"
 	StatsFilesTotal    = "/files/total"
 	StatsFilesExcluded = "/files/excluded"
 	StatsFilesErr      = "/files/err"

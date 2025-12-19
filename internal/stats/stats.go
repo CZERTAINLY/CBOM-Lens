@@ -17,7 +17,7 @@ import (
 // - /cbom-lens/sources/err — top-level sources that could not be accessed (e.g., Nmap scan failure)
 // - /cbom-lens/files/total — total file paths considered across all sources
 // - /cbom-lens/files/excluded — files successfully accessed but excluded (e.g., size limit, ignore rules)
-// - /cbom-lens/files/errors — files that could not be accessed (e.g., open/read/permission errors)
+// - /cbom-lens/files/err — files that could not be accessed (e.g., open/read/permission errors)
 type Stats struct {
 	prefix        string
 	totalSources  *expvar.Int
