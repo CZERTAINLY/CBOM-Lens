@@ -93,6 +93,13 @@ func (c Converter) CertHit(ctx context.Context, hit model.CertHit) *model.Detect
 	}
 }
 
+// Nmap converts nmap port scanning results into detections with CycloneDX components, dependencies and services.
+//
+// The function attempts to resolve the system hostname for the location field, instead of using 127.0.0.1 (localhost).
+// This will change in future when nmap scans multiple hosts.
+//
+// Returns nil if an error is encountered during processing.
+// For empty nmap port scanning results, empty slice (not nil) is returned.
 func (c Converter) Nmap(ctx context.Context, nmap model.Nmap) []model.Detection {
 
 	hostname, err := os.Hostname()
@@ -100,8 +107,8 @@ func (c Converter) Nmap(ctx context.Context, nmap model.Nmap) []model.Detection 
 		hostname = "N/A"
 	}
 
-	var detections []model.Detection
-	for _, port := range nmap.Ports {
+	detections := make([]model.Detection, len(nmap.Ports))
+	for i, port := range nmap.Ports {
 		compos, deps, services, err := c.parseNmap(ctx, port)
 
 		if err != nil {
@@ -109,14 +116,14 @@ func (c Converter) Nmap(ctx context.Context, nmap model.Nmap) []model.Detection 
 			return nil
 		}
 
-		detections = append(detections, model.Detection{
+		detections[i] = model.Detection{
 			Source:       "NMAP",
 			Type:         model.DetectionTypePort,
 			Location:     hostname + ":" + strconv.Itoa(port.PortNumber),
 			Components:   compos,
 			Dependencies: deps,
 			Services:     services,
-		})
+		}
 	}
 
 	return detections
