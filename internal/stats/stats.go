@@ -34,7 +34,7 @@ func New(prefix string) *Stats {
 	return &Stats{
 		prefix:        prefix,
 		totalSources:  expvar.NewInt(prefix + model.StatsSourcesTotal),
-		errSources:    expvar.NewInt(prefix + model.StatsErrSkipped),
+		errSources:    expvar.NewInt(prefix + model.StatsErrSources),
 		totalFiles:    expvar.NewInt(prefix + model.StatsFilesTotal),
 		excludedFiles: expvar.NewInt(prefix + model.StatsFilesExcluded),
 		errFiles:      expvar.NewInt(prefix + model.StatsFilesErr),

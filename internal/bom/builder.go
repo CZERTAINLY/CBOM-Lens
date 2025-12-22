@@ -206,8 +206,6 @@ func addEvidenceLocation(c *cdx.Component, locations ...string) {
 
 func bomStatistics(counter model.Stats) []cdx.Property {
 	stats := counter.Stats()
-	props := make([]cdx.Property, 0, len(stats))
-
 	for _, name := range slices.Sorted(maps.Keys(stats)) {
 		props = append(props, cdx.Property{
 			Name:  name,
