@@ -149,7 +149,66 @@ By combining evidence with stable `bom-ref` identifiers, analysis tools can:
 
 ---
 
-## 7. Next steps
+## 7. Metric Definitions
+
+### 7.1. Sources
+
+- **cbom_lens_sources_total**: Tracks each top-level source that the scanner attempts to process. This includes:
+  - Filesystem root directories
+  - Docker engines
+  - Nmap scan targets
+
+- **cbom_lens_sources_errors**: Counts sources that failed at initialization or access level, preventing any scanning of their contents. This includes:
+  - Filesystem does not exists or not accessbile
+  - Container engine can't be accessed
+  - Nmap binary is missing or can't be executed
+  - Other unspecified errors
+
+### 7.2. Files
+
+- **cbom_lens_files_total**: Counts every file path encountered during the scan, regardless of whether it was successfully processed, excluded, or errored.
+
+- **cbom_lens_files_excluded**: Tracks files that were successfully accessed but intentionally skipped based on:
+  - File size limits
+  - Ignore patterns or rules
+  - Other exclusion criteria
+
+- **cbom_lens_files_errors**: Counts files that could not be read or accessed due to:
+  - Permission errors
+  - File open failures
+  - Read errors
+  - Other I/O problems
+
+### 7.3. Example in CBOM
+
+```json
+"properties": [
+  {
+    "name": "cbom_lens_files_errors",
+    "value": "0"
+  },
+  {
+    "name": "cbom_lens_files_excluded",
+    "value": "0"
+  },
+  {
+    "name": "cbom_lens_files_total",
+    "value": "3"
+  },
+  {
+    "name": "cbom_lens_sources_errors",
+    "value": "0"
+  },
+  {
+    "name": "cbom_lens_sources_total",
+    "value": "1"
+  }
+]
+```
+
+---
+
+## 8. Next steps
 
 - For scanning use cases and strategies: see [Scanning use cases & best practices](scanning-use-cases.md).
 - For configuration details: see the [Configuration guide](configuration.md) and [Configuration reference](config.md).
