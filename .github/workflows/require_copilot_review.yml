@@ -2,6 +2,8 @@ name: Require Copilot Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    branches-ignore:
+      - 'renovate/**' # skip renovate bot PRs
 
 permissions:
   contents: read
