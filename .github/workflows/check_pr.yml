@@ -56,7 +56,7 @@ jobs:
           cat pr-context.json
 
       - name: Upload PR context
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: pr-context
           path: pr-context.json
@@ -64,14 +64,14 @@ jobs:
           if-no-files-found: error
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-report
           path: coverage.*.out
           if-no-files-found: error
 
       - name: Upload golangci-lint report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: golangci-lint-report
           path: golangci-lint-report.xml

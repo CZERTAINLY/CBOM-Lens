@@ -101,7 +101,7 @@ jobs:
           cat "SHA256SUMS-${NAME}.txt"
 
       - name: Upload artifact (${{ matrix.goos }}/${{ matrix.goarch }})
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.APP_NAME }}-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
