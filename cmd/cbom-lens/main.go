@@ -16,6 +16,7 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/log"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -163,7 +164,8 @@ func doScan(cmd *cobra.Command, args []string) error {
 	slog.DebugContext(ctx, "_scan", "configPath", configPath)
 	slog.DebugContext(ctx, "_scan", "config", config)
 
-	lens, err := NewLens(ctx, config)
+	counter := stats.New("cbom_lens")
+	lens, err := NewLens(ctx, counter, config)
 	if err != nil {
 		return err
 	}

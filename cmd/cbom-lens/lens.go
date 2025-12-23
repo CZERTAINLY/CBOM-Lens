@@ -18,6 +18,7 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/x509"
 	"github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"golang.org/x/sync/errgroup"
@@ -27,26 +28,27 @@ import (
 type Lens struct {
 	config      model.Scan
 	detectors   []service.Detector
-	filesystems iter.Seq2[walk.Entry, error]
-	containers  iter.Seq2[walk.Entry, error]
+	filesystems iter.Seq2[model.Entry, error]
+	containers  iter.Seq2[model.Entry, error]
 	nmaps       []nmap.Scanner
 	ips         []netip.Addr
 	converter   cdxprops.Converter
+	counter     *stats.Stats
 }
 
-func NewLens(ctx context.Context, config model.Scan) (Lens, error) {
+func NewLens(ctx context.Context, counter *stats.Stats, config model.Scan) (Lens, error) {
 	if config.Version != 0 {
 		return Lens{}, fmt.Errorf("config version %d is not supported, expected 0", config.Version)
 	}
 
 	// initialize inputs (filesystem, containers)
-	filesystems, err := filesystems(ctx, config.Filesystem)
+	filesystems, err := filesystems(ctx, counter, config.Filesystem)
 	if err != nil {
 		slog.WarnContext(ctx, "initializing filesytem scan failed", "error", err)
 		filesystems = nil
 	}
 
-	containers := containers(ctx, config.Containers)
+	containers := containers(ctx, counter, config.Containers)
 
 	// initialize nmap scanner
 	nmaps, ips := nmaps(ctx, config.Ports)
@@ -97,6 +99,7 @@ func NewLens(ctx context.Context, config model.Scan) (Lens, error) {
 		nmaps:       nmaps,
 		ips:         ips,
 		converter:   converter,
+		counter:     counter,
 	}, nil
 }
 
@@ -119,7 +122,7 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 	// TODO: configure a parallelism
 	// filesystem scanners
 	if s.filesystems != nil {
-		scanner := service.New(4, s.detectors)
+		scanner := service.New(4, s.counter, s.detectors)
 		g.Go(func() error {
 			goScan(ctx, scanner, s.filesystems, detections)
 			return nil
@@ -128,7 +131,7 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 
 	// containers scanners
 	if s.containers != nil {
-		scanner := service.New(2, s.detectors)
+		scanner := service.New(2, s.counter, s.detectors)
 		g.Go(func() error {
 			goScan(ctx, scanner, s.containers, detections)
 			return nil
@@ -139,7 +142,7 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 	for _, ip := range s.ips {
 		g.Go(func() error {
 			for _, n := range s.nmaps {
-				nmapScan(ctx, n, ip, s.converter, detections)
+				s.nmapScan(ctx, n, ip, s.converter, detections)
 			}
 			return nil
 		})
@@ -149,6 +152,7 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 	close(detections)
 
 	<-processed
+	b = b.WithCounter(s.counter)
 	err = b.AsJSON(out)
 	if err != nil {
 		return fmt.Errorf("formatting BOM as JSON: %w", err)
@@ -156,7 +160,7 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 	return nil
 }
 
-func goScan(ctx context.Context, scanner *service.Scan, seq iter.Seq2[walk.Entry, error], detections chan<- model.Detection) {
+func goScan(ctx context.Context, scanner *service.Scan, seq iter.Seq2[model.Entry, error], detections chan<- model.Detection) {
 	for results, err := range scanner.Do(ctx, seq) {
 		if err != nil {
 			slog.DebugContext(ctx, "error on filesystem scan", "error", err)
@@ -168,10 +172,12 @@ func goScan(ctx context.Context, scanner *service.Scan, seq iter.Seq2[walk.Entry
 	}
 }
 
-func nmapScan(ctx context.Context, scanner nmap.Scanner, ip netip.Addr, c cdxprops.Converter, detections chan<- model.Detection) {
+func (s Lens) nmapScan(ctx context.Context, scanner nmap.Scanner, ip netip.Addr, c cdxprops.Converter, detections chan<- model.Detection) {
+	s.counter.IncSources()
 	nmapScan, err := scanner.Scan(ctx, ip)
 	if err != nil {
 		slog.ErrorContext(ctx, "nmap scan failed", "error", err)
+		s.counter.IncErrSources()
 		return
 	}
 	d := c.Nmap(ctx, nmapScan)
@@ -184,8 +190,8 @@ func nmapScan(ctx context.Context, scanner nmap.Scanner, ip netip.Addr, c cdxpro
 	}
 }
 
-func filesystems(ctx context.Context, cfg model.Filesystem) (iter.Seq2[walk.Entry, error], error) {
-	var filesystems iter.Seq2[walk.Entry, error]
+func filesystems(ctx context.Context, counter *stats.Stats, cfg model.Filesystem) (iter.Seq2[model.Entry, error], error) {
+	var filesystems iter.Seq2[model.Entry, error]
 	if !cfg.Enabled {
 		return filesystems, nil
 	}
@@ -201,23 +207,25 @@ func filesystems(ctx context.Context, cfg model.Filesystem) (iter.Seq2[walk.Entr
 
 	roots := make([]*os.Root, 0, len(paths))
 	for _, path := range paths {
+		counter.IncSources()
 		root, err := os.OpenRoot(path)
 		if err != nil {
 			slog.WarnContext(ctx, "can't open dir, skipping", "dir", path, "error", err)
+			counter.IncErrSources()
 			continue
 		}
 		roots = append(roots, root)
 	}
-	ret := walk.Roots(ctx, roots...)
+	ret := walk.Roots(ctx, counter, roots...)
 	return ret, nil
 }
 
-func containers(ctx context.Context, config model.Containers) iter.Seq2[walk.Entry, error] {
+func containers(ctx context.Context, counter *stats.Stats, config model.Containers) iter.Seq2[model.Entry, error] {
 	if !config.Enabled {
 		return nil
 	}
 
-	ret := walk.Images(ctx, config.Config)
+	ret := walk.Images(ctx, counter, config.Config)
 	return ret
 }
 

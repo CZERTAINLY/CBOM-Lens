@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	scan "github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
 
 	"github.com/stretchr/testify/mock"
@@ -51,10 +56,10 @@ func TestScanner_Do(t *testing.T) {
 		Times(2)
 
 	detectors := []scan.Detector{noMatch, isScript}
-	scanner := scan.New(4, detectors)
-
+	counter := stats.New(t.Name())
+	scanner := scan.New(4, counter, detectors)
 	detections := make([]model.Detection, 0, 10)
-	for detection, err := range scanner.Do(t.Context(), walk.FS(t.Context(), root, "fstest::")) {
+	for detection, err := range scanner.Do(t.Context(), walk.FS(t.Context(), counter, root, "fstest::")) {
 		if errors.Is(err, model.ErrNoMatch) {
 			continue
 		}
@@ -64,8 +69,75 @@ func TestScanner_Do(t *testing.T) {
 
 	require.Len(t, detections, 1)
 	require.Equal(t, "fstest::/is-script", detections[0].Location)
-	stats := scanner.Stats()
-	require.NotNil(t, stats)
+	istats := scanner.Stats()
+	require.NotNil(t, istats)
+	stats := maps.Collect(counter.Stats())
+	t.Logf("stats=%+v", stats)
+
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		switch {
+		case strings.HasSuffix(key, "files_total"):
+			exp = "2"
+		}
+		require.Equal(t, exp, value, key)
+	}
+}
+
+func TestScanner_Do_Permissions(t *testing.T) {
+	tempdir := t.TempDir()
+	root, err := os.OpenRoot(tempdir)
+	require.NoError(t, err)
+
+	err = root.Mkdir("a", 0o755)
+	require.NoError(t, err)
+	aTXT, err := root.Create("a/a.txt")
+	require.NoError(t, err)
+	_, err = aTXT.Write([]byte("hello a.txt\n"))
+	require.NoError(t, err)
+	err = root.Mkdir("a/b", 0o755)
+	require.NoError(t, err)
+	err = root.Mkdir("a/X", 0o755)
+	require.NoError(t, err)
+	xTXT, err := root.Create("a/X/X.txt")
+	require.NoError(t, err)
+	_, err = xTXT.Write([]byte("X.txt is not accessible\n"))
+	require.NoError(t, err)
+
+	// simulate permission denied error on a/X
+	err = os.Chmod(filepath.Join(tempdir, "a", "X", "X.txt"), 0x000)
+	require.NoError(t, err)
+	t.Cleanup(
+		func() {
+			err = os.Chmod(filepath.Join(tempdir, "a", "X", "X.txt"), 0o755)
+			require.NoError(t, err)
+		})
+
+	counter := stats.New(t.Name())
+	noMatch := NewMockDetector(t)
+	noMatch.On("Detect", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, model.ErrNoMatch).
+		Times(1)
+	scanner := scan.New(1, counter, []scan.Detector{noMatch})
+	require.NotNil(t, scanner)
+
+	seq := walk.Roots(t.Context(), counter, root)
+	// this is needed to process results
+	for detections, err := range scanner.Do(t.Context(), seq) {
+		t.Logf("detections: %+v", detections)
+		t.Logf("err=%+v", err)
+	}
+
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		switch {
+		case strings.HasSuffix(key, "files_total"):
+			exp = "2"
+		case strings.HasSuffix(key, "files_errors"):
+			exp = "1"
+		}
+		require.Equal(t, exp, value, key)
+	}
 }
 
 type MockDetector struct {

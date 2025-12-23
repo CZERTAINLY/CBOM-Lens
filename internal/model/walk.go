@@ -1,4 +1,4 @@
-package walk
+package model
 
 import (
 	"io"
