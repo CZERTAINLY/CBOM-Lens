@@ -2,8 +2,6 @@ name: Require Copilot Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches-ignore:
-      - 'renovate/**' # skip renovate bot PRs
 
 permissions:
   contents: read
@@ -12,9 +10,15 @@ permissions:
 
 jobs:
   gate:
-    if: ${{ !github.event.pull_request.draft }} # skip drafts
+    # skip drafts
+    # and skip PRs created by Renovate
+    if: >
+      !github.event.pull_request.draft &&
+      github.event.pull_request.user.login != 'renovate[bot]' &&
+      github.event.pull_request.user.login != 'self-hosted-renovate[bot]'
     name: Check for Copilot Review
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/github-script@v8
         with:
