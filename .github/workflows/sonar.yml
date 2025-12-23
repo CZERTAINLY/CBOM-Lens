@@ -73,7 +73,7 @@ jobs:
           git clean -ffdx && git reset --hard HEAD
 
       - name: Download coverage report artifact from upstream run
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: coverage-report
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -81,7 +81,7 @@ jobs:
           path: .
 
       - name: Download golangci-lint report artifact from upstream run
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: golangci-lint-report
           github-token: ${{ secrets.GITHUB_TOKEN }}
