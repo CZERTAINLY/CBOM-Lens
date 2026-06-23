@@ -324,6 +324,52 @@ func TestWalkKey_ReadValueNamesError_continuesSubkeys(t *testing.T) {
 	require.Len(t, errs, 1, "ReadValueNames error propagated")
 }
 
+func TestWalkKey_ReadSubKeyNamesError_hasHiveViewContext(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	key := mock.NewMockRegistryKey(ctrl)
+	key.EXPECT().ReadValueNames().Return([]string{}, nil)
+	key.EXPECT().ReadSubKeyNames().Return(nil, errors.New("access denied"))
+
+	cfg := model.Registry{MaxValueSize: 0}
+	c, _ := registry.Compile(cfg)
+	_, errs := collectWalk(context.Background(), key, `SOFTWARE\App`, "HKLM", "64", 0, cfg, c)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0].Error(), "HKLM:64/SOFTWARE/App")
+}
+
+func TestWalkKey_OpenSubKeyError_hasHiveViewContext(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	root := mock.NewMockRegistryKey(ctrl)
+	root.EXPECT().ReadValueNames().Return([]string{}, nil)
+	root.EXPECT().ReadSubKeyNames().Return([]string{"Child"}, nil)
+	root.EXPECT().OpenSubKey("Child").Return(nil, errors.New("access denied"))
+
+	cfg := model.Registry{MaxValueSize: 0}
+	c, _ := registry.Compile(cfg)
+	_, errs := collectWalk(context.Background(), root, `SOFTWARE`, "HKLM", "64", 0, cfg, c)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0].Error(), "HKLM:64/SOFTWARE/Child")
+}
+
+func TestWalkKey_StatName_rawUnescaped(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	key := mock.NewMockRegistryKey(ctrl)
+	key.EXPECT().ReadValueNames().Return([]string{"my cert"}, nil)
+	key.EXPECT().ReadValueType("my cert").Return(uint32(3), nil)
+	key.EXPECT().ReadBinaryValue("my cert").Return([]byte{0x01}, nil)
+	key.EXPECT().ReadSubKeyNames().Return([]string{}, nil)
+
+	cfg := model.Registry{MaxValueSize: 0}
+	c, _ := registry.Compile(cfg)
+	entries, _ := collectWalk(context.Background(), key, `SOFTWARE\App`, "HKLM", "64", 0, cfg, c)
+	require.Len(t, entries, 1)
+	// Location escapes the space, but Stat().Name() returns the raw value name.
+	assert.Equal(t, "registry://HKLM:64/SOFTWARE/App/my%20cert", entries[0].Location())
+	info, err := entries[0].Stat()
+	require.NoError(t, err)
+	assert.Equal(t, "my cert", info.Name())
+}
+
 func TestWalkKey_EmptyKeyPath_noLeadingBackslash(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	root := mock.NewMockRegistryKey(ctrl)

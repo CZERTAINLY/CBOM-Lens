@@ -598,9 +598,9 @@ func defaultRegistryPaths() []RegistryPath {
 }
 
 // fixRegistryConfig applies defaults to a Registry config. When the scanner is
-// enabled but no paths are given it falls back to scanning the HKLM and HKCU
-// hive roots, mirroring how an empty filesystem path list defaults to the
-// working directory rather than scanning nothing.
+// enabled but no paths are given it falls back to the curated crypto subtrees
+// from defaultRegistryPaths, mirroring how an empty filesystem path list
+// defaults to a sensible scan target rather than scanning nothing.
 func fixRegistryConfig(r *Registry) {
 	if r.Enabled && len(r.Paths) == 0 {
 		r.Paths = defaultRegistryPaths()
