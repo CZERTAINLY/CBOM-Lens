@@ -88,7 +88,7 @@ This section configures a Docker and other compatible container engine scan.
 Windows Registry scanning. Enabling this on non-Windows platforms produces an error. See the [Windows Registry scanning](registry-scanning.md) guide for usage examples.
 
 - `enabled` (bool, default false) Enable registry scanning.
-- `paths` (list of RegistryPath) Registry locations to scan.
+- `paths` (list of RegistryPath) Registry locations to scan. When empty, defaults to the `HKLM` and `HKCU` hive roots.
 - `max_depth` (int, default 0) Maximum subkey recursion depth. `0` = unlimited.
 - `max_value_size` (int, default 1048576) Skip values larger than this (bytes).
 - `wow64` (bool, default false) Scan both 64-bit and 32-bit registry views.
@@ -98,7 +98,7 @@ Windows Registry scanning. Enabling this on non-Windows platforms produces an er
 ### RegistryPath
 
 - `hive` (string, required) One of `HKLM`, `HKCU`, `HKCR`, `HKU`, `HKCC`.
-- `key` (string) Subkey path relative to the hive root.
+- `key` (string, optional) Subkey path relative to the hive root. Omitted or empty scans the entire hive.
 
 ### RegistryFilter
 

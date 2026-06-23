@@ -144,6 +144,21 @@ func (mr *MockRegistryKeyMockRecorder) ReadValueNames() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadValueNames", reflect.TypeOf((*MockRegistryKey)(nil).ReadValueNames))
 }
 
+// ReadValueSize mocks base method.
+func (m *MockRegistryKey) ReadValueSize(name string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadValueSize", name)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReadValueSize indicates an expected call of ReadValueSize.
+func (mr *MockRegistryKeyMockRecorder) ReadValueSize(name any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadValueSize", reflect.TypeOf((*MockRegistryKey)(nil).ReadValueSize), name)
+}
+
 // ReadValueType mocks base method.
 func (m *MockRegistryKey) ReadValueType(name string) (uint32, error) {
 	m.ctrl.T.Helper()

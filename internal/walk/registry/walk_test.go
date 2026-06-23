@@ -109,14 +109,29 @@ func TestWalkKey_MaxValueSize_skips(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	key := mock.NewMockRegistryKey(ctrl)
 	key.EXPECT().ReadValueNames().Return([]string{"big"}, nil)
-	key.EXPECT().ReadValueType("big").Return(uint32(3), nil)
-	key.EXPECT().ReadBinaryValue("big").Return(make([]byte, 10), nil)
+	// Size pre-check reports 10 bytes > 5 limit, so the value is skipped
+	// before convertValue — ReadValueType/ReadBinaryValue must NOT be called.
+	key.EXPECT().ReadValueSize("big").Return(int64(10), nil)
 	key.EXPECT().ReadSubKeyNames().Return([]string{}, nil)
 
 	cfg := model.Registry{MaxValueSize: 5} // 5 bytes max; value is 10
 	c, _ := registry.Compile(cfg)
 	entries, _ := collectWalk(context.Background(), key, `KEY`, "HKLM", "64", 0, cfg, c)
 	assert.Empty(t, entries)
+}
+
+func TestWalkKey_QWORD_skipped(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	key := mock.NewMockRegistryKey(ctrl)
+	key.EXPECT().ReadValueNames().Return([]string{"qword"}, nil)
+	key.EXPECT().ReadValueType("qword").Return(uint32(11), nil) // REG_QWORD = 11 — skipped
+	key.EXPECT().ReadSubKeyNames().Return([]string{}, nil)
+
+	cfg := model.Registry{MaxValueSize: 0}
+	c, _ := registry.Compile(cfg)
+	entries, errs := collectWalk(context.Background(), key, `KEY`, "HKLM", "64", 0, cfg, c)
+	assert.Empty(t, entries)
+	assert.Empty(t, errs)
 }
 
 func TestWalkKey_RecursesIntoSubkeys(t *testing.T) {

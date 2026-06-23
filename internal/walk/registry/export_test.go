@@ -5,5 +5,8 @@ package registry
 
 var Compile = compile
 var WalkKey = walkKey
+var WalkAll = walkAll
+var SelectViews = selectViews
+var BuildLocation = buildLocation
 
 type Compiled = compiled

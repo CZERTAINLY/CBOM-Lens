@@ -138,6 +138,15 @@ jobs:
           $json = Get-Content output.json | ConvertFrom-Json
           if ($null -eq $json.bomFormat) { Write-Error "Output is not a valid CBOM"; exit 1 }
           if ($json.components.Count -eq 0) { Write-Error "No components detected — registry scanner may not be working"; exit 1 }
+          # Prove provenance: the discovered component must trace back to the
+          # registry value we planted, not just be some unrelated component.
+          $locations = $json.components.evidence.occurrences.location
+          $fromRegistry = $locations | Where-Object { $_ -like "registry://HKCU*CBOMLensTest*PEMCert*" }
+          if ($null -eq $fromRegistry) {
+            Write-Error "No component traced to the planted registry value (registry://HKCU.../CBOMLensTest/PEMCert). Locations seen: $($locations -join ', ')"
+            exit 1
+          }
+          Write-Host "Verified: planted cert discovered at $fromRegistry"
 
       - name: Cleanup test registry key
         if: always()

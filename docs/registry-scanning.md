@@ -21,6 +21,15 @@ registry:
 
 This scans `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\SystemCertificates` and all subkeys for values that contain cryptographic material.
 
+When `paths` is omitted, the scanner walks the `HKLM` and `HKCU` hive roots by default — so enabling the scanner with no further configuration scans both the machine-wide and current-user hives:
+
+```yaml
+registry:
+  enabled: true
+```
+
+`HKCR` and `HKCC` are intentionally not scanned by default, since they are views of subtrees already reachable from `HKLM` and `HKU` and would only duplicate results. List them explicitly under `paths` if you need them.
+
 ---
 
 ## Configuration reference
@@ -30,7 +39,7 @@ This scans `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\SystemCertificates` and all su
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable registry scanning. |
-| `paths` | list of [RegistryPath](#registrypath) | `[]` | Registry locations to scan. |
+| `paths` | list of [RegistryPath](#registrypath) | `HKLM` + `HKCU` roots | Registry locations to scan. When empty, defaults to the `HKLM` and `HKCU` hive roots. |
 | `max_depth` | int | `0` | Maximum subkey recursion depth. `0` means unlimited. |
 | `max_value_size` | int | `1048576` | Skip values larger than this (bytes). Default is 1 MB. |
 | `wow64` | bool | `false` | When `true`, scan both the 64-bit and 32-bit registry views on 64-bit Windows. |
@@ -42,7 +51,7 @@ This scans `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\SystemCertificates` and all su
 | Field | Type | Description |
 |-------|------|-------------|
 | `hive` | string | Registry hive. One of `HKLM`, `HKCU`, `HKCR`, `HKU`, `HKCC`. |
-| `key` | string | Subkey path relative to the hive root (backslash-separated). Empty string scans the entire hive. |
+| `key` | string (optional) | Subkey path relative to the hive root (backslash-separated). Omitted or empty scans the entire hive. |
 
 ### `RegistryFilter`
 

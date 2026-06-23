@@ -319,6 +319,7 @@ func LoadConfig(r io.Reader) (Config, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -328,6 +329,7 @@ func LoadConfigFromPath(path string) (Config, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -339,6 +341,7 @@ func LoadScanConfig(r io.Reader) (Scan, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -348,6 +351,7 @@ func LoadScanConfigFromPath(path string) (Scan, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -573,6 +577,28 @@ func fixContainersConfig(configs ContainersConfig) {
 	for idx := range configs {
 		host := configs[idx].Host
 		configs[idx].Host = fixDockerHost(host)
+	}
+}
+
+// defaultRegistryPaths are scanned when the registry scanner is enabled but no
+// explicit paths are configured. HKLM and HKCU cover machine-wide and
+// current-user crypto material; HKCR and HKCC are views of subtrees already
+// reachable from those two, so scanning them as well would only duplicate
+// results. An empty Key means the hive root is walked.
+func defaultRegistryPaths() []RegistryPath {
+	return []RegistryPath{
+		{Hive: "HKLM", Key: ""},
+		{Hive: "HKCU", Key: ""},
+	}
+}
+
+// fixRegistryConfig applies defaults to a Registry config. When the scanner is
+// enabled but no paths are given it falls back to scanning the HKLM and HKCU
+// hive roots, mirroring how an empty filesystem path list defaults to the
+// working directory rather than scanning nothing.
+func fixRegistryConfig(r *Registry) {
+	if r.Enabled && len(r.Paths) == 0 {
+		r.Paths = defaultRegistryPaths()
 	}
 }
 

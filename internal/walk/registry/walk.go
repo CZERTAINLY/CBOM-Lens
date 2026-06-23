@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 )
 
 // Windows REG_* type constants. These are fixed Windows API values.
@@ -19,6 +21,8 @@ const (
 	regExpandSZ uint32 = 2
 	regBinary   uint32 = 3
 	regMultiSZ  uint32 = 7
+	regDWORD    uint32 = 4
+	regQWORD    uint32 = 11
 )
 
 // compiled holds pre-compiled regex filters.
@@ -129,6 +133,21 @@ func walkKey(
 			if !valueAllowed(name, c) {
 				continue
 			}
+			// Skip oversized values before reading them into memory. The
+			// Windows API reports the value size without allocating the data,
+			// so this caps memory use rather than allocating then discarding.
+			if cfg.MaxValueSize > 0 {
+				size, err := key.ReadValueSize(name)
+				if err != nil {
+					if !yield(nil, fmt.Errorf("%s:%s/%s: %w", hive, view, normPath, err)) {
+						return false
+					}
+					continue
+				}
+				if size > int64(cfg.MaxValueSize) {
+					continue
+				}
+			}
 			data, ok, err := convertValue(key, name)
 			if err != nil {
 				if !yield(nil, fmt.Errorf("%s:%s/%s: %w", hive, view, normPath, err)) {
@@ -139,18 +158,12 @@ func walkKey(
 			if !ok {
 				continue // unsupported type — silently skip
 			}
+			// Exact post-read guard: the pre-read size is a byte count that for
+			// string types differs from the converted UTF-8 length, so re-check.
 			if cfg.MaxValueSize > 0 && len(data) > cfg.MaxValueSize {
 				continue
 			}
-			locationName := name
-			if locationName == "" {
-				locationName = "(Default)"
-			}
-			location := fmt.Sprintf("registry://%s:%s/%s/%s", hive, view, normPath, locationName)
-			if normPath == "" {
-				location = fmt.Sprintf("registry://%s:%s/%s", hive, view, locationName)
-			}
-			entry := registryEntry{location: location, data: data}
+			entry := registryEntry{location: buildLocation(hive, view, normPath, name), data: data}
 			if !yield(entry, nil) {
 				return false
 			}
@@ -226,8 +239,108 @@ func convertValue(key RegistryKey, name string) ([]byte, bool, error) {
 			return nil, false, fmt.Errorf("registry: ReadStringsValue %s: %w", name, err)
 		}
 		return []byte(strings.Join(ss, "\n")), true, nil
+	case regDWORD, regQWORD:
+		// Numeric scalar types cannot hold certificates, keys, or PEM/DER
+		// blobs, so they are intentionally excluded from crypto discovery.
+		return nil, false, nil
 	default:
 		return nil, false, nil // unsupported type — silently skip
+	}
+}
+
+// buildLocation renders the registry:// URI for a value. Each key-path segment
+// and the value name are percent-escaped so names containing spaces or reserved
+// characters (#, ?, %, …) still produce a parseable URI. The synthetic
+// "(Default)" label for the unnamed default value is emitted verbatim.
+func buildLocation(hive, view, normPath, name string) string {
+	var sb strings.Builder
+	sb.WriteString("registry://")
+	sb.WriteString(hive)
+	sb.WriteByte(':')
+	sb.WriteString(view)
+	if normPath != "" {
+		for _, seg := range strings.Split(normPath, "/") {
+			sb.WriteByte('/')
+			sb.WriteString(url.PathEscape(seg))
+		}
+	}
+	sb.WriteByte('/')
+	if name == "" {
+		sb.WriteString("(Default)")
+	} else {
+		sb.WriteString(url.PathEscape(name))
+	}
+	return sb.String()
+}
+
+// regView identifies a registry view to scan. access holds the platform's
+// KEY_WOW64_* access mask; label is the URI token ("64" or "32").
+type regView struct {
+	access uint32
+	label  string
+}
+
+// selectViews returns the registry views to scan. The 64-bit view is always
+// included; the 32-bit view is appended only when WOW64 dual scanning is
+// enabled. The access masks are passed in so this stays platform-neutral and
+// unit-testable.
+func selectViews(cfg model.Registry, access64, access32 uint32) []regView {
+	views := []regView{{access: access64, label: "64"}}
+	if cfg.WOW64 {
+		views = append(views, regView{access: access32, label: "32"})
+	}
+	return views
+}
+
+// walkAll is the platform-neutral orchestration behind Walk: for each
+// configured path and view it opens the root key via open, walks it, updates
+// counter, and yields entries/errors. Per-path open errors are non-fatal and
+// skip to the next path/view. Extracted from the Windows Walk so the path/view
+// iteration can be unit-tested with a fake opener.
+func walkAll(
+	ctx context.Context,
+	counter *stats.Stats,
+	cfg model.Registry,
+	views []regView,
+	open func(hive, key string, access uint32) (RegistryKey, error),
+	yield func(model.Entry, error) bool,
+) {
+	if !cfg.Enabled {
+		return
+	}
+	c, err := compile(cfg)
+	if err != nil {
+		yield(nil, err)
+		return
+	}
+	for _, p := range cfg.Paths {
+		for _, view := range views {
+			if ctx.Err() != nil {
+				return
+			}
+			counter.IncSources()
+			k, err := open(p.Hive, p.Key, view.access)
+			if err != nil {
+				counter.IncErrSources()
+				if !yield(nil, fmt.Errorf("registry: open %s\\%s: %w", p.Hive, p.Key, err)) {
+					return
+				}
+				continue
+			}
+			countingYield := func(entry model.Entry, err error) bool {
+				if err != nil {
+					counter.IncErrFiles()
+				} else {
+					counter.IncFiles()
+				}
+				return yield(entry, err)
+			}
+			cont := walkKey(ctx, k, p.Key, p.Hive, view.label, 0, cfg, c, countingYield)
+			k.Close()
+			if !cont {
+				return
+			}
+		}
 	}
 }
 

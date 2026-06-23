@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"log/slog"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
@@ -26,6 +27,11 @@ func (w windowsKey) ReadValueNames() ([]string, error) {
 func (w windowsKey) ReadValueType(name string) (uint32, error) {
 	_, valType, err := w.k.GetValue(name, nil)
 	return valType, err
+}
+
+func (w windowsKey) ReadValueSize(name string) (int64, error) {
+	n, _, err := w.k.GetValue(name, nil)
+	return int64(n), err
 }
 
 func (w windowsKey) ReadBinaryValue(name string) ([]byte, error) {
@@ -84,60 +90,21 @@ func Walk(ctx context.Context, counter *stats.Stats, cfg model.Registry) iter.Se
 		if !cfg.Enabled {
 			return
 		}
-		c, err := compile(cfg)
-		if err != nil {
-			yield(nil, err)
-			return
+		if !cfg.WOW64 {
+			slog.DebugContext(ctx, "registry: scanning 64-bit view only; set wow64:true to also scan the 32-bit WOW6432Node view")
 		}
-
-		views := []struct {
-			access uint32
-			label  string
-		}{
-			{registry.READ | registry.WOW64_64KEY, "64"},
-		}
-		if cfg.WOW64 {
-			views = append(views, struct {
-				access uint32
-				label  string
-			}{registry.READ | registry.WOW64_32KEY, "32"})
-		}
-
-		for _, p := range cfg.Paths {
-			hive, err := hiveRoot(p.Hive)
+		views := selectViews(cfg, registry.READ|registry.WOW64_64KEY, registry.READ|registry.WOW64_32KEY)
+		open := func(hive, key string, access uint32) (RegistryKey, error) {
+			root, err := hiveRoot(hive)
 			if err != nil {
-				if !yield(nil, err) {
-					return
-				}
-				continue
+				return nil, err
 			}
-			for _, view := range views {
-				if ctx.Err() != nil {
-					return
-				}
-				counter.IncSources()
-				k, err := registry.OpenKey(hive, p.Key, view.access)
-				if err != nil {
-					counter.IncErrSources()
-					if !yield(nil, fmt.Errorf("registry: open %s\\%s: %w", p.Hive, p.Key, err)) {
-						return
-					}
-					continue
-				}
-				countingYield := func(entry model.Entry, err error) bool {
-					if err != nil {
-						counter.IncErrFiles()
-					} else {
-						counter.IncFiles()
-					}
-					return yield(entry, err)
-				}
-				cont := walkKey(ctx, windowsKey{k: k, access: view.access}, p.Key, p.Hive, view.label, 0, cfg, c, countingYield)
-				k.Close()
-				if !cont {
-					return
-				}
+			k, err := registry.OpenKey(root, key, access)
+			if err != nil {
+				return nil, err
 			}
+			return windowsKey{k: k, access: access}, nil
 		}
+		walkAll(ctx, counter, cfg, views, open, yield)
 	}
 }

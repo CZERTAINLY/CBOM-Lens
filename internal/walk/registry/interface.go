@@ -13,6 +13,10 @@ type RegistryKey interface {
 	// Uses registry.Key.GetValue(name, nil) to retrieve the type without reading data.
 	ReadValueType(name string) (uint32, error)
 
+	// ReadValueSize returns the size in bytes of the named value without
+	// reading its data, so oversized values can be skipped before allocation.
+	ReadValueSize(name string) (int64, error)
+
 	// ReadBinaryValue returns raw bytes for a REG_BINARY value.
 	ReadBinaryValue(name string) ([]byte, error)
 

@@ -85,7 +85,7 @@ cbom?: #CBOM
 
 #RegistryPath: {
 	hive: "HKLM" | "HKCU" | "HKCR" | "HKU" | "HKCC"
-	key:  string
+	key?: string | *"" // empty key walks the hive root
 }
 
 #RegistryFilter: {
