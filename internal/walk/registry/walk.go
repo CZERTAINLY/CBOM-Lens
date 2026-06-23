@@ -336,7 +336,7 @@ func walkAll(
 				return yield(entry, err)
 			}
 			cont := walkKey(ctx, k, p.Key, p.Hive, view.label, 0, cfg, c, countingYield)
-			k.Close()
+			_ = k.Close()
 			if !cont {
 				return
 			}
