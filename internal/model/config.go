@@ -581,14 +581,19 @@ func fixContainersConfig(configs ContainersConfig) {
 }
 
 // defaultRegistryPaths are scanned when the registry scanner is enabled but no
-// explicit paths are configured. HKLM and HKCU cover machine-wide and
-// current-user crypto material; HKCR and HKCC are views of subtrees already
-// reachable from those two, so scanning them as well would only duplicate
-// results. An empty Key means the hive root is walked.
+// explicit paths are configured. The defaults target the well-known Windows
+// crypto subtrees under both the machine-wide (HKLM) and current-user (HKCU)
+// hives — certificate stores and the Cryptography configuration — rather than
+// the hive roots. Scanning the full hives at unlimited depth would read
+// hundreds of thousands of values through every detector; these subtrees keep
+// the zero-config scan focused on cryptographic material. Users who need wider
+// coverage can set paths explicitly.
 func defaultRegistryPaths() []RegistryPath {
 	return []RegistryPath{
-		{Hive: "HKLM", Key: ""},
-		{Hive: "HKCU", Key: ""},
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\Cryptography`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\Cryptography`},
 	}
 }
 

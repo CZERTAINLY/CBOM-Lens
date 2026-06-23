@@ -56,8 +56,10 @@ registry:
 	require.NoError(t, err)
 	require.True(t, cfg.Registry.Enabled)
 	require.Equal(t, []model.RegistryPath{
-		{Hive: "HKLM", Key: ""},
-		{Hive: "HKCU", Key: ""},
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\Cryptography`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\Cryptography`},
 	}, cfg.Registry.Paths)
 }
 
@@ -110,8 +112,10 @@ registry:
 `))
 	require.NoError(t, err)
 	require.Equal(t, []model.RegistryPath{
-		{Hive: "HKLM", Key: ""},
-		{Hive: "HKCU", Key: ""},
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\Cryptography`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\Cryptography`},
 	}, cfg.Registry.Paths)
 }
 

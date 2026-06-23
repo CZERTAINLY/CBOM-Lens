@@ -124,8 +124,22 @@ func TestWalkAll_disabled_yieldsNothing(t *testing.T) {
 }
 
 func TestBuildLocation_escapesSpecialChars(t *testing.T) {
-	loc := registry.BuildLocation("HKLM", "64", "SOFTWARE/My App", "cert #1")
+	loc := registry.BuildLocation("HKLM", "64", `SOFTWARE\My App`, "cert #1")
 	assert.Equal(t, "registry://HKLM:64/SOFTWARE/My%20App/cert%20%231", loc)
+}
+
+func TestBuildLocation_literalSlashInNameEscaped(t *testing.T) {
+	// A value name containing a literal '/' must not become a path separator.
+	loc := registry.BuildLocation("HKLM", "64", `SOFTWARE`, "a/b")
+	assert.Equal(t, "registry://HKLM:64/SOFTWARE/a%2Fb", loc)
+}
+
+func TestBuildLocation_nestedKeyDistinctFromSlashInSegment(t *testing.T) {
+	nested := registry.BuildLocation("HKLM", "64", `a\b`, "v")  // two nesting levels
+	slashed := registry.BuildLocation("HKLM", "64", `a/b`, "v") // one segment named "a/b"
+	assert.Equal(t, "registry://HKLM:64/a/b/v", nested)
+	assert.Equal(t, "registry://HKLM:64/a%2Fb/v", slashed)
+	assert.NotEqual(t, nested, slashed) // no longer conflated
 }
 
 func TestBuildLocation_defaultValueVerbatim(t *testing.T) {

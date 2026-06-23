@@ -122,7 +122,7 @@ func walkKey(
 	if len(c.includeKeys) == 0 || matchesAny(normPath, c.includeKeys) {
 		names, err := key.ReadValueNames()
 		if err != nil {
-			if !yield(nil, fmt.Errorf("registry: ReadValueNames %s: %w", normPath, err)) {
+			if !yield(nil, fmt.Errorf("registry: ReadValueNames %s:%s/%s: %w", hive, view, normPath, err)) {
 				return false
 			}
 		}
@@ -163,7 +163,11 @@ func walkKey(
 			if cfg.MaxValueSize > 0 && len(data) > cfg.MaxValueSize {
 				continue
 			}
-			entry := registryEntry{location: buildLocation(hive, view, normPath, name), data: data}
+			statName := name
+			if statName == "" {
+				statName = "(Default)"
+			}
+			entry := registryEntry{location: buildLocation(hive, view, keyPath, name), name: statName, data: data}
 			if !yield(entry, nil) {
 				return false
 			}
@@ -180,7 +184,7 @@ func walkKey(
 	}
 	subNames, err := key.ReadSubKeyNames()
 	if err != nil {
-		return yield(nil, fmt.Errorf("registry: ReadSubKeyNames %s: %w", normPath, err))
+		return yield(nil, fmt.Errorf("registry: ReadSubKeyNames %s:%s/%s: %w", hive, view, normPath, err))
 	}
 	for _, sub := range subNames {
 		if ctx.Err() != nil {
@@ -197,7 +201,7 @@ func walkKey(
 		}
 		subKey, err := key.OpenSubKey(sub)
 		if err != nil {
-			if !yield(nil, fmt.Errorf("registry: OpenSubKey %s: %w", normSubPath, err)) {
+			if !yield(nil, fmt.Errorf("registry: OpenSubKey %s:%s/%s: %w", hive, view, normSubPath, err)) {
 				return false
 			}
 			continue
@@ -248,18 +252,20 @@ func convertValue(key RegistryKey, name string) ([]byte, bool, error) {
 	}
 }
 
-// buildLocation renders the registry:// URI for a value. Each key-path segment
-// and the value name are percent-escaped so names containing spaces or reserved
-// characters (#, ?, %, …) still produce a parseable URI. The synthetic
-// "(Default)" label for the unnamed default value is emitted verbatim.
-func buildLocation(hive, view, normPath, name string) string {
+// buildLocation renders the registry:// URI for a value. keyPath is the raw
+// backslash-separated key path; it is split on the backslash separator and each
+// segment — plus the value name — is percent-escaped. Splitting before escaping
+// (rather than after backslash→slash normalisation) keeps a literal '/' inside a
+// name distinct from the '\' nesting separator. The synthetic "(Default)" label
+// for the unnamed default value is emitted verbatim.
+func buildLocation(hive, view, keyPath, name string) string {
 	var sb strings.Builder
 	sb.WriteString("registry://")
 	sb.WriteString(hive)
 	sb.WriteByte(':')
 	sb.WriteString(view)
-	if normPath != "" {
-		for _, seg := range strings.Split(normPath, "/") {
+	if keyPath != "" {
+		for _, seg := range strings.Split(keyPath, `\`) {
 			sb.WriteByte('/')
 			sb.WriteString(url.PathEscape(seg))
 		}
@@ -347,6 +353,7 @@ func walkAll(
 // registryEntry implements model.Entry for a single registry value.
 type registryEntry struct {
 	location string
+	name     string // raw value name ("(Default)" for the unnamed default value)
 	data     []byte
 }
 
@@ -357,7 +364,7 @@ func (e registryEntry) Open() (io.ReadCloser, error) {
 }
 
 func (e registryEntry) Stat() (fs.FileInfo, error) {
-	return registryStat{name: e.location[strings.LastIndex(e.location, "/")+1:], size: int64(len(e.data))}, nil
+	return registryStat{name: e.name, size: int64(len(e.data))}, nil
 }
 
 // registryStat is a minimal fs.FileInfo for a registry value.

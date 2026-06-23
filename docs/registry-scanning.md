@@ -21,14 +21,23 @@ registry:
 
 This scans `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\SystemCertificates` and all subkeys for values that contain cryptographic material.
 
-When `paths` is omitted, the scanner walks the `HKLM` and `HKCU` hive roots by default — so enabling the scanner with no further configuration scans both the machine-wide and current-user hives:
+When `paths` is omitted, the scanner targets the well-known Windows crypto subtrees under both the machine-wide (`HKLM`) and current-user (`HKCU`) hives — so enabling the scanner with no further configuration scans the certificate stores and cryptography configuration:
 
 ```yaml
 registry:
   enabled: true
 ```
 
-`HKCR` and `HKCC` are intentionally not scanned by default, since they are views of subtrees already reachable from `HKLM` and `HKU` and would only duplicate results. List them explicitly under `paths` if you need them.
+The zero-config default expands to:
+
+| Hive | Key |
+|------|-----|
+| `HKLM` | `SOFTWARE\Microsoft\SystemCertificates` |
+| `HKLM` | `SOFTWARE\Microsoft\Cryptography` |
+| `HKCU` | `SOFTWARE\Microsoft\SystemCertificates` |
+| `HKCU` | `SOFTWARE\Microsoft\Cryptography` |
+
+These subtrees keep the default scan focused on cryptographic material. Scanning entire hives at unlimited depth would read hundreds of thousands of values through every detector, so it is not the default — set `paths` explicitly (e.g. a hive root with an empty `key`) if you need wider coverage.
 
 ---
 
@@ -39,7 +48,7 @@ registry:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable registry scanning. |
-| `paths` | list of [RegistryPath](#registrypath) | `HKLM` + `HKCU` roots | Registry locations to scan. When empty, defaults to the `HKLM` and `HKCU` hive roots. |
+| `paths` | list of [RegistryPath](#registrypath) | crypto subtrees | Registry locations to scan. When empty, defaults to the well-known `HKLM`/`HKCU` `SystemCertificates` and `Cryptography` subtrees (see [Quick start](#quick-start)). |
 | `max_depth` | int | `0` | Maximum subkey recursion depth. `0` means unlimited. |
 | `max_value_size` | int | `1048576` | Skip values larger than this (bytes). Default is 1 MB. |
 | `wow64` | bool | `false` | When `true`, scan both the 64-bit and 32-bit registry views on 64-bit Windows. |
