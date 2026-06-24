@@ -51,4 +51,4 @@ golangci-lint-report.xml
 tmp/
 
 # WINEPREFIX for a wine test
-testing/registry/wine/
+/testing/registry/wine/
