@@ -59,6 +59,21 @@ service:
 					"ipv4": false,
 					"ipv6": false
 				},
+				"registry": {
+					"enabled": false,
+					"paths": null,
+					"max_depth": 0,
+					"max_value_size": 1048576,
+					"wow64": false,
+					"include": {
+						"keys": null,
+						"values": null
+					},
+					"exclude": {
+						"keys": null,
+						"values": null
+					}
+				},
 				"cbom": {
 					"version": "1.6",
 					"extensions": null
@@ -108,6 +123,21 @@ service:
 					"enabled": false,
 					"ipv4": false,
 					"ipv6": false
+				},
+				"registry": {
+					"enabled": false,
+					"paths": null,
+					"max_depth": 0,
+					"max_value_size": 1048576,
+					"wow64": false,
+					"include": {
+						"keys": null,
+						"values": null
+					},
+					"exclude": {
+						"keys": null,
+						"values": null
+					}
 				},
 				"cbom": {
 					"version": "1.6",
@@ -160,6 +190,21 @@ service:
 					"ipv4": false,
 					"ipv6": false
 				},
+				"registry": {
+					"enabled": false,
+					"paths": null,
+					"max_depth": 0,
+					"max_value_size": 1048576,
+					"wow64": false,
+					"include": {
+						"keys": null,
+						"values": null
+					},
+					"exclude": {
+						"keys": null,
+						"values": null
+					}
+				},
 				"cbom": {
 					"version": "1.6",
 					"extensions": null
@@ -200,6 +245,21 @@ containers:
     "ipv4": false,
     "ipv6": false
   },
+  "registry": {
+    "enabled": false,
+    "paths": null,
+    "max_depth": 0,
+    "max_value_size": 1048576,
+    "wow64": false,
+    "include": {
+      "keys": null,
+      "values": null
+    },
+    "exclude": {
+      "keys": null,
+      "values": null
+    }
+  },
   "service": {
     "log": "stderr",
     "mode": "manual"
@@ -233,6 +293,21 @@ cbom:
     "enabled": false,
     "ipv4": false,
     "ipv6": false
+  },
+  "registry": {
+    "enabled": false,
+    "paths": null,
+    "max_depth": 0,
+    "max_value_size": 1048576,
+    "wow64": false,
+    "include": {
+      "keys": null,
+      "values": null
+    },
+    "exclude": {
+      "keys": null,
+      "values": null
+    }
   },
   "service": {
     "log": "stderr",
@@ -896,8 +971,9 @@ func TestIsZero(t *testing.T) {
 	var p model.Ports
 	var s model.Service
 	var c model.Config
+	var r model.Registry
 
-	for _, z := range []interface{ IsZero() bool }{f, cc, p, s, c} {
+	for _, z := range []interface{ IsZero() bool }{f, cc, p, s, c, r} {
 		require.True(t, z.IsZero())
 	}
 }

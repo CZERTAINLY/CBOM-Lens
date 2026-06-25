@@ -73,6 +73,7 @@ type Runner struct {
 	results           chan Result
 	closing           bool
 	stderrFunc        StderrFunc
+	stderrWg          sync.WaitGroup
 }
 
 func NewRunner(f StderrFunc) *Runner {
@@ -163,7 +164,9 @@ func (r *Runner) Start(ctx context.Context, proto Command) error {
 	}
 
 	if r.stderrFunc != nil {
-		go r.processStderr(ctx, stderr)
+		r.stderrWg.Go(func() {
+			r.processStderr(ctx, stderr)
+		})
 	}
 
 	go r.wait(r.cmd, &buf)
@@ -216,6 +219,10 @@ func (r *Runner) processStderr(ctx context.Context, stderr io.Reader) {
 }
 
 func (r *Runner) wait(cmd *exec.Cmd, bufp *bytes.Buffer) {
+	// Drain stderr before Wait() — per Go docs, StderrPipe reads must
+	// complete before Wait is called, otherwise Wait closes the pipe
+	// and in-flight reads lose data.
+	r.stderrWg.Wait()
 	err := cmd.Wait()
 	if r.cancelFunc != nil {
 		r.cancelFunc()

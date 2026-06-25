@@ -18,6 +18,7 @@ An example is in [manual-config.yaml](manual-config.yaml).
 - `filesystem` (optional, [Filesystem](#filesystem) section)
 - `containers` (optional, [ContainerConfig](#containerconfig))
 - `ports` (optional, [Ports](#ports) section)
+- `registry` (optional, [Registry](#registry) section)
 
 ## Service
 Service:
@@ -81,6 +82,28 @@ This section configures a Docker and other compatible container engine scan.
 - `ports` (string, optional, default "1-65535") Comma/range expression (e.g. `22,80,443,8000-8100`).
 - `ipv4` (bool, optional, default true) Scan IPv4.
 - `ipv6` (bool, optional, default true) Scan IPv6.
+
+## Registry
+
+Windows Registry scanning. Enabling this on non-Windows platforms produces an error. See the [Windows Registry scanning](registry-scanning.md) guide for usage examples.
+
+- `enabled` (bool, default false) Enable registry scanning.
+- `paths` (list of RegistryPath) Registry locations to scan. When empty, defaults to the well-known `HKLM`/`HKCU` `SystemCertificates` and `Cryptography` subtrees (a focused crypto scan, not a full-hive sweep).
+- `max_depth` (int, default 0) Maximum subkey recursion depth. `0` = unlimited.
+- `max_value_size` (int, default 1048576) Skip values larger than this (bytes).
+- `wow64` (bool, default false) Scan both 64-bit and 32-bit registry views.
+- `include` (RegistryFilter) Only process keys/values matching these regex patterns.
+- `exclude` (RegistryFilter) Skip keys/values matching these regex patterns.
+
+### RegistryPath
+
+- `hive` (string, required) One of `HKLM`, `HKCU`, `HKCR`, `HKU`, `HKCC`.
+- `key` (string, optional) Subkey path relative to the hive root. Omitted or empty scans the entire hive.
+
+### RegistryFilter
+
+- `keys` (list of string) Regex patterns matched against key paths.
+- `values` (list of string) Regex patterns matched against value names.
 
 ## Service
 

@@ -24,13 +24,16 @@ containers:
 
 ports:
   # network port scan settings
+
+registry:
+  # Windows registry scan settings
 ```
 
 Key points:
 
 - `version` – configuration version (currently `0`).
 - `service` – how CBOM-Lens runs (manual, timer, discovery) and where results go.
-- `filesystem`, `containers`, `ports` – which sources to scan and how.
+- `filesystem`, `containers`, `ports`, `registry` – which sources to scan and how.
 
 ---
 
@@ -169,7 +172,28 @@ Notes:
 
 ---
 
-## 6. Saving and uploading results
+## 6. Windows Registry scans
+
+The `registry` section lets CBOM-Lens scan the Windows Registry for cryptographic materials stored as registry values.
+
+```yaml
+registry:
+  enabled: true
+  paths:
+    - hive: HKLM
+      key: 'SOFTWARE\Microsoft\SystemCertificates'
+```
+
+Notes:
+
+- Only runs on Windows. Enabling the scanner on other platforms produces an error.
+- Supports depth limiting, include/exclude regex filters, and WOW64 dual-view scanning.
+
+For the full feature set, see the dedicated [Windows Registry scanning](registry-scanning.md) guide.
+
+---
+
+## 7. Saving and uploading results
 
 Two main knobs control what happens to the generated CBOM:
 
@@ -192,7 +216,7 @@ See [Operations](operations.md) and [CZERTAINLY & CBOM-Repository integration](i
 
 ---
 
-## 7. Environment variables
+## 8. Environment variables
 
 String values in the configuration can reference environment variables, for example:
 
@@ -211,7 +235,7 @@ See the [Configuration reference](config.md) for the precise rules and examples.
 
 ---
 
-## 8. Full example config
+## 9. Full example config
 
 A full manual mode configuration example is available at:
 
@@ -221,7 +245,7 @@ Use it as a starting point and adjust to your environment.
 
 ---
 
-## 9. Next steps
+## 10. Next steps
 
 - For exact field definitions, defaults, and constraints: see the [Configuration reference](config.md).
 - For schema and validation details (CUE): see the schema file [config.cue](config.cue).

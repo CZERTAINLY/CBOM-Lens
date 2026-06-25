@@ -20,6 +20,7 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/service"
 	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
+	"github.com/CZERTAINLY/CBOM-lens/internal/walk/registry"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -134,6 +135,16 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 		scanner := service.New(2, s.counter, s.detectors)
 		g.Go(func() error {
 			goScan(ctx, scanner, s.containers, detections)
+			return nil
+		})
+	}
+
+	// registry scanners
+	if s.config.Registry.Enabled {
+		scanner := service.New(2, s.counter, s.detectors)
+		registries := registry.Walk(ctx, s.counter, s.config.Registry)
+		g.Go(func() error {
+			goScan(ctx, scanner, registries, detections)
 			return nil
 		})
 	}

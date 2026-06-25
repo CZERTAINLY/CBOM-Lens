@@ -146,6 +146,7 @@ func doScan(cmd *cobra.Command, args []string) error {
 				Filesystem: serviceConfig.Filesystem,
 				Containers: serviceConfig.Containers,
 				Ports:      serviceConfig.Ports,
+				Registry:   serviceConfig.Registry,
 				Service:    serviceConfig.Service.ServiceFields,
 				CBOM:       serviceConfig.CBOM,
 			}
@@ -215,6 +216,7 @@ func doRun(cmd *cobra.Command, args []string) error {
 		Filesystem: config.Filesystem,
 		Containers: config.Containers,
 		Ports:      config.Ports,
+		Registry:   config.Registry,
 		Service: model.ServiceFields{
 			Verbose: flagVerbose || config.Service.Verbose,
 			Log:     config.Service.Log,

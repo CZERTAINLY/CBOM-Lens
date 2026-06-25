@@ -80,3 +80,82 @@ jobs:
           name: golangci-lint-report
           path: golangci-lint-report.xml
           if-no-files-found: error
+
+  check-windows:
+    if: github.event_name != 'push'
+    name: Check (Windows)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version: stable
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build with coverage
+        run: go build -cover -covermode=atomic -o cbom-lens-ci.exe ./cmd/cbom-lens
+
+      - name: Create coverage directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path coverage
+
+      - name: Write test registry values
+        shell: pwsh
+        run: |
+          New-Item -Path "HKCU:\Software\CBOMLensTest" -Force | Out-Null
+          $cert = New-SelfSignedCertificate -DnsName "cbom-lens-ci-test" -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddDays(1)
+          $pem = "-----BEGIN CERTIFICATE-----`n"
+          $pem += [Convert]::ToBase64String($cert.RawData, [Base64FormattingOptions]::InsertLineBreaks)
+          $pem += "`n-----END CERTIFICATE-----"
+          Set-ItemProperty -Path "HKCU:\Software\CBOMLensTest" -Name "PEMCert" -Value $pem -Type String
+          Remove-Item -Path "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
+
+      - name: Run registry scan
+        shell: pwsh
+        env:
+          GOCOVERDIR: coverage
+        run: |
+          $config = @"
+          version: 0
+          service:
+            mode: manual
+          registry:
+            enabled: true
+            paths:
+              - hive: HKCU
+                key: 'Software\CBOMLensTest'
+          "@
+          $config | Out-File -FilePath cbom-lens-test.yaml -Encoding utf8
+          .\cbom-lens-ci.exe run --config cbom-lens-test.yaml | Out-File -FilePath output.json
+          $json = Get-Content output.json | ConvertFrom-Json
+          if ($null -eq $json.bomFormat) { Write-Error "Output is not a valid CBOM"; exit 1 }
+          if ($json.components.Count -eq 0) { Write-Error "No components detected — registry scanner may not be working"; exit 1 }
+          # Prove provenance: the discovered component must trace back to the
+          # registry value we planted, not just be some unrelated component.
+          $locations = $json.components.evidence.occurrences.location
+          $fromRegistry = $locations | Where-Object { $_ -like "registry://HKCU*CBOMLensTest*PEMCert*" }
+          if ($null -eq $fromRegistry) {
+            Write-Error "No component traced to the planted registry value (registry://HKCU.../CBOMLensTest/PEMCert). Locations seen: $($locations -join ', ')"
+            exit 1
+          }
+          Write-Host "Verified: planted cert discovered at $fromRegistry"
+
+      - name: Cleanup test registry key
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Path "HKCU:\Software\CBOMLensTest" -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: coverage-windows
+          path: coverage/

@@ -11,6 +11,7 @@ service: #Service
 filesystem?: #Filesystem
 containers?: #Containers
 ports?: #Ports
+registry?: #Registry
 cbom?: #CBOM
 }
 
@@ -20,6 +21,7 @@ version: 0
 filesystem?: #Filesystem
 containers?: #Containers
 ports?: #Ports
+registry?: #Registry
 service?: #ServiceFields
 cbom?: #CBOM
 }
@@ -69,6 +71,26 @@ cbom?: #CBOM
   ports?: string | *"1-65535"
   ipv4?: bool | *true
   ipv6?: bool | *true
+}
+
+#Registry: {
+	enabled?:        bool | *false
+	paths?:          [...#RegistryPath]
+	max_depth?:      int | *0
+	max_value_size?: int | *1048576
+	wow64?:          bool | *false
+	include?:        #RegistryFilter
+	exclude?:        #RegistryFilter
+}
+
+#RegistryPath: {
+	hive: "HKLM" | "HKCU" | "HKCR" | "HKU" | "HKCC"
+	key?: string | *"" // empty key walks the hive root
+}
+
+#RegistryFilter: {
+	keys?:   [...string]
+	values?: [...string]
 }
 
 // Schedule can be a cron 5 fields format, or macro like @yearly or a @every <duration>, which is string accepted by https://golang.org/pkg/time/#ParseDuration

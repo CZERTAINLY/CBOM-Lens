@@ -50,6 +50,7 @@ type Scan struct {
 	Filesystem Filesystem    `json:"filesystem"`
 	Containers Containers    `json:"containers"`
 	Ports      Ports         `json:"ports"`
+	Registry   Registry      `json:"registry"`
 	Service    ServiceFields `json:"service"`
 	CBOM       CBOM          `json:"cbom"`
 }
@@ -60,6 +61,7 @@ type Config struct {
 	Filesystem Filesystem `json:"filesystem"`
 	Containers Containers `json:"containers"`
 	Ports      Ports      `json:"ports"`
+	Registry   Registry   `json:"registry"`
 	Service    Service    `json:"service"`
 	CBOM       CBOM       `json:"cbom"`
 }
@@ -92,6 +94,28 @@ type Ports struct {
 	Ports   string `json:"ports,omitempty"`  // "1-65535", "22,80,8000-8100", etc.
 	IPv4    bool   `json:"ipv4"`
 	IPv6    bool   `json:"ipv6"`
+}
+
+type Registry struct {
+	Enabled      bool           `json:"enabled"        yaml:"enabled"`
+	Paths        []RegistryPath `json:"paths"          yaml:"paths,omitempty"`
+	MaxDepth     int            `json:"max_depth"      yaml:"max_depth"` // 0 = unlimited
+	MaxValueSize int            `json:"max_value_size" yaml:"max_value_size" default:"1048576"`
+	WOW64        bool           `json:"wow64"          yaml:"wow64"`
+	Include      RegistryFilter `json:"include"        yaml:"include,omitempty"`
+	Exclude      RegistryFilter `json:"exclude"        yaml:"exclude,omitempty"`
+}
+
+func (r Registry) IsZero() bool { return isZero(r) }
+
+type RegistryPath struct {
+	Hive string `json:"hive" yaml:"hive"` // "HKLM", "HKCU", "HKCR", "HKU", "HKCC"
+	Key  string `json:"key"  yaml:"key"`
+}
+
+type RegistryFilter struct {
+	Keys   []string `json:"keys"   yaml:"keys,omitempty"`
+	Values []string `json:"values" yaml:"values,omitempty"`
 }
 
 type ServiceFields struct {
@@ -143,6 +167,7 @@ func (c Config) IsZero() bool {
 	return c.Filesystem.IsZero() &&
 		c.Containers.Config.IsZero() &&
 		c.Ports.IsZero() &&
+		c.Registry.IsZero() &&
 		c.Service.IsZero()
 }
 
@@ -294,6 +319,7 @@ func LoadConfig(r io.Reader) (Config, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -303,6 +329,7 @@ func LoadConfigFromPath(path string) (Config, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -314,6 +341,7 @@ func LoadScanConfig(r io.Reader) (Scan, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -323,6 +351,7 @@ func LoadScanConfigFromPath(path string) (Scan, error) {
 		return ret, err
 	}
 	fixContainersConfig(ret.Containers.Config)
+	fixRegistryConfig(&ret.Registry)
 	return ret, nil
 }
 
@@ -548,6 +577,33 @@ func fixContainersConfig(configs ContainersConfig) {
 	for idx := range configs {
 		host := configs[idx].Host
 		configs[idx].Host = fixDockerHost(host)
+	}
+}
+
+// defaultRegistryPaths are scanned when the registry scanner is enabled but no
+// explicit paths are configured. The defaults target the well-known Windows
+// crypto subtrees under both the machine-wide (HKLM) and current-user (HKCU)
+// hives — certificate stores and the Cryptography configuration — rather than
+// the hive roots. Scanning the full hives at unlimited depth would read
+// hundreds of thousands of values through every detector; these subtrees keep
+// the zero-config scan focused on cryptographic material. Users who need wider
+// coverage can set paths explicitly.
+func defaultRegistryPaths() []RegistryPath {
+	return []RegistryPath{
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKLM", Key: `SOFTWARE\Microsoft\Cryptography`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\SystemCertificates`},
+		{Hive: "HKCU", Key: `SOFTWARE\Microsoft\Cryptography`},
+	}
+}
+
+// fixRegistryConfig applies defaults to a Registry config. When the scanner is
+// enabled but no paths are given it falls back to the curated crypto subtrees
+// from defaultRegistryPaths, mirroring how an empty filesystem path list
+// defaults to a sensible scan target rather than scanning nothing.
+func fixRegistryConfig(r *Registry) {
+	if r.Enabled && len(r.Paths) == 0 {
+		r.Paths = defaultRegistryPaths()
 	}
 }
 

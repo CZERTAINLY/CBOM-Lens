@@ -143,7 +143,17 @@ func TestServer_listAttributeDefinitions(t *testing.T) {
 	block, ok := data.Content[0].Data.(attrCodeblockContentData)
 	require.True(t, ok)
 	require.Equal(t, "yaml", block.Language)
-	require.Equal(t, "dmVyc2lvbjogMApmaWxlc3lzdGVtOgogICAgZW5hYmxlZDogdHJ1ZQogICAgcGF0aHM6CiAgICAgICAgLSAvdGVzdApjb250YWluZXJzOgogICAgZW5hYmxlZDogZmFsc2UKICAgIGNvbmZpZzogW10KcG9ydHM6CiAgICBlbmFibGVkOiBmYWxzZQogICAgYmluYXJ5OiAiIgogICAgcG9ydHM6ICIiCiAgICBpcHY0OiBmYWxzZQogICAgaXB2NjogZmFsc2UKc2VydmljZToKICAgIHZlcmJvc2U6IGZhbHNlCiAgICBsb2c6ICIiCmNib206CiAgICB2ZXJzaW9uOiAiIgogICAgZXh0ZW5zaW9uczogW10K", block.Code)
+
+	decodedConfigYAML, err := base64.StdEncoding.DecodeString(block.Code)
+	require.NoError(t, err)
+
+	var decodedConfig model.Scan
+	err = yaml.Unmarshal(decodedConfigYAML, &decodedConfig)
+	require.NoError(t, err)
+
+	require.Equal(t, testConfig.Version, decodedConfig.Version)
+	require.True(t, decodedConfig.Filesystem.Enabled)
+	require.Equal(t, testConfig.Filesystem.Paths, decodedConfig.Filesystem.Paths)
 }
 
 func TestServer_listAttributeDefinitions_ConfigError(t *testing.T) {
