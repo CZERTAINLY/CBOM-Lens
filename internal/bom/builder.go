@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
 	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/google/uuid"
@@ -32,41 +33,56 @@ func init() {
 // Builder is a builder pattern for a CycloneDX BOM structure
 type Builder struct {
 	version      cdx.SpecVersion
-	schema       string
 	components   map[string]*cdx.Component
 	dependencies map[string]*[]string
-	properties   []cdx.Property
 	counter      *stats.Stats
+	clock        func() time.Time
+	serial       func() string
 }
 
 func NewBuilder(config model.CBOM) (*Builder, error) {
 	var versions = map[string]cdx.SpecVersion{
 		"1.6": cdx.SpecVersion1_6,
 	}
-	var schemas = map[cdx.SpecVersion]string{
-		cdx.SpecVersion1_6: "https://cyclonedx.org/schema/bom-1.6.schema.json",
-	}
 
 	version, ok := versions[config.Version]
 	if !ok {
 		return nil, fmt.Errorf("unsupported cbom spec version %s", config.Version)
 	}
-	schema, ok := schemas[version]
-	if !ok {
-		return nil, fmt.Errorf("unknown json schema for version %s", version)
+	// emitterFor is the single source of truth for renderable versions: a
+	// version must not be accepted here unless BOM() can actually emit it.
+	if _, err := emitterFor(version); err != nil {
+		return nil, fmt.Errorf("unsupported cbom spec version %s: %w", config.Version, err)
 	}
 
 	return &Builder{
 		version:      version,
-		schema:       schema,
 		components:   make(map[string]*cdx.Component),
 		dependencies: make(map[string]*[]string),
-		properties:   []cdx.Property{},
+		clock:        func() time.Time { return time.Now().UTC() },
+		serial:       func() string { return "urn:uuid:" + uuid.New().String() },
 	}, nil
 }
 
 func (b *Builder) WithCounter(counter *stats.Stats) *Builder {
 	b.counter = counter
+	return b
+}
+
+// WithClock overrides the timestamp source. A nil f keeps the default clock.
+func (b *Builder) WithClock(f func() time.Time) *Builder {
+	if f != nil {
+		b.clock = f
+	}
+	return b
+}
+
+// WithSerial overrides the serial number source. A nil f keeps the default
+// generator.
+func (b *Builder) WithSerial(f func() string) *Builder {
+	if f != nil {
+		b.serial = f
+	}
 	return b
 }
 
@@ -104,65 +120,87 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 	}
 }
 
-// BOM returns a cdx.BOM based on a data inside the Builder
+// BOM returns a cdx.BOM based on a data inside the Builder. It builds the
+// version-neutral IR via model() and renders it through the Emitter for the
+// Builder's spec version.
 func (b *Builder) BOM(ctx context.Context) cdx.BOM {
-	safeRefs := b.safeRefs()
+	e, err := emitterFor(b.version)
+	if err != nil {
+		// NewBuilder validates the version against emitterFor, so this is
+		// unreachable for Builders constructed through NewBuilder.
+		panic(err)
+	}
+	return e.Emit(ctx, b.model(ctx))
+}
 
-	components := make([]cdx.Component, 0, len(b.components))
+// model returns the version-neutral cbom.BOMModel built from the Builder's
+// accumulated components/dependencies maps. A single canonical safeRefs map
+// is applied to both assets and relationship endpoints, so a dependsOn edge's
+// From/To always match the wire ref used for the corresponding asset (see
+// safeRefs/safeRef). BOM() renders the result through the version's Emitter.
+func (b *Builder) model(ctx context.Context) cbom.BOMModel {
+	sr := b.safeRefs()
+
+	assets := make([]cbom.Asset, 0, len(b.components))
 	for _, compop := range b.components {
 		if compop == nil {
 			continue
 		}
-		components = append(components, safeRefs.component(ctx, *compop))
+		comp := sr.component(ctx, *compop)
+		assets = append(assets, cbom.Asset{
+			Ref:       cbom.AssetRef(comp.BOMRef),
+			Component: comp,
+		})
 	}
+	slices.SortFunc(assets, func(a, b cbom.Asset) int {
+		return strings.Compare(string(a.Ref), string(b.Ref))
+	})
 
-	dependencies := make([]cdx.Dependency, 0, len(b.dependencies))
-	for bomRef, depsp := range b.dependencies {
-		dependencies = append(dependencies, safeRefs.dependency(ctx, bomRef, depsp))
+	// Flatten dependsOn into per-edge RelDependsOn, preserving within-source
+	// order (emit16 regroups same-From edges into one dependsOn array; the
+	// golden corpus pins the rendering). Edges whose endpoints do not resolve
+	// to a stored component are dropped: emitting a fabricated ref would be
+	// dangling, and minting one would be nondeterministic.
+	var rels []cbom.Relationship
+	for ref, depsp := range b.dependencies {
+		if depsp == nil {
+			continue
+		}
+		from, ok := sr.refs[ref]
+		if !ok {
+			slog.WarnContext(ctx, "dropping dependency entry: ref has no component", "ref", ref)
+			continue
+		}
+		for _, dep := range *depsp {
+			to, ok := sr.refs[dep]
+			if !ok {
+				slog.WarnContext(ctx, "dropping dependency edge: target has no component", "from", ref, "to", dep)
+				continue
+			}
+			rels = append(rels, cbom.Relationship{
+				From: cbom.AssetRef(from),
+				To:   cbom.AssetRef(to),
+				Kind: cbom.RelDependsOn,
+			})
+		}
 	}
+	// Stable sort by From only, so within-From order (slice order) is preserved.
+	slices.SortStableFunc(rels, func(a, b cbom.Relationship) int {
+		return strings.Compare(string(a.From), string(b.From))
+	})
 
-	var metadataProperties *[]cdx.Property
+	var statsProps []cdx.Property
 	if b.counter != nil {
-		p := bomStatistics(b.counter)
-		metadataProperties = &p
+		statsProps = bomStatistics(b.counter)
 	}
 
-	bom := cdx.BOM{
-		JSONSchema:   "https://cyclonedx.org/schema/bom-1.6.schema.json",
-		BOMFormat:    "CycloneDX",
-		SpecVersion:  cdx.SpecVersion1_6,
-		SerialNumber: "urn:uuid:" + uuid.New().String(),
-		Version:      1,
-		Metadata: &cdx.Metadata{
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-			Lifecycles: &[]cdx.Lifecycle{
-				{
-					Name:        "",
-					Phase:       "operations",
-					Description: "",
-				},
-			},
-			// This can't be not nil otherwise this error will happen
-			// json: error calling MarshalJSON for type *cyclonedx.ToolsChoice: unexpected end of JSON input
-			Component: &cdx.Component{
-				Type:    "application",
-				Name:    "CBOM-Lens",
-				Version: programVersion,
-				Manufacturer: &cdx.OrganizationalEntity{
-					Name:    "CZERTAINLY",
-					Address: &cdx.PostalAddress{},
-					URL: &[]string{
-						"https://www.czertainly.com",
-					},
-				},
-			},
-			Properties: metadataProperties,
-		},
-		Components:   &components,
-		Dependencies: &dependencies,
-		Properties:   &b.properties,
+	return cbom.BOMModel{
+		Assets:       assets,
+		Rels:         rels,
+		SerialNumber: b.serial(),
+		Timestamp:    b.clock().Format(time.RFC3339),
+		StatsProps:   statsProps,
 	}
-	return bom
 }
 
 // AsJSON encode the BOM into JSON format
@@ -220,16 +258,6 @@ func bomStatistics(counter *stats.Stats) []cdx.Property {
 
 type refs map[string]string
 
-func (r refs) get(ctx context.Context, key string) string {
-	safe, ok := r[key]
-	if !ok {
-		slog.WarnContext(ctx, "unknown bom-ref to replace, generating a new one", "original", key, "new", safe)
-		safe = uuid.New().String()
-		r[key] = safe
-	}
-	return safe
-}
-
 type safeRefs struct {
 	refs refs
 }
@@ -247,29 +275,14 @@ func (b Builder) safeRefs() safeRefs {
 	return safeRefs{refs: refs}
 }
 
-func (s safeRefs) component(ctx context.Context, compo cdx.Component) cdx.Component {
-	safe := s.refs.get(ctx, compo.BOMRef)
-	compo.BOMRef = safe
+func (s safeRefs) component(_ context.Context, compo cdx.Component) cdx.Component {
+	// safeRefs is built from the same components map this compo comes from,
+	// so the lookup always hits.
+	compo.BOMRef = s.refs[compo.BOMRef]
 
 	replaceBOMReferences(s.refs, reflect.ValueOf(&compo))
 
 	return compo
-}
-
-func (s safeRefs) dependency(ctx context.Context, bomRef string, depsp *[]string) cdx.Dependency {
-	safe := s.refs.get(ctx, bomRef)
-	if depsp != nil {
-		deps := make([]string, len(*depsp))
-		for idx, dep := range *depsp {
-			deps[idx] = s.refs[dep]
-		}
-		depsp = &deps
-	}
-
-	return cdx.Dependency{
-		Ref:          safe,
-		Dependencies: depsp,
-	}
 }
 
 func safeRef(bomRef string) string {

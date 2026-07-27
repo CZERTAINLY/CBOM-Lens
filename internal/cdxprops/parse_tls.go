@@ -269,7 +269,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 		info = algorithmInfo{
 			name:                   "ChaCha20-Poly1305",
 			oid:                    "ietf-rfc8439",
-			algorithmName:          "crypt/algorithm/chacha20-poly1305",
+			algorithmName:          "crypto/algorithm/chacha20-poly1305",
 			keySize:                int(KeyLen256),
 			paramSetID:             string(CipherModePOLY1305),
 			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
