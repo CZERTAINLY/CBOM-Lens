@@ -28,7 +28,7 @@ func TestValidator_Validate_Errors(t *testing.T) {
 				var empty []cdx.Component
 				bom.Components = &empty
 			},
-			then: "BOM validation failed:\nproperties: Property 'components' does not match the schema",
+			then: "BOM validation failed:\n/: properties: Property 'components' does not match the schema\n/components: type: Value is null but should be array",
 		},
 	}
 
@@ -104,9 +104,7 @@ func TestValidator_Validate(t *testing.T) {
 
 // TestValidator_OfflineStrictness proves the validator enforces constraints
 // coming from the spdx.schema.json and jsf-0.82.schema.json subschemas even
-// without network access. Before the fix the $refs to those subschemas were
-// resolved via HTTP at compile time and silently imposed no constraints when
-// the fetch failed (fail-open).
+// without network access.
 func TestValidator_OfflineStrictness(t *testing.T) {
 	validator, err := bom.NewValidator(cdx.SpecVersion1_6)
 	require.NoError(t, err)
@@ -127,7 +125,11 @@ func TestValidator_OfflineStrictness(t *testing.T) {
 
 		err = validator.Validate(&bom)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "components")
+		// The failure chain must name the license id — not just any
+		// components violation — so this test keeps covering the SPDX
+		// subschema constraint it is named for.
+		require.Contains(t, err.Error(), "Property 'licenses' does not match")
+		require.Contains(t, err.Error(), "Property 'id' does not match")
 	})
 
 	t.Run("valid SPDX license id is accepted", func(t *testing.T) {
@@ -152,7 +154,7 @@ func TestValidator_OfflineStrictness(t *testing.T) {
 
 		err := validator.ValidateBytes(raw)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "signature")
+		require.Contains(t, err.Error(), "Property 'signature' does not match")
 	})
 }
 
@@ -294,7 +296,7 @@ func TestValidator_JSFSignature(t *testing.T) {
 		})
 		err := validator.ValidateBytes(raw)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "signature")
+		require.Contains(t, err.Error(), "Property 'signature' does not match")
 	})
 }
 

@@ -275,3 +275,50 @@ func TestCompileSchemaSet_Errors(t *testing.T) {
 		})
 	}
 }
+
+// TestSchemaSets_EveryEmbeddedSchemaDeclared closes the audit gap between the
+// //go:embed glob and schemaSets: a schema file that is embedded but not
+// declared in any set would ship in the binary with its $refs unaudited by
+// TestSchemaSets_AllExternalRefsDeclared, which iterates sets only.
+func TestSchemaSets_EveryEmbeddedSchemaDeclared(t *testing.T) {
+	declared := map[string]struct{}{}
+	for _, set := range schemaSets {
+		declared[set.main] = struct{}{}
+		for _, sub := range set.subs {
+			declared[sub.path] = struct{}{}
+		}
+	}
+	files, err := fs.Glob(schemaFS, "schemas/*.schema.json")
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	for _, f := range files {
+		_, ok := declared[f]
+		require.Truef(t, ok,
+			"%s is embedded but not declared in any schemaSet - its $refs are unaudited; declare it or remove the file", f)
+	}
+}
+
+// TestStrictCompiler_IDNEmailFormat pins the idn-email format validator:
+// AssertFormat is on, so an unknown format would reject every value, while
+// the previous accept-all shim let malformed addresses through.
+func TestStrictCompiler_IDNEmailFormat(t *testing.T) {
+	schema, err := newStrictCompiler().Compile([]byte(`{"type": "string", "format": "idn-email"}`))
+	require.NoError(t, err)
+
+	for _, valid := range []string{
+		"user@example.com",
+		"Real Name <user@example.com>",
+		"tester@例え.jp", // RFC 6532 internationalized domain
+	} {
+		require.Truef(t, schema.Validate([]byte(fmt.Sprintf("%q", valid))).Valid,
+			"%q must be accepted", valid)
+	}
+	for _, invalid := range []string{
+		"not-an-email",
+		"missing-at.example.com",
+		"two@@example.com",
+	} {
+		require.Falsef(t, schema.Validate([]byte(fmt.Sprintf("%q", invalid))).Valid,
+			"%q must be rejected", invalid)
+	}
+}

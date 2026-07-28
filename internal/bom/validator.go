@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
+	"net/mail"
+	"slices"
 	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -33,8 +36,6 @@ type schemaSet struct {
 }
 
 // schemaSets maps each supported spec version to its embedded schema files.
-// CycloneDX 1.7 (issue #175, ticket 2) will add bom-1.7.schema.json together
-// with its cryptography-defs.schema.json subschema here.
 var schemaSets = map[cdx.SpecVersion]schemaSet{
 	cdx.SpecVersion1_6: {
 		main: "schemas/bom-1.6.schema.json",
@@ -88,10 +89,17 @@ func newStrictCompiler() *jss.Compiler {
 	compiler.SetAssertFormat(true)
 	// The library has no built-in validator for "idn-email" (used by
 	// bom-1.6's organizationalContact.email and identifiableAction.email);
-	// with AssertFormat on, an unknown format rejects every value. Register
-	// an accept-all validator to keep the annotation-only semantics the
-	// draft prescribes for unknown formats.
-	compiler.RegisterFormat("idn-email", func(any) bool { return true })
+	// with AssertFormat on, an unknown format rejects every value. net/mail
+	// parses RFC 5322 addresses with RFC 6532 (UTF-8) support, which covers
+	// the internationalized forms idn-email admits.
+	compiler.RegisterFormat("idn-email", func(v any) bool {
+		s, ok := v.(string)
+		if !ok {
+			return true // format applies to strings only
+		}
+		_, err := mail.ParseAddress(s)
+		return err == nil
+	})
 	return compiler
 }
 
@@ -147,7 +155,9 @@ func compileSchemaSet(fsys fs.FS, set schemaSet) (*jss.Schema, error) {
 	// guarantees such a ref is never fetched, not that it fails validation.
 	// The actual mitigation for the walker's blind spots is
 	// TestSchemaSets_AllExternalRefsDeclared, which audits the raw JSON of
-	// every embedded schema for undeclared external $refs.
+	// every schema declared in schemaSets for undeclared external $refs
+	// (TestSchemaSets_EveryEmbeddedSchemaDeclared ensures no embedded file
+	// escapes that audit by staying undeclared).
 	var unresolved []string
 	for _, c := range all {
 		for _, uri := range c.schema.UnresolvedReferenceURIs() {
@@ -209,13 +219,35 @@ func (v Validator) versionToSchema(version cdx.SpecVersion) (*jss.Schema, error)
 
 func (v Validator) validateBytes(schema *jss.Schema, b []byte) error {
 	res := schema.Validate(b)
-	if !res.Valid {
-		var errorMsgs []string
-		for _, err := range res.Errors {
-			errorMsgs = append(errorMsgs, fmt.Sprintf("%s: %s", err.Keyword, err.Error()))
-		}
-		// Join all errors with newlines for readability
-		return fmt.Errorf("BOM validation failed:\n%s", strings.Join(errorMsgs, "\n"))
+	if res.Valid {
+		return nil
 	}
-	return nil
+	// Flatten the full evaluation tree so every failing detail reports its
+	// JSON-pointer instance location and keyword — the root-level errors
+	// alone collapse everything into "Property 'X' does not match the
+	// schema", which names neither the failing element nor the reason.
+	list := res.ToList(false)
+	seen := make(map[string]struct{})
+	var msgs []string
+	add := func(loc string, errs map[string]string) {
+		if loc == "" {
+			loc = "/"
+		}
+		for _, keyword := range slices.Sorted(maps.Keys(errs)) {
+			line := fmt.Sprintf("%s: %s: %s", loc, keyword, errs[keyword])
+			if _, dup := seen[line]; dup {
+				continue
+			}
+			seen[line] = struct{}{}
+			msgs = append(msgs, line)
+		}
+	}
+	add(list.InstanceLocation, list.Errors)
+	for _, d := range list.Details {
+		if d.Valid {
+			continue
+		}
+		add(d.InstanceLocation, d.Errors)
+	}
+	return fmt.Errorf("BOM validation failed:\n%s", strings.Join(msgs, "\n"))
 }
