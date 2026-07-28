@@ -248,6 +248,11 @@ func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]strin
 	for _, site := range danglingBOMRefs(bom) {
 		actual[site.Ref] = append(actual[site.Ref], site.Path)
 	}
+	// Sort per-ref paths so failure output is stable regardless of walk order
+	// (map-held refs traverse in randomized order).
+	for _, paths := range actual {
+		slices.Sort(paths)
+	}
 
 	var unexpected strings.Builder
 	for _, ref := range slices.Sorted(maps.Keys(actual)) {
