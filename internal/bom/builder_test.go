@@ -675,13 +675,8 @@ func TestBuilder_NilClockAndSerialKeepDefaults(t *testing.T) {
 	})
 }
 
-// TestBuilder_ModelDependencyEdgeSemantics pins the IR-path semantics for
-// dependency entries without edges: they are omitted from the output. The
-// pre-IR BOM() emitted {"ref": X} / {"ref": X, "dependsOn": []} for these
-// shapes; no production converter creates them (internal/cdxprops/x509.go
-// always builds non-nil, non-empty lists), and the IR path deliberately drops
-// them instead. A converter that needs an edge-less participant must model it
-// explicitly rather than rely on this.
+// TestBuilder_ModelDependencyEdgeSemantics verifies that dependency entries
+// without edges are omitted and must be modeled explicitly when needed.
 func TestBuilder_ModelDependencyEdgeSemantics(t *testing.T) {
 	t.Run("nil dependsOn entry is omitted", func(t *testing.T) {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
@@ -710,10 +705,9 @@ func TestBuilder_ModelDependencyEdgeSemantics(t *testing.T) {
 	})
 }
 
-// TestBuilder_DanglingDependencyRefs: edges (or whole entries) whose refs do
-// not resolve to a stored component are dropped, never patched with a minted
-// ref. Minting was nondeterministic (uuid.New per run), breaking reproducible
-// output for any producer that emits an edge to a filtered-out component.
+// TestBuilder_DanglingDependencyRefs verifies unresolved refs are dropped
+// because minting replacements with uuid.New would make output
+// nondeterministic.
 func TestBuilder_DanglingDependencyRefs(t *testing.T) {
 	newB := func() *Builder {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
