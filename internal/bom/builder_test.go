@@ -84,7 +84,9 @@ func TestBuilder_WithCounter(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, builder.counter)
 
-	counter := stats.New(t.Name())
+	// expvar registers globally and panics on duplicate prefix (e.g. under
+	// -count=2), so derive a unique prefix per run.
+	counter := stats.New(fmt.Sprintf("%s_%d", t.Name(), time.Now().UnixNano()))
 	result := builder.WithCounter(counter)
 
 	require.Equal(t, builder, result) // Check fluent interface
