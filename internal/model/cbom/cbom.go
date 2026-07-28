@@ -8,9 +8,9 @@ import cdx "github.com/CycloneDX/cyclonedx-go"
 type AssetRef string
 
 // KeyMeta carries key material metadata the Builder needs back out of a
-// component in a version-neutral form. Exactly one of Bits or Curve is set:
-// Bits for sized keys (RSA/DSA modulus bits), Curve for named-curve keys.
-// The zero value means unknown.
+// component in a version-neutral form. At most one of Bits or Curve should be
+// set: Bits for sized keys (RSA/DSA modulus bits), Curve for named-curve keys.
+// The zero value (Bits == 0 and Curve == "") means unknown.
 type KeyMeta struct {
 	Bits  int    // e.g. 2048 for RSA
 	Curve string // e.g. "secp256r1" for EC
