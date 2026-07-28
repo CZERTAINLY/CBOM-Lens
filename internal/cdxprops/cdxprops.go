@@ -23,6 +23,10 @@ type Converter struct {
 	// bomRefHasher controls which algorithm will be used
 	// to generate non-algorithm BOMRef. Defaults to sha256
 	bomRefHasher func([]byte) string
+	// implementationPlatform, when non-empty, overrides the runtime.GOARCH
+	// derived value. BOMRefHash covers implementationPlatform, so tests pin it
+	// to keep refs architecture-independent.
+	implementationPlatform cdx.ImplementationPlatform
 }
 
 func NewConverter() Converter {
@@ -39,6 +43,14 @@ func NewConverter() Converter {
 // Default is yes
 func (c Converter) WithCzertainlyExtensions(czertainly bool) Converter {
 	c.czertainly = czertainly
+	return c
+}
+
+// WithImplementationPlatform overrides the runtime.GOARCH derived
+// implementation platform. Component BOMRefs are content hashes covering this
+// field, so pinning it makes refs reproducible across architectures.
+func (c Converter) WithImplementationPlatform(platform cdx.ImplementationPlatform) Converter {
+	c.implementationPlatform = platform
 	return c
 }
 
@@ -191,6 +203,9 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 }
 
 func (c Converter) ImplementationPlatform() cdx.ImplementationPlatform {
+	if c.implementationPlatform != "" {
+		return c.implementationPlatform
+	}
 	switch runtime.GOARCH {
 	case "amd64":
 		return cdx.ImplementationPlatformX86_64

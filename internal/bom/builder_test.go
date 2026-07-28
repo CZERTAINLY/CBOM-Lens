@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
 	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
@@ -19,7 +23,6 @@ func TestNewBuilder(t *testing.T) {
 		name        string
 		config      model.CBOM
 		wantVersion cdx.SpecVersion
-		wantSchema  string
 		wantErr     bool
 		errMsg      string
 	}{
@@ -27,7 +30,6 @@ func TestNewBuilder(t *testing.T) {
 			name:        "valid version 1.6",
 			config:      model.CBOM{Version: "1.6"},
 			wantVersion: cdx.SpecVersion1_6,
-			wantSchema:  "https://cyclonedx.org/schema/bom-1.6.schema.json",
 			wantErr:     false,
 		},
 		{
@@ -56,10 +58,8 @@ func TestNewBuilder(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, builder)
 				require.Equal(t, tt.wantVersion, builder.version)
-				require.Equal(t, tt.wantSchema, builder.schema)
 				require.NotNil(t, builder.components)
 				require.NotNil(t, builder.dependencies)
-				require.NotNil(t, builder.properties)
 				require.Empty(t, builder.components)
 				require.Empty(t, builder.dependencies)
 			}
@@ -67,12 +67,26 @@ func TestNewBuilder(t *testing.T) {
 	}
 }
 
+func TestBuilder_DeterministicMetadata(t *testing.T) {
+	fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	b = b.WithClock(func() time.Time { return fixed }).
+		WithSerial(func() string { return "urn:uuid:00000000-0000-0000-0000-000000000000" })
+
+	bom := b.BOM(context.Background())
+	require.Equal(t, "urn:uuid:00000000-0000-0000-0000-000000000000", bom.SerialNumber)
+	require.Equal(t, "2024-01-02T03:04:05Z", bom.Metadata.Timestamp)
+}
+
 func TestBuilder_WithCounter(t *testing.T) {
 	builder, err := NewBuilder(model.CBOM{Version: "1.6"})
 	require.NoError(t, err)
 	require.Nil(t, builder.counter)
 
-	counter := stats.New(t.Name())
+	// expvar registers globally and panics on duplicate prefix (e.g. under
+	// -count=2), so derive a unique prefix per run.
+	counter := stats.New(fmt.Sprintf("%s_%d", t.Name(), time.Now().UnixNano()))
 	result := builder.WithCounter(counter)
 
 	require.Equal(t, builder, result) // Check fluent interface
@@ -456,40 +470,6 @@ func TestSafeRefs_Component(t *testing.T) {
 	})
 }
 
-func TestSafeRefs_Dependency(t *testing.T) {
-	t.Run("dependency with no deps", func(t *testing.T) {
-		refs := safeRefs{
-			refs: map[string]string{
-				"comp-1": "safe-comp-1",
-			},
-		}
-
-		dep := refs.dependency(t.Context(), "comp-1", nil)
-
-		require.Equal(t, "safe-comp-1", dep.Ref)
-		require.Nil(t, dep.Dependencies)
-	})
-
-	t.Run("dependency with deps", func(t *testing.T) {
-		refs := safeRefs{
-			refs: map[string]string{
-				"comp-1": "safe-comp-1",
-				"dep-1":  "safe-dep-1",
-				"dep-2":  "safe-dep-2",
-			},
-		}
-
-		deps := []string{"dep-1", "dep-2"}
-		dep := refs.dependency(t.Context(), "comp-1", &deps)
-
-		require.Equal(t, "safe-comp-1", dep.Ref)
-		require.NotNil(t, dep.Dependencies)
-		require.Len(t, *dep.Dependencies, 2)
-		require.Contains(t, *dep.Dependencies, "safe-dep-1")
-		require.Contains(t, *dep.Dependencies, "safe-dep-2")
-	})
-}
-
 func TestReplaceBOMReferences(t *testing.T) {
 	t.Run("replace BOMReference in struct", func(t *testing.T) {
 		refs := safeRefs{
@@ -599,4 +579,218 @@ func TestBuilder_SafeRefs(t *testing.T) {
 		require.Contains(t, safeRefs.refs, "comp-1")
 		require.NotContains(t, safeRefs.refs, "comp-2")
 	})
+}
+
+func TestBuilder_StableOrdering(t *testing.T) {
+	newB := func() *Builder {
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		// two components + one dependency; map iteration order is randomized per range
+		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b"}
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		deps := []string{"a@1"}
+		b.dependencies["b@2"] = &deps
+		return b
+	}
+	first := newB().BOM(context.Background())
+	for i := 0; i < 20; i++ {
+		got := newB().BOM(context.Background())
+		require.Equal(t, *first.Components, *got.Components, "components order must be stable")
+		require.Equal(t, *first.Dependencies, *got.Dependencies, "dependencies order must be stable")
+	}
+	// and it is sorted ascending by ref
+	refs := []string{(*first.Components)[0].BOMRef, (*first.Components)[1].BOMRef}
+	require.True(t, sort.StringsAreSorted(refs), "components sorted by BOMRef")
+}
+
+func TestBuilder_StatsProperties(t *testing.T) {
+	// expvar registers globally and panics on duplicate prefix, so derive a
+	// unique prefix per run and build the expected names from it.
+	prefix := fmt.Sprintf("bom_stats_%d", time.Now().UnixNano())
+	counter := stats.New(prefix)
+	counter.IncFiles()
+	counter.IncFiles()
+	counter.IncErrSources()
+
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	b = b.WithCounter(counter)
+
+	want := []cdx.Property{
+		{Name: prefix + "_files_errors", Value: "0"},
+		{Name: prefix + "_files_excluded", Value: "0"},
+		{Name: prefix + "_files_total", Value: "2"},
+		{Name: prefix + "_sources_errors", Value: "1"},
+		{Name: prefix + "_sources_total", Value: "0"},
+	}
+
+	m := b.model(context.Background())
+	require.Equal(t, want, m.StatsProps)
+
+	bom := b.BOM(context.Background())
+	require.NotNil(t, bom.Metadata.Properties)
+	require.Equal(t, want, *bom.Metadata.Properties)
+}
+
+func TestBuilder_NoCounterOmitsMetadataProperties(t *testing.T) {
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+
+	bom := b.BOM(context.Background())
+	require.Nil(t, bom.Metadata.Properties)
+}
+
+func TestBuilder_BOMDeterministic(t *testing.T) {
+	newB := func() *Builder {
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b"}
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		b.components["c@3"] = &cdx.Component{BOMRef: "c@3", Name: "c"}
+		b.dependencies["b@2"] = &[]string{"a@1", "c@3"}
+		b.dependencies["a@1"] = &[]string{"c@3"}
+		fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+		return b.WithClock(func() time.Time { return fixed }).
+			WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" })
+	}
+
+	var first bytes.Buffer
+	require.NoError(t, newB().AsJSON(context.Background(), &first))
+	for i := 0; i < 10; i++ {
+		var got bytes.Buffer
+		require.NoError(t, newB().AsJSON(context.Background(), &got))
+		require.Equal(t, first.String(), got.String(), "full JSON output must be byte-identical across runs")
+	}
+}
+
+func TestBuilder_NilClockAndSerialKeepDefaults(t *testing.T) {
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	b = b.WithClock(nil).WithSerial(nil)
+
+	require.NotPanics(t, func() {
+		bom := b.BOM(context.Background())
+		require.NotEmpty(t, bom.SerialNumber)
+		require.NotEmpty(t, bom.Metadata.Timestamp)
+	})
+}
+
+// TestBuilder_ModelDependencyEdgeSemantics verifies that dependency entries
+// without edges are omitted and must be modeled explicitly when needed.
+func TestBuilder_ModelDependencyEdgeSemantics(t *testing.T) {
+	t.Run("nil dependsOn entry is omitted", func(t *testing.T) {
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		b.dependencies["a@1"] = nil
+
+		m := b.model(context.Background())
+		require.Empty(t, m.Rels)
+
+		bom := b.BOM(context.Background())
+		require.Empty(t, *bom.Dependencies)
+	})
+
+	t.Run("empty dependsOn entry is omitted", func(t *testing.T) {
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		b.dependencies["a@1"] = &[]string{}
+
+		m := b.model(context.Background())
+		require.Empty(t, m.Rels)
+
+		bom := b.BOM(context.Background())
+		require.Empty(t, *bom.Dependencies)
+	})
+}
+
+// TestBuilder_DanglingDependencyRefs verifies unresolved refs are dropped
+// because minting replacements with uuid.New would make output
+// nondeterministic.
+func TestBuilder_DanglingDependencyRefs(t *testing.T) {
+	newB := func() *Builder {
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b"}
+		fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+		return b.WithClock(func() time.Time { return fixed }).
+			WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" })
+	}
+
+	t.Run("dangling To edge is dropped", func(t *testing.T) {
+		b := newB()
+		b.dependencies["a@1"] = &[]string{"ghost@7", "b@2"}
+
+		m := b.model(context.Background())
+		require.Len(t, m.Rels, 1, "only the resolvable edge survives")
+		require.Equal(t, cbom.AssetRef(safeRef("b@2")), m.Rels[0].To)
+	})
+
+	t.Run("dangling From entry is dropped", func(t *testing.T) {
+		b := newB()
+		b.dependencies["ghost@0"] = &[]string{"a@1"}
+
+		m := b.model(context.Background())
+		require.Empty(t, m.Rels)
+	})
+
+	t.Run("output is deterministic with dangling refs present", func(t *testing.T) {
+		build := func() string {
+			b := newB()
+			b.dependencies["a@1"] = &[]string{"ghost@7"}
+			b.dependencies["ghost@0"] = &[]string{"a@1"}
+			var buf bytes.Buffer
+			require.NoError(t, b.AsJSON(context.Background(), &buf))
+			return buf.String()
+		}
+		first := build()
+		for i := 0; i < 5; i++ {
+			require.Equal(t, first, build(), "dangling refs must not introduce nondeterminism")
+		}
+	})
+}
+
+func TestBuilder_BOMPanicsWithoutEmitter(t *testing.T) {
+	// Builder constructed without NewBuilder validation: BOM() must panic on a
+	// version that has no emitter rather than emit a wrong-version document.
+	b := &Builder{version: cdx.SpecVersion1_5}
+	require.Panics(t, func() { b.BOM(context.Background()) })
+}
+
+func TestBuilder_ModelCanonicalRefs(t *testing.T) {
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+
+	b.components["sig@raw"] = &cdx.Component{BOMRef: "sig@raw", Name: "sig"}
+	b.components["key@raw"] = &cdx.Component{BOMRef: "key@raw", Name: "key"}
+	b.dependencies["sig@raw"] = &[]string{"key@raw"}
+
+	m := b.model(context.Background())
+
+	require.Len(t, m.Assets, 2)
+	require.Len(t, m.Rels, 1)
+
+	var sigRef, keyRef cbom.AssetRef
+	for _, a := range m.Assets {
+		switch a.Component.Name {
+		case "sig":
+			sigRef = a.Ref
+		case "key":
+			keyRef = a.Ref
+		}
+	}
+	require.NotEmpty(t, sigRef)
+	require.NotEmpty(t, keyRef)
+
+	// Raw refs must NOT survive canonicalization.
+	require.NotEqual(t, cbom.AssetRef("sig@raw"), sigRef)
+	require.NotEqual(t, cbom.AssetRef("key@raw"), keyRef)
+
+	rel := m.Rels[0]
+	require.Equal(t, cbom.RelDependsOn, rel.Kind)
+	// Relationship endpoints must match the SAME canonical refs as the assets.
+	require.Equal(t, sigRef, rel.From)
+	require.Equal(t, keyRef, rel.To)
 }

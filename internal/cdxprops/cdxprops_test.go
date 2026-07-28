@@ -8,6 +8,7 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
+	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,4 +88,12 @@ func TestConverter_Nmap(t *testing.T) {
 			require.Contains(t, detection.Location, expectedPorts[i], "detection #%d", i)
 		}
 	})
+}
+
+func TestConverter_WithImplementationPlatform(t *testing.T) {
+	c := cdxprops.NewConverter().WithImplementationPlatform(cdx.ImplementationPlatformARMv8A)
+	require.Equal(t, cdx.ImplementationPlatformARMv8A, c.ImplementationPlatform())
+
+	// Without the override the platform still derives from runtime.GOARCH.
+	require.NotEmpty(t, cdxprops.NewConverter().ImplementationPlatform())
 }
