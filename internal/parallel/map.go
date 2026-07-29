@@ -64,8 +64,7 @@ func (s *Map[E, D]) goWorkers(seq iter.Seq2[E, error]) {
 				select {
 				case <-s.gctx.Done():
 					return s.gctx.Err()
-				default:
-					s.mapped <- result[D]{d: d, e: scanErr}
+				case s.mapped <- result[D]{d: d, e: scanErr}:
 				}
 				return nil
 			})
