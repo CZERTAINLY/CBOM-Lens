@@ -26,8 +26,8 @@ github.com/Microsoft/hcsshim v0.15.0-rc.1 h1:FbbwtQmiD+BVHynGkx5S65JkLyhkEiiTP8n
 github.com/Microsoft/hcsshim v0.15.0-rc.1/go.mod h1:HWvvUPIy9HF6LotILj1G4VyS065rcLQ6tqj6tMUdOfI=
 github.com/STARRY-S/zip v0.2.3 h1:luE4dMvRPDOWQdeDdUxUoZkzUIpTccdKdhHHsQJ1fm4=
 github.com/STARRY-S/zip v0.2.3/go.mod h1:lqJ9JdeRipyOQJrYSOtpNAiaesFO6zVDsE8GIGFaoSk=
-github.com/Ullaakut/nmap/v3 v3.1.0 h1:6gukuRH3iJYIpt860eKHdsy+Ls0Ty1z/7O1QcDKItdA=
-github.com/Ullaakut/nmap/v3 v3.1.0/go.mod h1:dd5K68P7LHc5nKrFwQx6EdTt61O9UN5x3zn1R4SLcco=
+github.com/Ullaakut/nmap/v4 v4.0.1 h1:fG6JHomsoQp6ij/Xk26qiyFO9q2qa+X4xoaft70SJi4=
+github.com/Ullaakut/nmap/v4 v4.0.1/go.mod h1:4i9XxqHOPnfTz43QNgFDZ4bqStJhm4Hg+mcqSeB63HA=
 github.com/adrg/xdg v0.5.3 h1:xRnxJXne7+oWDatRhR1JLnvuccuIeCoBu2rtuLqQB78=
 github.com/adrg/xdg v0.5.3/go.mod h1:nlTsY+NNiCBGCK2tpm09vRqfVzrc2fLmXGpBLF0zlTQ=
 github.com/anchore/go-collections v0.1.1 h1:kGlmSehs+ctTBZr+98F2+taHeolHy+XDx1Nczl8GZc8=
@@ -226,6 +226,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 h1:HWRh5R2+9EifMyIHV7ZV+MIZqgz
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0/go.mod h1:JfhWUomR1baixubs02l85lZYYOm7LV6om4ceouMv45c=
 github.com/h2non/filetype v1.1.3 h1:FKkx9QbD7HR/zjK1Ia5XiBsq9zdLi5Kf3zGyFTAFkGg=
 github.com/h2non/filetype v1.1.3/go.mod h1:319b3zT68BvV+WRj7cwy856M2ehB3HqNOt6sy1HndBY=
+github.com/hamba/testutils v0.7.0 h1:GQ0RJbz4+aFauvEV5AFgPMOKltl8gWZVbzROS5b9qDc=
+github.com/hamba/testutils v0.7.0/go.mod h1:5rw9ZvxgDegvi9j32U5s5LBDrOBhrCu4g53EM03KOF4=
 github.com/hashicorp/go-version v1.8.0 h1:KAkNb1HAiZd1ukkxDFGmokVZe1Xy9HG6NUp+bPle2i4=
 github.com/hashicorp/go-version v1.8.0/go.mod h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09ZGVZPK5anwXA=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=

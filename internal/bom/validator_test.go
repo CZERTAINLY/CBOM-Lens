@@ -3,6 +3,7 @@ package bom_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
@@ -297,6 +298,80 @@ func TestValidator_JSFSignature(t *testing.T) {
 		err := validator.ValidateBytes(raw)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Property 'signature' does not match")
+	})
+}
+
+// TestValidator_DeepNesting locks the recursion-tracking fix that arrived
+// with the kaptinlin/jsonschema v0.9.3 bump (fixed in v0.9.2): v0.7.5 broke
+// recursive $ref cycles with a depth heuristic that turned validation
+// fail-open, silently ACCEPTING invalid content nested at component depth
+// >= 5. Both directions are asserted so the check can neither regress to
+// fail-open nor over-tighten into rejecting valid deep nesting.
+func TestValidator_DeepNesting(t *testing.T) {
+	validator, err := bom.NewValidator(cdx.SpecVersion1_6)
+	require.NoError(t, err)
+
+	// deeplyNested wraps leaf into a components-in-components chain so that
+	// leaf sits at the given nesting depth (level 1 = direct child of the
+	// BOM's components array).
+	deeplyNested := func(depth int, leaf cdx.Component) cdx.Component {
+		comp := leaf
+		for level := depth - 1; level >= 1; level-- {
+			comp = cdx.Component{
+				Type:       cdx.ComponentTypeLibrary,
+				Name:       fmt.Sprintf("nested-level-%d", level),
+				Components: &[]cdx.Component{comp},
+			}
+		}
+		return comp
+	}
+
+	validate := func(t *testing.T, leaf cdx.Component) (error, error) {
+		t.Helper()
+		b, err := bom.NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		doc := b.BOM(t.Context())
+		doc.Components = &[]cdx.Component{deeplyNested(8, leaf)}
+
+		var buf bytes.Buffer
+		enc := cdx.NewBOMEncoder(&buf, cdx.BOMFileFormatJSON)
+		require.NoError(t, enc.Encode(&doc))
+
+		return validator.Validate(&doc), validator.ValidateBytes(buf.Bytes())
+	}
+
+	t.Run("invalid type enum at depth 8 is rejected", func(t *testing.T) {
+		errBOM, errBytes := validate(t, cdx.Component{
+			Type: "not-a-component-type",
+			Name: "deep-invalid-leaf",
+		})
+
+		// The error format flattens the evaluation tree, deduplicates
+		// identical lines, and the underlying library resets instance
+		// pointers at every $ref hop — so no accumulated
+		// /components/0/.../type pointer exists to match. Depth is proven
+		// by the value instead: the bogus type exists only on the depth-8
+		// leaf, so an enum violation naming it can only come from
+		// descending all eight levels (v0.7.5 bailed out fail-open and
+		// produced no error at all). Assertions pin structural fragments —
+		// JSON pointer, keyword, offending value — not translated
+		// message text.
+		for _, err := range []error{errBOM, errBytes} {
+			require.Error(t, err)
+			require.Regexp(t, `(?m)^/components: items: `, err.Error())
+			require.Regexp(t, `(?m)^/0: \$ref: `, err.Error())
+			require.Regexp(t, `(?m)^/type: enum: Value not-a-component-type`, err.Error())
+		}
+	})
+
+	t.Run("fully valid nesting at depth 8 is accepted", func(t *testing.T) {
+		errBOM, errBytes := validate(t, cdx.Component{
+			Type: cdx.ComponentTypeLibrary,
+			Name: "deep-valid-leaf",
+		})
+
+		require.NoError(t, errBOM)
+		require.NoError(t, errBytes)
 	})
 }
 
