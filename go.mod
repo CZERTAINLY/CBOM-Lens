@@ -1,6 +1,6 @@
 module github.com/CZERTAINLY/CBOM-lens
 
-go 1.26
+go 1.26.4
 
 require (
 	cuelang.org/go v0.16.1
@@ -15,7 +15,7 @@ require (
 	github.com/go-co-op/gocron/v2 v2.21.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/kaptinlin/jsonschema v0.7.5
+	github.com/kaptinlin/jsonschema v0.9.3
 	github.com/kodeart/go-problem/v2 v2.0.3
 	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0
 	github.com/robfig/cron/v3 v3.0.1
@@ -67,7 +67,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
+	github.com/cockroachdb/apd/v3 v3.2.3 // indirect
 	github.com/containerd/cgroups/v3 v3.1.3 // indirect
 	github.com/containerd/containerd/api v1.10.0 // indirect
 	github.com/containerd/containerd/v2 v2.2.2 // indirect
@@ -98,7 +98,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/gitleaks/go-gitdiff v0.9.1 // indirect
-	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -114,8 +114,8 @@ require (
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
-	github.com/kaptinlin/go-i18n v0.2.12 // indirect
-	github.com/kaptinlin/jsonpointer v0.4.17 // indirect
+	github.com/kaptinlin/go-i18n v0.6.0 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.27 // indirect
 	github.com/kaptinlin/messageformat-go v0.4.18 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
@@ -153,7 +153,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.13.1 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
+	github.com/pelletier/go-toml/v2 v2.4.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
