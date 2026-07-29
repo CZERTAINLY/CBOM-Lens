@@ -2,117 +2,24 @@ name: Test Docker image
 
 on:
   pull_request:
-    branches: [ main*, feat/*, hotfix/* ]
+    paths-ignore:
+      - 'deploy/charts/**'
+    branches: [ main ]
   workflow_dispatch:
 
 concurrency:
   group: pr-${{ github.event.pull_request.number || github.ref }}-docker-test
   cancel-in-progress: true
 
-env:
-  REGISTRY: harbor.3key.company
-  IMAGE: harbor.3key.company/czertainly/cbom-lens
-  DOCKERFILE: ./Dockerfile
-  # cache scope so both jobs share the same cache namespace
-  CACHE_SCOPE: cbom-lens
-
 permissions:
   contents: read
+  security-events: write
 
 jobs:
-  build_amd64:
-    name: Build amd64
-    runs-on: ubuntu-latest
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Build (amd64) - local only (no push)
-        id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: ${{ env.DOCKERFILE }}
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: ${{ env.IMAGE }}:ci
-          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}-amd64
-          cache-to: type=gha,mode=max,scope=${{ env.CACHE_SCOPE }}-amd64
-          build-args: |
-            VERSION=${{ github.ref_name }}
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: ${{ env.IMAGE }}:ci
-          format: json
-          output: trivy-report-amd64.json
-          exit-code: 0
-
-      - name: Upload vulnerability report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: trivy-report-amd64
-          path: trivy-report-amd64.json
-
-      - name: Fail build on vulnerabilities
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: ${{ env.IMAGE }}:ci
-          trivy-config: config/trivy.yaml
-          skip-setup-trivy: true
-
-  build_arm64:
-    name: Build arm64
-    runs-on: ubuntu-24.04-arm
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Build (arm64) - local only (no push)
-        id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: ${{ env.DOCKERFILE }}
-          platforms: linux/arm64
-          push: false
-          load: true
-          tags: ${{ env.IMAGE }}:ci
-          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}-arm64
-          cache-to: type=gha,mode=max,scope=${{ env.CACHE_SCOPE }}-arm64
-          build-args: |
-            VERSION=${{ github.ref_name }}
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: ${{ env.IMAGE }}:ci
-          format: json
-          output: trivy-report-arm64.json
-          exit-code: 0
-
-      - name: Upload vulnerability report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: trivy-report-arm64
-          path: trivy-report-arm64.json
-
-      - name: Fail build on vulnerabilities
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: ${{ env.IMAGE }}:ci
-          trivy-config: config/trivy.yaml
-          skip-setup-trivy: true
+  test:
+    uses: OmniTrustILM/.github/.github/workflows/containers-test.yml@main
+    with:
+      image: ilm/cbom-lens
+      cache-scope: cbom-lens
+      build-args: |
+        VERSION=${{ github.ref_name }}
