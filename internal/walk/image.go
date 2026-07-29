@@ -3,6 +3,7 @@ package walk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"iter"
@@ -47,9 +48,27 @@ func Images(parentContext context.Context, counter *stats.Stats, configs model.C
 					_ = cli.Close()
 				}
 			}()
-			for img, err := range images(ctx, cli, cc) {
+
+			// Failing to enumerate the images makes the whole host
+			// unusable, so it counts as a source failure, like a refused
+			// connection.
+			names, err := imageNames(ctx, cli, cc)
+			if err != nil {
+				counter.IncErrSources()
+				slog.WarnContext(ctx, "can't list images on container host, skipping", "error", err)
+				if !yield(nil, err) {
+					return
+				}
+				continue
+			}
+
+			for _, name := range names {
+				img, err := stereoscope.GetImageFromSource(ctx, name, image.DockerDaemonSource, nil)
 				if err != nil {
-					slog.WarnContext(ctx, "listing or loading image failed", "error", err)
+					// One unreadable image does not invalidate the
+					// host, the remaining images are still scanned.
+					counter.IncErrFiles()
+					slog.DebugContext(ctx, "can't load image, skipping", "image", name, "error", err)
 					if !yield(nil, err) {
 						return
 					}
@@ -123,57 +142,45 @@ func image1(ctx context.Context, counter *stats.Stats, name string, image *image
 	}
 }
 
-func newClient(_ context.Context, cfg model.ContainerConfig) (*client.Client, error) {
+func newClient(ctx context.Context, cfg model.ContainerConfig) (*client.Client, error) {
 	cli, err := client.New(client.WithHost(cfg.Host))
 	if err != nil {
 		return nil, err
 	}
+
+	// client.New starts at the client's maximum API version and negotiates
+	// lazily inside the first request, where the negotiation error is
+	// discarded — an unreachable or too old daemon would then fail with a
+	// confusing "client version is too new" instead of a connection error.
+	// Negotiate here so an unusable host is reported as one.
+	//
+	// A daemon answering the ping without an Api-Version header (a proxy,
+	// typically) keeps the client at its maximum version: the moby client
+	// offers no way to detect that, so such a host is treated as usable.
+	if _, err := cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true}); err != nil {
+		_ = cli.Close()
+		return nil, fmt.Errorf("ping %s: %w", cfg.Host, err)
+	}
 	return cli, nil
 }
 
-func images(ctx context.Context, cli *client.Client, cfg model.ContainerConfig) iter.Seq2[*image.Image, error] {
-	if len(cfg.Images) == 0 {
-		return imagesAll(ctx, cli)
+// imageNames returns the images to scan on the host: the configured ones, or
+// everything the daemon reports when none are configured.
+func imageNames(ctx context.Context, cli *client.Client, cfg model.ContainerConfig) ([]string, error) {
+	if len(cfg.Images) > 0 {
+		return cfg.Images, nil
 	}
 
-	return func(yield func(*image.Image, error) bool) {
-		for _, name := range cfg.Images {
-			img, err := stereoscope.GetImageFromSource(
-				ctx,
-				name,
-				image.DockerDaemonSource,
-				nil,
-			)
-			if !yield(img, err) {
-				return
-			}
-		}
+	res, err := cli.ImageList(ctx, client.ImageListOptions{All: false})
+	if err != nil {
+		return nil, fmt.Errorf("listing images: %w", err)
 	}
-}
 
-func imagesAll(ctx context.Context, cli *client.Client) iter.Seq2[*image.Image, error] {
-	return func(yield func(*image.Image, error) bool) {
-		res, err := cli.ImageList(
-			ctx,
-			client.ImageListOptions{All: false},
-		)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-
-		for _, dimg := range res.Items {
-			img, err := stereoscope.GetImageFromSource(
-				ctx,
-				dimg.ID,
-				image.DockerDaemonSource,
-				nil,
-			)
-			if !yield(img, err) {
-				return
-			}
-		}
+	names := make([]string, 0, len(res.Items))
+	for _, dimg := range res.Items {
+		names = append(names, dimg.ID)
 	}
+	return names, nil
 }
 
 // dentry implements model.Entry for an image file node
