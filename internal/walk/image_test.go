@@ -94,17 +94,17 @@ func TestImages_FakeDaemonListError(t *testing.T) {
 		Images: nil,
 	}
 
-	// Pre-existing behavior pinned across the docker->moby client
-	// migration: imagesAll yields the ImageList error internally, but
-	// Images ranges over that Seq2 with a single variable, so the error
-	// never reaches the caller — the iteration ends with zero yields.
+	// The ImageList failure must surface to the caller as a single
+	// (nil, err) yield (issue #194 — previously swallowed by a
+	// single-variable range inside Images).
 	idx := 0
 	counter := stats.New(t.Name())
 	for entry, err := range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
-		t.Errorf("unexpected yield: entry=%v err=%v", entry, err)
+		require.Nil(t, entry)
+		require.Error(t, err)
 		idx++
 	}
-	require.Equal(t, 0, idx)
+	require.Equal(t, 1, idx)
 }
 
 func TestWrongHost(t *testing.T) {

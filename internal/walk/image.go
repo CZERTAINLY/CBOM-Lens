@@ -47,7 +47,14 @@ func Images(parentContext context.Context, counter *stats.Stats, configs model.C
 					_ = cli.Close()
 				}
 			}()
-			for img := range images(ctx, cli, cc) {
+			for img, err := range images(ctx, cli, cc) {
+				if err != nil {
+					slog.WarnContext(ctx, "listing or loading image failed", "error", err)
+					if !yield(nil, err) {
+						return
+					}
+					continue
+				}
 				if img == nil {
 					slog.DebugContext(ctx, "img is nil skipping")
 					continue
