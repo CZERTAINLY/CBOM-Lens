@@ -346,14 +346,21 @@ func TestValidator_DeepNesting(t *testing.T) {
 			Name: "deep-invalid-leaf",
 		})
 
-		// The failure chain must name the leaf's type/enum violation — the
-		// bogus value exists only on the depth-8 component, so matching it
-		// proves the validator actually descended that deep instead of
-		// bailing out fail-open like v0.7.5 did.
+		// The error format flattens the evaluation tree, deduplicates
+		// identical lines, and the underlying library resets instance
+		// pointers at every $ref hop — so no accumulated
+		// /components/0/.../type pointer exists to match. Depth is proven
+		// by the value instead: the bogus type exists only on the depth-8
+		// leaf, so an enum violation naming it can only come from
+		// descending all eight levels (v0.7.5 bailed out fail-open and
+		// produced no error at all). Assertions pin structural fragments —
+		// JSON pointer, keyword, offending value — not translated
+		// message text.
 		for _, err := range []error{errBOM, errBytes} {
 			require.Error(t, err)
-			require.Contains(t, err.Error(), "Property 'type' does not match the schema")
-			require.Contains(t, err.Error(), "/type: enum: Value not-a-component-type")
+			require.Regexp(t, `(?m)^/components: items: `, err.Error())
+			require.Regexp(t, `(?m)^/0: \$ref: `, err.Error())
+			require.Regexp(t, `(?m)^/type: enum: Value not-a-component-type`, err.Error())
 		}
 	})
 
