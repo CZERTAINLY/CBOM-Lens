@@ -151,9 +151,8 @@ func imagesAll(ctx context.Context, cli *client.Client) iter.Seq2[*image.Image, 
 			client.ImageListOptions{All: false},
 		)
 		if err != nil {
-			if !yield(nil, err) {
-				return
-			}
+			yield(nil, err)
+			return
 		}
 
 		for _, dimg := range res.Items {
