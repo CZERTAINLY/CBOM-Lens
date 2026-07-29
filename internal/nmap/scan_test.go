@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	nmapv4 "github.com/Ullaakut/nmap/v4"
@@ -44,6 +45,27 @@ func fakeNmap(t *testing.T, fixturePath string, stderrLine string, exitCode int)
 	return binPath, argsFile
 }
 
+// scanFake runs s.Scan against a fakeNmap script, retrying the rare ETXTBSY
+// fork/exec race: with parallel tests, a child process forked by another test
+// can briefly hold this test's just-written script file descriptor between
+// its fork and exec, making exec of the script fail with "text file busy"
+// (see golang.org/issue/22315). The window is tiny, so a few short retries
+// make the deterministic tests immune to it. Any other outcome, success or
+// failure, is returned as-is.
+func scanFake(t *testing.T, s Scanner, addr netip.Addr) (model.Nmap, error) {
+	t.Helper()
+	var got model.Nmap
+	var err error
+	for range 20 {
+		got, err = s.Scan(t.Context(), addr)
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return got, err
+}
+
 // recordedArgs reads back the argv recorded by the fakeNmap script,
 // one argument per line.
 func recordedArgs(t *testing.T, argsFile string) []string {
@@ -57,10 +79,8 @@ func TestScan_EmitsExpectedArgsAndParsesTLS(t *testing.T) {
 	t.Parallel()
 	bin, argsFile := fakeNmap(t, "testdata/nmaprun_tls.xml", "", 0)
 
-	got, err := New().
-		WithNmapBinary(bin).
-		WithPorts("443").
-		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
+	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
+		netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 
 	// The exact argv is an intentional parity lock on the nmap command line
@@ -122,9 +142,8 @@ func TestScan_IPv6AddsDash6AndDefaultPorts(t *testing.T) {
 	t.Parallel()
 	bin, argsFile := fakeNmap(t, "testdata/nmaprun_tls.xml", "", 0)
 
-	_, err := New().
-		WithNmapBinary(bin).
-		Scan(t.Context(), netip.MustParseAddr("::1"))
+	_, err := scanFake(t, New().WithNmapBinary(bin),
+		netip.MustParseAddr("::1"))
 	require.NoError(t, err)
 
 	// The exact argv is an intentional parity lock on the nmap command line
@@ -147,10 +166,8 @@ func TestScan_NoHostsReturnsZeroModel(t *testing.T) {
 	t.Parallel()
 	bin, _ := fakeNmap(t, "testdata/nmaprun_empty.xml", "", 0)
 
-	got, err := New().
-		WithNmapBinary(bin).
-		WithPorts("443").
-		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
+	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
+		netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 	require.Equal(t, model.Nmap{}, got)
 }
@@ -159,10 +176,8 @@ func TestScan_LogsWarningsFromStderr(t *testing.T) {
 	t.Parallel()
 	bin, _ := fakeNmap(t, "testdata/nmaprun_tls.xml", "Warning: fake warning", 0)
 
-	got, err := New().
-		WithNmapBinary(bin).
-		WithPorts("443").
-		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
+	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
+		netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 	require.Len(t, got.Ports, 1)
 }
@@ -173,10 +188,8 @@ func TestScan_BinaryExitErrorWrapped(t *testing.T) {
 	require.NoError(t, os.WriteFile(garbage, []byte("this is not nmap XML output\n"), 0o644))
 	bin, _ := fakeNmap(t, garbage, "", 1)
 
-	got, err := New().
-		WithNmapBinary(bin).
-		WithPorts("443").
-		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
+	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
+		netip.MustParseAddr("127.0.0.1"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nmap scan services:")
 	require.Equal(t, model.Nmap{}, got)
