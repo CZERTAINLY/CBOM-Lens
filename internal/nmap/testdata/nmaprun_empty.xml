@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -T4 -sV --script=ssl-enum-ciphers,ssl-cert,ssh-hostkey 127.0.0.1 -p 443 -oX -" start="1712000000" startstr="Mon Apr  1 12:00:00 2024" version="7.95" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="1" services="443"/>
+<runstats><finished time="1712000001" timestr="Mon Apr  1 12:00:01 2024" summary="Nmap done at Mon Apr  1 12:00:01 2024; 1 IP address (0 hosts up) scanned in 1.00 seconds" elapsed="1.00" exit="success"/><hosts up="0" down="0" total="1"/></runstats>
+</nmaprun>
