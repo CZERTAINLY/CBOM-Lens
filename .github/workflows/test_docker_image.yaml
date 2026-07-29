@@ -21,5 +21,8 @@ jobs:
     with:
       image: ilm/cbom-lens
       cache-scope: cbom-lens
+      # Repo config mirrors the org policy; override exists only so the
+      # repo-local .trivyignore (unfixable CVEs, see #184) is honored.
+      allow-trivy-config-override: true
       build-args: |
         VERSION=${{ github.ref_name }}
