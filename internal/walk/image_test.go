@@ -5,7 +5,11 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
+	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,6 +22,90 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+// fakeDockerDaemon starts a minimal Docker Engine API server on a unix
+// socket. It answers the version-negotiation ping and delegates the image
+// list endpoint to imagesHandler. Returns the socket path.
+func fakeDockerDaemon(t *testing.T, imagesHandler http.HandlerFunc) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sockets required")
+	}
+	sock := filepath.Join(t.TempDir(), "d.sock")
+	l, err := net.Listen("unix", sock)
+	require.NoError(t, err)
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/_ping"):
+			w.Header().Set("Api-Version", "1.51")
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/images/json"):
+			imagesHandler(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return sock
+}
+
+func TestImages_FakeDaemonEmpty(t *testing.T) {
+	sock := fakeDockerDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	})
+
+	config := model.ContainerConfig{
+		Name:   t.Name(),
+		Type:   "docker",
+		Host:   "unix://" + sock,
+		Images: nil,
+	}
+
+	idx := 0
+	counter := stats.New(t.Name())
+	for range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
+		idx++
+	}
+	require.Equal(t, 0, idx)
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		switch {
+		case strings.HasSuffix(key, "sources_total"):
+			exp = "1"
+		case strings.HasSuffix(key, "sources_errors"):
+			exp = "0"
+		}
+		require.Equal(t, exp, value, key)
+	}
+}
+
+func TestImages_FakeDaemonListError(t *testing.T) {
+	sock := fakeDockerDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "image list failed", http.StatusInternalServerError)
+	})
+
+	config := model.ContainerConfig{
+		Name:   t.Name(),
+		Type:   "docker",
+		Host:   "unix://" + sock,
+		Images: nil,
+	}
+
+	// Pre-existing behavior pinned across the docker->moby client
+	// migration: imagesAll yields the ImageList error internally, but
+	// Images ranges over that Seq2 with a single variable, so the error
+	// never reaches the caller — the iteration ends with zero yields.
+	idx := 0
+	counter := stats.New(t.Name())
+	for entry, err := range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
+		t.Errorf("unexpected yield: entry=%v err=%v", entry, err)
+		idx++
+	}
+	require.Equal(t, 0, idx)
+}
 
 func TestWrongHost(t *testing.T) {
 	config := model.ContainerConfig{
