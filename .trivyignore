@@ -1,0 +1,7 @@
+# CVE-2026-34040 — github.com/docker/docker v28.5.2+incompatible.
+# Moby daemon authorization-bypass; the fix ships only in Moby v29, which no
+# longer publishes go module tags for github.com/docker/docker. cbom-lens
+# consumes only the client and api/types packages; the vulnerable authz
+# middleware is daemon-side code never linked into our binary's execution
+# paths. Remove once imports migrate to github.com/moby/moby/client (#184).
+CVE-2026-34040
