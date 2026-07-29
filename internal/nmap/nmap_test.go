@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	nmapv3 "github.com/Ullaakut/nmap/v3"
+	nmapv4 "github.com/Ullaakut/nmap/v4"
 	"github.com/stretchr/testify/require"
 )
 
@@ -147,7 +147,7 @@ func TestHostToModel(t *testing.T) {
 	require.NotEmpty(t, rawJSON)
 
 	var raw struct {
-		Info nmapv3.Host `json:"Info"`
+		Info nmapv4.Host `json:"Info"`
 	}
 	err = json.NewDecoder(bytes.NewReader(rawJSON)).Decode(&raw)
 	require.NoError(t, err)
