@@ -246,7 +246,27 @@ func TestScan_BinaryExitErrorWrapped(t *testing.T) {
 	got, err := New().WithNmapBinary(bin).WithPorts("443").
 		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "nmap scan services:")
+	require.ErrorContains(t, err, "nmap scan services:")
+	// The exit status must win over the (equally broken) stdout: v4 maps a
+	// non-zero exit to the run error and never reaches XML parsing.
+	require.ErrorContains(t, err, "exit status 1")
+	require.Equal(t, model.Nmap{}, got)
+}
+
+func TestScan_GarbageOutputIsParseError(t *testing.T) {
+	// Not parallel: fakeNmap uses t.Setenv.
+	garbage := filepath.Join(t.TempDir(), "garbage.txt")
+	require.NoError(t, os.WriteFile(garbage, []byte("this is not nmap XML output\n"), 0o644))
+	bin, _ := fakeNmap(t, garbage, "", 0)
+
+	got, err := New().WithNmapBinary(bin).WithPorts("443").
+		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
+	require.Error(t, err)
+	require.ErrorContains(t, err, "nmap scan services:")
+	// A clean exit with unparseable stdout must surface v4's XML parse
+	// error identity, pinning the run-error-over-parse-error precedence
+	// from the other direction.
+	require.ErrorContains(t, err, "parsing nmap XML output")
 	require.Equal(t, model.Nmap{}, got)
 }
 
