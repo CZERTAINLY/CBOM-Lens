@@ -2,6 +2,7 @@ package nmap
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -246,6 +247,45 @@ func TestScan_BinaryExitErrorWrapped(t *testing.T) {
 		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nmap scan services:")
+	require.Equal(t, model.Nmap{}, got)
+}
+
+func TestScan_ContextDeadlineReturnsScanTimeout(t *testing.T) {
+	// Not parallel: fakeNmap uses t.Setenv.
+	bin, _ := fakeNmap(t, "testdata/nmaprun_tls.xml", "", 0)
+	// The fake sleeps well past the context deadline, so the scan can only
+	// finish early by the context killing it.
+	t.Setenv("NMAP_FAKE_SLEEP_MS", "10000")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	got, err := New().WithNmapBinary(bin).WithPorts("443").
+		Scan(ctx, netip.MustParseAddr("127.0.0.1"))
+	require.Less(t, time.Since(start), 5*time.Second,
+		"Scan must return promptly after the deadline instead of waiting out the fake's sleep")
+	require.Error(t, err)
+	require.ErrorIs(t, err, nmapv4.ErrScanTimeout)
+	require.Equal(t, model.Nmap{}, got)
+}
+
+func TestScan_ContextCancelReturnsScanInterrupt(t *testing.T) {
+	// Not parallel: fakeNmap uses t.Setenv.
+	bin, _ := fakeNmap(t, "testdata/nmaprun_tls.xml", "", 0)
+	t.Setenv("NMAP_FAKE_SLEEP_MS", "10000")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	timer := time.AfterFunc(100*time.Millisecond, cancel)
+	defer timer.Stop()
+
+	start := time.Now()
+	got, err := New().WithNmapBinary(bin).WithPorts("443").
+		Scan(ctx, netip.MustParseAddr("127.0.0.1"))
+	require.Less(t, time.Since(start), 5*time.Second,
+		"Scan must return promptly after cancellation instead of waiting out the fake's sleep")
+	require.Error(t, err)
+	require.ErrorIs(t, err, nmapv4.ErrScanInterrupt)
 	require.Equal(t, model.Nmap{}, got)
 }
 
