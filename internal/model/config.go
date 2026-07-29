@@ -618,11 +618,12 @@ func probeDockerLikeSocket(ctx context.Context, sockPath string) (string, error)
 	defer func() { _ = cli.Close() }()
 
 	if _, err = cli.Ping(ctx, client.PingOptions{}); err != nil {
-		// Distinguish dial errors. The moby client wraps dial failures
-		// in errConnectionFailed which drops net.Error from the chain,
-		// so also treat an expired probe deadline as a timeout.
+		// Distinguish a host that is silent from one that refuses: the
+		// client passes context errors through undecorated, and the
+		// resulting *url.Error is a net.Error reporting Timeout, while a
+		// refused dial is replaced by its own error type.
 		var netErr net.Error
-		if (errors.As(err, &netErr) && netErr.Timeout()) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if errors.As(err, &netErr) && netErr.Timeout() {
 			return "", fmt.Errorf("ping timeout: %w", err)
 		}
 		return "", fmt.Errorf("ping failed: %w", err)
