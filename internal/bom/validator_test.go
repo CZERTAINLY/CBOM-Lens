@@ -330,14 +330,14 @@ func TestValidator_DeepNesting(t *testing.T) {
 		t.Helper()
 		b, err := bom.NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
-		bom := b.BOM(t.Context())
-		bom.Components = &[]cdx.Component{deeplyNested(8, leaf)}
+		doc := b.BOM(t.Context())
+		doc.Components = &[]cdx.Component{deeplyNested(8, leaf)}
 
 		var buf bytes.Buffer
 		enc := cdx.NewBOMEncoder(&buf, cdx.BOMFileFormatJSON)
-		require.NoError(t, enc.Encode(&bom))
+		require.NoError(t, enc.Encode(&doc))
 
-		return validator.Validate(&bom), validator.ValidateBytes(buf.Bytes())
+		return validator.Validate(&doc), validator.ValidateBytes(buf.Bytes())
 	}
 
 	t.Run("invalid type enum at depth 8 is rejected", func(t *testing.T) {
