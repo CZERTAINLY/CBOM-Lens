@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	nmapv4 "github.com/Ullaakut/nmap/v4"
 	"github.com/stretchr/testify/require"
 )
 
@@ -218,4 +219,54 @@ func TestScannerBuilders(t *testing.T) {
 	require.Equal(t, []string{"443"}, s1.ports)
 	require.Equal(t, []string{"443", "8443"}, s2.ports)
 	require.Equal(t, []string{"443", "9443"}, s3.ports)
+}
+
+func TestParseScripts_UnknownScriptGoesToScripts(t *testing.T) {
+	t.Parallel()
+
+	var out model.NmapPort
+	parseScripts(t.Context(), []nmapv4.Script{
+		{ID: "http-title", Output: "Some title"},
+	}, &out)
+
+	require.Equal(t, []model.NmapScript{
+		{ID: "http-title", Value: "Some title"},
+	}, out.Scripts)
+	require.Empty(t, out.Ciphers)
+	require.Empty(t, out.TLSCerts)
+	require.Empty(t, out.SSHHostKeys)
+}
+
+func TestCipherSuites_IgnoresNonCipherTables(t *testing.T) {
+	t.Parallel()
+
+	got := cipherSuites(t.Context(), []nmapv4.Table{
+		{Key: "compressors"},
+		{
+			Key: "ciphers",
+			Tables: []nmapv4.Table{
+				{
+					Elements: []nmapv4.Element{
+						{Key: "name", Value: "X"},
+						{Key: "kex_info", Value: "Y"},
+					},
+				},
+			},
+		},
+	})
+
+	require.Equal(t, []model.SSLCipher{{Name: "X", KexInfo: "Y"}}, got)
+}
+
+func TestSSLCerts_SkipsUnparseablePEM(t *testing.T) {
+	t.Parallel()
+
+	got := sslCerts(t.Context(), nmapv4.Script{
+		ID: "ssl-cert",
+		Elements: []nmapv4.Element{
+			{Key: "pem", Value: "no pem here"},
+		},
+	})
+
+	require.Empty(t, got)
 }
