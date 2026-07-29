@@ -260,7 +260,7 @@ func nmaps(_ context.Context, cfg model.Ports) ([]nmap.Scanner, []netip.Addr) {
 	var scanner = nmap.New()
 
 	if cfg.Binary != "" {
-		scanner.WithNmapBinary(cfg.Binary)
+		scanner = scanner.WithNmapBinary(cfg.Binary)
 	}
 	if cfg.Ports != "" {
 		scanner = scanner.WithPorts(cfg.Ports)
