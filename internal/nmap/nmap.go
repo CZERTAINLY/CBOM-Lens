@@ -13,10 +13,10 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
-	"github.com/Ullaakut/nmap/v3"
+	"github.com/Ullaakut/nmap/v4"
 )
 
-// Scanner is a wrapper on top of "github.com/Ullaakut/nmap/v3" Scanner
+// Scanner is a wrapper on top of "github.com/Ullaakut/nmap/v4" Scanner
 type Scanner struct {
 	nmap    string
 	ports   []string
@@ -96,14 +96,14 @@ func (s Scanner) Scan(ctx context.Context, addr netip.Addr) (model.Nmap, error) 
 }
 
 func scan(ctx context.Context, options []nmap.Option) (*nmap.Run, error) {
-	scanner, err := nmap.NewScanner(ctx, options...)
+	scanner, err := nmap.NewScanner(options...)
 	if err != nil {
 		return nil, fmt.Errorf("creating nmap scanner: %w", err)
 	}
 
 	now := time.Now()
 	slog.InfoContext(ctx, "scan started")
-	scan, warningsp, err := scanner.Run()
+	scan, err := scanner.Run(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "scan failed", "error", err)
 		return nil, fmt.Errorf("nmap scan: %w", err)
@@ -128,10 +128,8 @@ func scan(ctx context.Context, options []nmap.Option) (*nmap.Run, error) {
 
 	slog.DebugContext(ctx, "scan finished", "elapsed", time.Since(now).String())
 
-	if warningsp != nil && *warningsp != nil {
-		for _, warn := range *warningsp {
-			slog.WarnContext(ctx, "scan", "warning", warn)
-		}
+	for _, warn := range scan.Warnings() {
+		slog.WarnContext(ctx, "scan", "warning", warn)
 	}
 
 	return scan, nil

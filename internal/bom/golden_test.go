@@ -19,7 +19,7 @@ import (
 	pemscan "github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
-	nmapv3 "github.com/Ullaakut/nmap/v3"
+	nmapv4 "github.com/Ullaakut/nmap/v4"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,7 +52,7 @@ func buildRepresentativeCorpus(t *testing.T) []model.Detection {
 	rawJSON, err := os.ReadFile(filepath.Join("..", "nmap", "testdata", "raw.json"))
 	require.NoError(t, err)
 	var raw struct {
-		Info nmapv3.Host `json:"Info"`
+		Info nmapv4.Host `json:"Info"`
 	}
 	require.NoError(t, json.Unmarshal(rawJSON, &raw))
 
@@ -209,7 +209,7 @@ func certFromPEMFixture(t *testing.T, path string) *x509.Certificate {
 // the "ssl-cert" nmap script output of host (as a PEM "elem" value, the way
 // nmap emits it). This mirrors internal/nmap's own sslCerts() parsing so the
 // certificate matches exactly what a real nmap/cdxprops run would see.
-func certFromNmapFixture(t *testing.T, host nmapv3.Host) *x509.Certificate {
+func certFromNmapFixture(t *testing.T, host nmapv4.Host) *x509.Certificate {
 	t.Helper()
 	for _, port := range host.Ports {
 		for _, script := range port.Scripts {
