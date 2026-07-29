@@ -18,8 +18,7 @@ import (
 	"github.com/anchore/stereoscope/pkg/filetree/filenode"
 	"github.com/anchore/stereoscope/pkg/image"
 
-	dimage "github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // Images traverse through all defined containers and their images and all files inside
@@ -118,10 +117,7 @@ func image1(ctx context.Context, counter *stats.Stats, name string, image *image
 }
 
 func newClient(_ context.Context, cfg model.ContainerConfig) (*client.Client, error) {
-	cli, err := client.NewClientWithOpts(
-		client.WithHost(cfg.Host),
-		client.WithAPIVersionNegotiation(),
-	)
+	cli, err := client.New(client.WithHost(cfg.Host))
 	if err != nil {
 		return nil, err
 	}
@@ -150,9 +146,9 @@ func images(ctx context.Context, cli *client.Client, cfg model.ContainerConfig) 
 
 func imagesAll(ctx context.Context, cli *client.Client) iter.Seq2[*image.Image, error] {
 	return func(yield func(*image.Image, error) bool) {
-		images, err := cli.ImageList(
+		res, err := cli.ImageList(
 			ctx,
-			dimage.ListOptions{All: false},
+			client.ImageListOptions{All: false},
 		)
 		if err != nil {
 			if !yield(nil, err) {
@@ -160,7 +156,7 @@ func imagesAll(ctx context.Context, cli *client.Client) iter.Seq2[*image.Image, 
 			}
 		}
 
-		for _, dimg := range images {
+		for _, dimg := range res.Items {
 			img, err := stereoscope.GetImageFromSource(
 				ctx,
 				dimg.ID,

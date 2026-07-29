@@ -6,10 +6,8 @@ require (
 	cuelang.org/go v0.16.1
 	github.com/CycloneDX/cyclonedx-go v0.10.0
 	github.com/Ullaakut/nmap/v3 v3.1.0
-	github.com/Ullaakut/nmap/v4 v4.0.1
 	github.com/anchore/stereoscope v0.3.0
 	github.com/creasty/defaults v1.8.0
-	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0
 	github.com/gliderlabs/ssh v0.3.8
 	github.com/go-co-op/gocron/v2 v2.22.0
@@ -17,6 +15,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/kaptinlin/jsonschema v0.9.3
 	github.com/kodeart/go-problem/v2 v2.0.3
+	github.com/moby/moby/client v0.5.1
 	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/smallstep/pkcs7 v0.2.1
@@ -83,6 +82,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v29.6.1+incompatible // indirect
+	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.5 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
@@ -128,7 +128,6 @@ require (
 	github.com/moby/go-archive v0.2.0 // indirect
 	github.com/moby/locker v1.0.1 // indirect
 	github.com/moby/moby/api v1.55.0 // indirect
-	github.com/moby/moby/client v0.5.0 // indirect
 	github.com/moby/patternmatcher v0.6.0 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
