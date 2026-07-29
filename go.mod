@@ -12,7 +12,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/gliderlabs/ssh v0.3.8
-	github.com/go-co-op/gocron/v2 v2.21.0
+	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/kaptinlin/jsonschema v0.7.5
