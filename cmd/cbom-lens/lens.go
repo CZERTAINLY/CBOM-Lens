@@ -174,7 +174,12 @@ func (s Lens) Do(ctx context.Context, out io.Writer) error {
 func goScan(ctx context.Context, scanner *service.Scan, seq iter.Seq2[model.Entry, error], detections chan<- model.Detection) {
 	for results, err := range scanner.Do(ctx, seq) {
 		if err != nil {
-			slog.DebugContext(ctx, "error on filesystem scan", "error", err)
+			// goScan drives every source (filesystem, containers,
+			// registry), and both walker and scan errors are logged and
+			// counted where they occur — a source failure at warn level
+			// plus cbom_lens_sources_errors. Debug here avoids reporting
+			// the same failure twice.
+			slog.DebugContext(ctx, "scan error", "error", err)
 			continue
 		}
 		for _, detection := range results {
