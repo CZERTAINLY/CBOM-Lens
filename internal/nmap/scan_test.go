@@ -1,7 +1,9 @@
 package nmap
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -172,14 +174,33 @@ func TestScan_NoHostsReturnsZeroModel(t *testing.T) {
 	require.Equal(t, model.Nmap{}, got)
 }
 
-func TestScan_LogsWarningsFromStderr(t *testing.T) {
-	t.Parallel()
-	bin, _ := fakeNmap(t, "testdata/nmaprun_tls.xml", "Warning: fake warning", 0)
+func TestScan_WarningsLoggedOnlyForNonEmptyRuns(t *testing.T) {
+	// Not parallel: swaps the process-wide default slog logger. Parallel
+	// siblings are paused for the whole sequential pass, so nothing else
+	// writes to the captured logger while this test runs.
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 
+	// A run with >= 1 host must log the nmap stderr warning.
+	bin, _ := fakeNmap(t, "testdata/nmaprun_tls.xml", "Warning: fake warning", 0)
 	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
 		netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 	require.Len(t, got.Ports, 1)
+	require.Contains(t, buf.String(), "fake warning")
+
+	// Quirk lock: an empty run returns the zero-value model before the
+	// warnings loop is reached, so the very same stderr warning must NOT
+	// be logged.
+	buf.Reset()
+	bin, _ = fakeNmap(t, "testdata/nmaprun_empty.xml", "Warning: fake warning", 0)
+	got, err = scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
+		netip.MustParseAddr("127.0.0.1"))
+	require.NoError(t, err)
+	require.Equal(t, model.Nmap{}, got)
+	require.NotContains(t, buf.String(), "fake warning")
 }
 
 func TestScan_BinaryExitErrorWrapped(t *testing.T) {
