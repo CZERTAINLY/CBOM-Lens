@@ -6,6 +6,7 @@ require (
 	cuelang.org/go v0.16.1
 	github.com/CycloneDX/cyclonedx-go v0.10.0
 	github.com/Ullaakut/nmap/v3 v3.1.0
+	github.com/Ullaakut/nmap/v4 v4.0.1
 	github.com/anchore/stereoscope v0.3.0
 	github.com/creasty/defaults v1.8.0
 	github.com/docker/docker v28.5.2+incompatible
