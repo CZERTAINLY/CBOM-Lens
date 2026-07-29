@@ -135,7 +135,7 @@ Common deployment patterns:
 
 - **No CBOM output** – ensure `filesystem.enabled`, `containers.enabled`, or `ports.enabled` are set correctly and the target paths/engines are reachable.
 - **Permission errors** – run CBOM-Lens with sufficient privileges to read files, talk to container engines, or perform network scans.
-- **nmap not found** – install nmap and ensure it is on `PATH`, or configure the binary path if supported.
+- **nmap not found** – install nmap and ensure it is on `PATH`, or set `ports.binary` to an absolute path (see [Configuration reference](config.md)).
 - **Repository upload failures** – verify `service.repository.base_url`, network connectivity, and repository logs.
 
 If issues persist, increase verbosity (`service.verbose: true`) and inspect logs for detailed error messages.

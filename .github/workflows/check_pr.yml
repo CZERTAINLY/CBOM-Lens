@@ -37,6 +37,19 @@ jobs:
         run: go build -v ./...
       - name: Run go vet
         run: go vet ./...
+      # github.com/docker/docker is frozen at v28.5.2+incompatible with an
+      # unfixable CVE-2026-34040 (Moby v29 stopped tagging it). The Engine API
+      # client we use lives in github.com/moby/moby/client; docker/docker may
+      # reappear in the module graph through test-only dependencies, but it must
+      # never become a dependency of the shipped binary.
+      - name: Ensure the released binary never links github.com/docker/docker (CVE-2026-34040)
+        run: |
+          # anchored so github.com/docker/docker-credential-helpers, which the
+          # binary does link, is not mistaken for it
+          if go list -deps ./cmd/cbom-lens | grep -E '^github.com/docker/docker(/|$)'; then
+            echo "::error::github.com/docker/docker is linked into cmd/cbom-lens; use github.com/moby/moby/client instead"
+            exit 1
+          fi
       - name: Build cbom-lens-ci
         run: go build -race -cover -covermode=atomic -o cbom-lens-ci ./cmd/cbom-lens
       - name: Run tests
