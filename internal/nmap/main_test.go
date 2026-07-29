@@ -40,6 +40,13 @@ func Testdata() embed.FS {
 }
 
 func TestMain(m *testing.M) {
+	// Helper-process idiom: when re-executed with NMAP_FAKE_MODE=1 the test
+	// binary acts as a fake nmap instead of running the test suite (see
+	// runFakeNmap in scan_test.go).
+	if os.Getenv("NMAP_FAKE_MODE") == "1" {
+		os.Exit(runFakeNmap())
+	}
+
 	cert, err := generateSelfSignedCert()
 	if err != nil {
 		log.Fatalf("generate self-signed certificate: %v", err)

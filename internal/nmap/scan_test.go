@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,55 +17,87 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeNmap writes a POSIX-shell fake nmap into t.TempDir() that records its
-// argv (one arg per line) to a file, optionally prints a line to stderr,
-// cats the given fixture to stdout, and exits with code.
-// Skips the calling test on Windows.
-func fakeNmap(t *testing.T, fixturePath string, stderrLine string, exitCode int) (binPath, argsFile string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake nmap is a POSIX shell script, skipping on Windows")
+// runFakeNmap is the fake-nmap side of the helper-process idiom: TestMain
+// dispatches here when the test binary is re-executed with NMAP_FAKE_MODE=1,
+// so the fake runs on every platform without writing shell scripts (which
+// also made the tests prone to the ETXTBSY fork/exec race of
+// golang.org/issue/22315). Driven by NMAP_FAKE_* environment variables, it
+// records its argv (one arg per line) into NMAP_FAKE_ARGS_FILE, optionally
+// sleeps NMAP_FAKE_SLEEP_MS, copies the NMAP_FAKE_FIXTURE file to stdout,
+// optionally prints the NMAP_FAKE_STDERR line to stderr, and exits with
+// NMAP_FAKE_EXIT.
+func runFakeNmap() int {
+	if argsFile := os.Getenv("NMAP_FAKE_ARGS_FILE"); argsFile != "" {
+		var sb strings.Builder
+		for _, arg := range os.Args[1:] {
+			sb.WriteString(arg)
+			sb.WriteByte('\n')
+		}
+		if err := os.WriteFile(argsFile, []byte(sb.String()), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "fake nmap: writing args file:", err)
+			return 111
+		}
 	}
 
-	dir := t.TempDir()
-	binPath = filepath.Join(dir, "nmap")
-	argsFile = filepath.Join(dir, "args.txt")
+	if ms := os.Getenv("NMAP_FAKE_SLEEP_MS"); ms != "" {
+		n, err := strconv.Atoi(ms)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fake nmap: invalid NMAP_FAKE_SLEEP_MS:", err)
+			return 111
+		}
+		time.Sleep(time.Duration(n) * time.Millisecond)
+	}
+
+	if fixture := os.Getenv("NMAP_FAKE_FIXTURE"); fixture != "" {
+		data, err := os.ReadFile(fixture)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fake nmap: reading fixture:", err)
+			return 111
+		}
+		if _, err := os.Stdout.Write(data); err != nil {
+			fmt.Fprintln(os.Stderr, "fake nmap: writing stdout:", err)
+			return 111
+		}
+	}
+
+	if line := os.Getenv("NMAP_FAKE_STDERR"); line != "" {
+		fmt.Fprintln(os.Stderr, line)
+	}
+
+	code := 0
+	if v := os.Getenv("NMAP_FAKE_EXIT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fake nmap: invalid NMAP_FAKE_EXIT:", err)
+			return 111
+		}
+		code = n
+	}
+	return code
+}
+
+// fakeNmap configures the running test binary to act as a fake nmap (see
+// runFakeNmap) that records its argv, prints the fixture to stdout, and
+// optionally emits a stderr line before exiting with the given code. It
+// returns the binary path to hand to the wrapper and the argv recording
+// file. It uses t.Setenv for the NMAP_FAKE_* control variables, so calling
+// tests must not be parallel.
+func fakeNmap(t *testing.T, fixturePath string, stderrLine string, exitCode int) (binPath, argsFile string) {
+	t.Helper()
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
 
 	absFixture, err := filepath.Abs(fixturePath)
 	require.NoError(t, err)
 
-	var sb strings.Builder
-	sb.WriteString("#!/bin/sh\n")
-	fmt.Fprintf(&sb, "printf '%%s\\n' \"$@\" > %q\n", argsFile)
-	if stderrLine != "" {
-		fmt.Fprintf(&sb, "echo %q >&2\n", stderrLine)
-	}
-	fmt.Fprintf(&sb, "cat %q\n", absFixture)
-	fmt.Fprintf(&sb, "exit %d\n", exitCode)
-
-	require.NoError(t, os.WriteFile(binPath, []byte(sb.String()), 0o755))
-	return binPath, argsFile
-}
-
-// scanFake runs s.Scan against a fakeNmap script, retrying the rare ETXTBSY
-// fork/exec race: with parallel tests, a child process forked by another test
-// can briefly hold this test's just-written script file descriptor between
-// its fork and exec, making exec of the script fail with "text file busy"
-// (see golang.org/issue/22315). The window is tiny, so a few short retries
-// make the deterministic tests immune to it. Any other outcome, success or
-// failure, is returned as-is.
-func scanFake(t *testing.T, s Scanner, addr netip.Addr) (model.Nmap, error) {
-	t.Helper()
-	var got model.Nmap
-	var err error
-	for range 20 {
-		got, err = s.Scan(t.Context(), addr)
-		if err == nil || !strings.Contains(err.Error(), "text file busy") {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return got, err
+	argsFile = filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("NMAP_FAKE_MODE", "1")
+	t.Setenv("NMAP_FAKE_ARGS_FILE", argsFile)
+	t.Setenv("NMAP_FAKE_FIXTURE", absFixture)
+	t.Setenv("NMAP_FAKE_STDERR", stderrLine)
+	t.Setenv("NMAP_FAKE_EXIT", strconv.Itoa(exitCode))
+	return exe, argsFile
 }
 
 // recordedArgs reads back the argv recorded by the fakeNmap script,
@@ -78,11 +110,11 @@ func recordedArgs(t *testing.T, argsFile string) []string {
 }
 
 func TestScan_EmitsExpectedArgsAndParsesTLS(t *testing.T) {
-	t.Parallel()
+	// Not parallel: fakeNmap uses t.Setenv.
 	bin, argsFile := fakeNmap(t, "testdata/nmaprun_tls.xml", "", 0)
 
-	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
-		netip.MustParseAddr("127.0.0.1"))
+	got, err := New().WithNmapBinary(bin).WithPorts("443").
+		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 
 	// The exact argv is an intentional parity lock on the nmap command line
@@ -141,11 +173,11 @@ func TestScan_EmitsExpectedArgsAndParsesTLS(t *testing.T) {
 }
 
 func TestScan_IPv6AddsDash6AndDefaultPorts(t *testing.T) {
-	t.Parallel()
+	// Not parallel: fakeNmap uses t.Setenv.
 	bin, argsFile := fakeNmap(t, "testdata/nmaprun_tls.xml", "", 0)
 
-	_, err := scanFake(t, New().WithNmapBinary(bin),
-		netip.MustParseAddr("::1"))
+	_, err := New().WithNmapBinary(bin).
+		Scan(t.Context(), netip.MustParseAddr("::1"))
 	require.NoError(t, err)
 
 	// The exact argv is an intentional parity lock on the nmap command line
@@ -165,19 +197,20 @@ func TestScan_IPv6AddsDash6AndDefaultPorts(t *testing.T) {
 }
 
 func TestScan_NoHostsReturnsZeroModel(t *testing.T) {
-	t.Parallel()
+	// Not parallel: fakeNmap uses t.Setenv.
 	bin, _ := fakeNmap(t, "testdata/nmaprun_empty.xml", "", 0)
 
-	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
-		netip.MustParseAddr("127.0.0.1"))
+	got, err := New().WithNmapBinary(bin).WithPorts("443").
+		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 	require.Equal(t, model.Nmap{}, got)
 }
 
 func TestScan_WarningsLoggedOnlyForNonEmptyRuns(t *testing.T) {
-	// Not parallel: swaps the process-wide default slog logger. Parallel
-	// siblings are paused for the whole sequential pass, so nothing else
-	// writes to the captured logger while this test runs.
+	// Not parallel: swaps the process-wide default slog logger (and fakeNmap
+	// uses t.Setenv). Parallel siblings are paused for the whole sequential
+	// pass, so nothing else writes to the captured logger while this test
+	// runs.
 	prev := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	var buf bytes.Buffer
@@ -185,8 +218,8 @@ func TestScan_WarningsLoggedOnlyForNonEmptyRuns(t *testing.T) {
 
 	// A run with >= 1 host must log the nmap stderr warning.
 	bin, _ := fakeNmap(t, "testdata/nmaprun_tls.xml", "Warning: fake warning", 0)
-	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
-		netip.MustParseAddr("127.0.0.1"))
+	got, err := New().WithNmapBinary(bin).WithPorts("443").
+		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 	require.Len(t, got.Ports, 1)
 	require.Contains(t, buf.String(), "fake warning")
@@ -196,21 +229,21 @@ func TestScan_WarningsLoggedOnlyForNonEmptyRuns(t *testing.T) {
 	// be logged.
 	buf.Reset()
 	bin, _ = fakeNmap(t, "testdata/nmaprun_empty.xml", "Warning: fake warning", 0)
-	got, err = scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
-		netip.MustParseAddr("127.0.0.1"))
+	got, err = New().WithNmapBinary(bin).WithPorts("443").
+		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
 	require.NoError(t, err)
 	require.Equal(t, model.Nmap{}, got)
 	require.NotContains(t, buf.String(), "fake warning")
 }
 
 func TestScan_BinaryExitErrorWrapped(t *testing.T) {
-	t.Parallel()
+	// Not parallel: fakeNmap uses t.Setenv.
 	garbage := filepath.Join(t.TempDir(), "garbage.txt")
 	require.NoError(t, os.WriteFile(garbage, []byte("this is not nmap XML output\n"), 0o644))
 	bin, _ := fakeNmap(t, garbage, "", 1)
 
-	got, err := scanFake(t, New().WithNmapBinary(bin).WithPorts("443"),
-		netip.MustParseAddr("127.0.0.1"))
+	got, err := New().WithNmapBinary(bin).WithPorts("443").
+		Scan(t.Context(), netip.MustParseAddr("127.0.0.1"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nmap scan services:")
 	require.Equal(t, model.Nmap{}, got)
