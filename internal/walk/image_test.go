@@ -5,14 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"maps"
-	"net"
 	"net/http"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/CZERTAINLY/CBOM-lens/internal/dockertest"
 	"github.com/CZERTAINLY/CBOM-lens/internal/log"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
@@ -23,44 +21,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeDockerDaemon starts a minimal Docker Engine API server on a unix
-// socket. It answers the version-negotiation ping and delegates the image
-// list endpoint to imagesHandler. Returns the socket path.
-func fakeDockerDaemon(t *testing.T, imagesHandler http.HandlerFunc) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("unix sockets required")
-	}
-	sock := filepath.Join(t.TempDir(), "d.sock")
-	l, err := net.Listen("unix", sock)
-	require.NoError(t, err)
-
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/_ping"):
-			w.Header().Set("Api-Version", "1.51")
-			w.WriteHeader(http.StatusOK)
-		case strings.HasSuffix(r.URL.Path, "/images/json"):
-			imagesHandler(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})}
-	go func() { _ = srv.Serve(l) }()
-	t.Cleanup(func() { _ = srv.Close() })
-	return sock
-}
-
 func TestImages_FakeDaemonEmpty(t *testing.T) {
-	sock := fakeDockerDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[]`))
-	})
+	daemon := dockertest.New(t)
 
 	config := model.ContainerConfig{
 		Name:   t.Name(),
 		Type:   "docker",
-		Host:   "unix://" + sock,
+		Host:   daemon.Host,
 		Images: nil,
 	}
 
@@ -83,20 +50,19 @@ func TestImages_FakeDaemonEmpty(t *testing.T) {
 }
 
 func TestImages_FakeDaemonListError(t *testing.T) {
-	sock := fakeDockerDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+	daemon := dockertest.New(t, dockertest.WithImages(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "image list failed", http.StatusInternalServerError)
-	})
+	}))
 
 	config := model.ContainerConfig{
 		Name:   t.Name(),
 		Type:   "docker",
-		Host:   "unix://" + sock,
+		Host:   daemon.Host,
 		Images: nil,
 	}
 
 	// The ImageList failure must surface to the caller as a single
-	// (nil, err) yield (issue #194 — previously swallowed by a
-	// single-variable range inside Images).
+	// (nil, err) yield.
 	idx := 0
 	counter := stats.New(t.Name())
 	for entry, err := range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
