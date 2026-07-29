@@ -11,10 +11,14 @@ import (
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/log"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/CZERTAINLY/CBOM-lens/internal/portscanner"
 	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
 	"github.com/Ullaakut/nmap/v3"
 )
+
+// Compile-time assertion: Scanner satisfies portscanner.Scanner.
+var _ portscanner.Scanner = Scanner{}
 
 // Scanner is a wrapper on top of "github.com/Ullaakut/nmap/v3" Scanner
 type Scanner struct {
