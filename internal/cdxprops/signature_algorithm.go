@@ -102,7 +102,9 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 	var paramSetID string
 	var padding cdx.CryptoPadding
 	var classicalSecurityLevel int
-	var nistQuantumSecurityLevel int
+	// nil means the field is omitted. See algorithmInfo for why this is a
+	// pointer rather than an int.
+	var nqsl *int
 
 	switch sigAlg {
 	case x509.MD2WithRSA:
@@ -213,7 +215,10 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 			algorithmFamily = info.name
 			paramSetID = info.paramSetID
 			classicalSecurityLevel = info.classicalSecurityLevel
-			nistQuantumSecurityLevel = info.nistQuantumSecurityLevel
+			if info.nistQuantumSecurityLevel != nil {
+				// Copy the value; do not alias the shared registry entry.
+				nqsl = ptr(*info.nistQuantumSecurityLevel)
+			}
 			// fallback for PQC
 			switch {
 			case strings.Contains(info.algorithmName, "slh-dsa-sha2"):
@@ -222,16 +227,17 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 				hash = "SHAKE-256"
 			}
 			if c.czertainly {
-				props = append(props, czertainlyPqcProps(props, info.pqc)...)
+				// Plain assignment: czertainlyPqcProps already appends to the
+				// slice it is given. The previous
+				// `props = append(props, czertainlyPqcProps(props, ...)...)`
+				// duplicated every property already in props, and was harmless
+				// only because props happened to be empty here.
+				props = czertainlyPqcProps(props, info.pqc)
 			}
 		}
 	}
 
 	execEnv := cdx.CryptoExecutionEnvironmentSoftwarePlainRAM
-	var nqsl *int
-	if nistQuantumSecurityLevel != 0 {
-		nqsl = &nistQuantumSecurityLevel
-	}
 
 	cryptoProps := cdx.CryptoAlgorithmProperties{
 		Primitive:                cdx.CryptoPrimitiveSignature,

@@ -3,6 +3,7 @@ package cdxprops
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"slices"
 	"testing"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -89,6 +90,43 @@ func TestExtractAlgorithmInfo_ECDSA(t *testing.T) {
 			}, got.cryptoFunctions)
 		})
 	}
+}
+
+// TestCzertainlyPqcProps_PreservesExistingProps pins the append contract.
+//
+// czertainlyPqcProps appends to the slice it is handed, so its result must be
+// assigned, never appended again. getAlgorithmProperties used to do
+// `props = append(props, czertainlyPqcProps(props, ...)...)`, which duplicates
+// every property already present. That was invisible only because props was
+// always empty at the call site. This test pre-seeds two properties so the
+// duplication would be caught.
+func TestCzertainlyPqcProps_PreservesExistingProps(t *testing.T) {
+	t.Parallel()
+
+	seed := []cdx.Property{
+		{Name: "first", Value: "1"},
+		{Name: "second", Value: "2"},
+	}
+
+	t.Run("with sizes appends exactly three", func(t *testing.T) {
+		t.Parallel()
+
+		got := czertainlyPqcProps(slices.Clone(seed), pqcInfo{
+			privKeySize: 2560, pubKeySize: 1312, signatureSize: 2420,
+		})
+
+		require.Len(t, got, 5, "two seeded plus three size properties, with no duplication")
+		require.Equal(t, seed, got[:2], "seeded properties must survive in order")
+	})
+
+	t.Run("without sizes returns the input unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		// nil pqc metadata (XMSS, XMSS-MT, HSS-LMS) must not wipe the caller's
+		// properties. The old implementation returned nil here.
+		got := czertainlyPqcProps(slices.Clone(seed), nil)
+		require.Equal(t, seed, got)
+	})
 }
 
 // TestExtractAlgorithmInfo_ECDSA_DistinctOIDs guards the specific copy-paste
