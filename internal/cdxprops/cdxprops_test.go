@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMLMKEMPrivateKey(t *testing.T) {
+func TestMLDSA65PrivateKey(t *testing.T) {
 	pk, err := cdxtest.TestData(cdxtest.MLDSA65PrivateKey)
 	require.NoError(t, err)
 
