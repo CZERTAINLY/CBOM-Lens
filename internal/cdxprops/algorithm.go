@@ -36,12 +36,19 @@ type algorithmInfo struct {
 	// make cbom-lens assert something no standard says.
 	nistQuantumSecurityLevel *int
 	pqc                      isPqcInfo
+	// primitive is the CycloneDX cryptographic primitive. Empty means the
+	// caller decides, which is what the classical switch-ladder path relies on
+	// (publicKeyComponents derives signature vs pke from the certificate's
+	// KeyUsage). Registry entries state it, because a KEM is not a signature
+	// scheme and no amount of KeyUsage inspection will turn it into one.
+	primitive cdx.CryptoPrimitive
 }
 
 type isPqcInfo interface {
 	isPqcInfo()
 }
 
+// pqcInfo holds the sizes of a post-quantum signature scheme.
 type pqcInfo struct {
 	privKeySize   int
 	pubKeySize    int
@@ -49,6 +56,19 @@ type pqcInfo struct {
 }
 
 func (pqcInfo) isPqcInfo() {}
+
+// kemInfo holds the sizes of a key-encapsulation mechanism. A KEM has no
+// signature, and its two keys are an encapsulation key and a decapsulation
+// key rather than a public/private signing pair, so it needs its own shape;
+// reusing pqcInfo would have meant reporting a signature size for something
+// that cannot sign.
+type kemInfo struct {
+	encapKeySize   int
+	decapKeySize   int
+	ciphertextSize int
+}
+
+func (kemInfo) isPqcInfo() {}
 
 var unsupportedAlgorithms = map[string]algorithmInfo{
 	// ML-DSA (FIPS 204). Object identifiers from RFC 9881 sec. 3
@@ -66,6 +86,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   128,
 		nistQuantumSecurityLevel: ptr(2),
 		pqc: pqcInfo{
@@ -84,6 +105,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   192,
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
@@ -102,6 +124,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   256,
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
@@ -127,6 +150,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   128,
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
@@ -145,6 +169,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   128,
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
@@ -163,6 +188,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   192,
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
@@ -181,6 +207,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   192,
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
@@ -199,6 +226,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   256,
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
@@ -217,6 +245,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   256,
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
@@ -238,6 +267,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   128,
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
@@ -256,6 +286,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   128,
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
@@ -274,6 +305,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   192,
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
@@ -292,6 +324,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   192,
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
@@ -310,6 +343,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   256,
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
@@ -328,12 +362,84 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive:                cdx.CryptoPrimitiveSignature,
 		classicalSecurityLevel:   256,
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
 			privKeySize:   128,
 			pubKeySize:    64,
 			signatureSize: 49856,
+		},
+	},
+
+	// ML-KEM (FIPS 203). Object identifiers registered in the NIST CSOR under
+	// kems ::= { nistAlgorithms 4 }: id-alg-ml-kem-512(1), -768(2), -1024(3).
+	// FIPS 203 itself assigns no OIDs. OpenSSL 3.5.3 reports the same three
+	// identifiers for its ML-KEM implementations, which corroborates them.
+	//
+	// Security categories from FIPS 203 sec. 8: "ML-KEM-512 is claimed to be
+	// in security category 1, ML-KEM-768 ... category 3, and ML-KEM-1024 ...
+	// category 5." classicalSecurityLevel is the "required RBG strength
+	// (bits)" column of FIPS 203 Table 2: 128 / 192 / 256.
+	//
+	// Sizes from FIPS 203 Table 3, "Sizes (in bytes) of keys and ciphertexts
+	// of ML-KEM". The shared secret is 32 bytes for all three parameter sets
+	// and is not a property of the algorithm identifier, so it is not modelled.
+	"2.16.840.1.101.3.4.4.1": {
+		name:          "ML-KEM-512",
+		oid:           "2.16.840.1.101.3.4.4.1",
+		paramSetID:    "512",
+		keySize:       0,
+		algorithmName: "crypto/algorithm/ml-kem-512",
+		cryptoFunctions: []cdx.CryptoFunction{
+			cdx.CryptoFunctionEncapsulate,
+			cdx.CryptoFunctionDecapsulate,
+		},
+		primitive:                cdx.CryptoPrimitiveKEM,
+		classicalSecurityLevel:   128,
+		nistQuantumSecurityLevel: ptr(1),
+		pqc: kemInfo{
+			encapKeySize:   800,
+			decapKeySize:   1632,
+			ciphertextSize: 768,
+		},
+	},
+	"2.16.840.1.101.3.4.4.2": {
+		name:          "ML-KEM-768",
+		oid:           "2.16.840.1.101.3.4.4.2",
+		paramSetID:    "768",
+		keySize:       0,
+		algorithmName: "crypto/algorithm/ml-kem-768",
+		cryptoFunctions: []cdx.CryptoFunction{
+			cdx.CryptoFunctionEncapsulate,
+			cdx.CryptoFunctionDecapsulate,
+		},
+		primitive:                cdx.CryptoPrimitiveKEM,
+		classicalSecurityLevel:   192,
+		nistQuantumSecurityLevel: ptr(3),
+		pqc: kemInfo{
+			encapKeySize:   1184,
+			decapKeySize:   2400,
+			ciphertextSize: 1088,
+		},
+	},
+	"2.16.840.1.101.3.4.4.3": {
+		name:          "ML-KEM-1024",
+		oid:           "2.16.840.1.101.3.4.4.3",
+		paramSetID:    "1024",
+		keySize:       0,
+		algorithmName: "crypto/algorithm/ml-kem-1024",
+		cryptoFunctions: []cdx.CryptoFunction{
+			cdx.CryptoFunctionEncapsulate,
+			cdx.CryptoFunctionDecapsulate,
+		},
+		primitive:                cdx.CryptoPrimitiveKEM,
+		classicalSecurityLevel:   256,
+		nistQuantumSecurityLevel: ptr(5),
+		pqc: kemInfo{
+			encapKeySize:   1568,
+			decapKeySize:   3168,
+			ciphertextSize: 1568,
 		},
 	},
 
@@ -350,6 +456,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive: cdx.CryptoPrimitiveSignature,
 		// classicalSecurityLevel assumes the n=32 (SHA-256) parameter
 		// families. The AlgorithmIdentifier does not carry the parameter set,
 		// so this is the best available approximation; see docs/pqc-support.md.
@@ -374,6 +481,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive: cdx.CryptoPrimitiveSignature,
 		// classicalSecurityLevel assumes the n=32 (SHA-256) parameter
 		// families. The AlgorithmIdentifier does not carry the parameter set,
 		// so this is the best available approximation; see docs/pqc-support.md.
@@ -401,6 +509,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
 		},
+		primitive: cdx.CryptoPrimitiveSignature,
 		// classicalSecurityLevel assumes the n=32 (SHA-256) parameter
 		// families. The AlgorithmIdentifier does not carry the parameter set,
 		// so this is the best available approximation; see docs/pqc-support.md.
@@ -663,8 +772,30 @@ func czertainlyPqcProps(props []cdx.Property, x isPqcInfo) []cdx.Property {
 	switch i := x.(type) {
 	case pqcInfo:
 		return pqcProps(props, i)
+	case kemInfo:
+		return kemProps(props, i)
 	}
 	return props
+}
+
+func kemProps(props []cdx.Property, i kemInfo) []cdx.Property {
+	return append(props, []cdx.Property{
+		// The decapsulation key is the KEM's private half and the
+		// encapsulation key its public half, so they reuse the existing
+		// property names rather than inventing parallel ones.
+		{
+			Name:  czertainly.AlgorithmPrivateKeySize,
+			Value: strconv.Itoa(i.decapKeySize),
+		},
+		{
+			Name:  czertainly.AlgorithmPublicKeySize,
+			Value: strconv.Itoa(i.encapKeySize),
+		},
+		{
+			Name:  czertainly.AlgorithmCiphertextSize,
+			Value: strconv.Itoa(i.ciphertextSize),
+		},
+	}...)
 }
 
 func pqcProps(props []cdx.Property, i pqcInfo) []cdx.Property {

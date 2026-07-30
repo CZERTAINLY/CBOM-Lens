@@ -56,44 +56,14 @@ var pqcSigOIDRef = map[string]cdx.BOMReference{
 	"1.3.6.1.5.5.7.6.35":         "crypto/algorithm/xmssmt-hashsig@1.3.6.1.5.5.7.6.35",          // XMSS^MT
 }
 
-// Public-key OIDs seen in SubjectPublicKeyInfo.algorithm (includes KEMs).
-var spkiOIDRef = map[string]cdx.BOMReference{
-	// ML-DSA (same OIDs as signature; appears as key type too)
-	"2.16.840.1.101.3.4.3.17": "crypto/key/ml-dsa-44@2.16.840.1.101.3.4.3.17",
-	"2.16.840.1.101.3.4.3.18": "crypto/key/ml-dsa-65@2.16.840.1.101.3.4.3.18",
-	"2.16.840.1.101.3.4.3.19": "crypto/key/ml-dsa-87@2.16.840.1.101.3.4.3.19",
-
-	// ML-KEM (FIPS 203)
-	"2.16.840.1.101.3.4.4.1": "crypto/key/ml-kem-512@2.16.840.1.101.3.4.4.1",
-	"2.16.840.1.101.3.4.4.2": "crypto/key/ml-kem-768@2.16.840.1.101.3.4.4.2",
-	"2.16.840.1.101.3.4.4.3": "crypto/key/ml-kem-1024@2.16.840.1.101.3.4.4.3",
-
-	// SLH-DSA (FIPS 205)
-	"2.16.840.1.101.3.4.3.20": "crypto/key/slh-dsa-sha2-128s@2.16.840.1.101.3.4.3.20",
-	"2.16.840.1.101.3.4.3.21": "crypto/key/slh-dsa-sha2-128f@2.16.840.1.101.3.4.3.21",
-	"2.16.840.1.101.3.4.3.22": "crypto/key/slh-dsa-sha2-192s@2.16.840.1.101.3.4.3.22",
-	"2.16.840.1.101.3.4.3.23": "crypto/key/slh-dsa-sha2-192f@2.16.840.1.101.3.4.3.23",
-	"2.16.840.1.101.3.4.3.24": "crypto/key/slh-dsa-sha2-256s@2.16.840.1.101.3.4.3.24",
-	"2.16.840.1.101.3.4.3.25": "crypto/key/slh-dsa-sha2-256f@2.16.840.1.101.3.4.3.25",
-	"2.16.840.1.101.3.4.3.26": "crypto/key/slh-dsa-shake-128s@2.16.840.1.101.3.4.3.26",
-	"2.16.840.1.101.3.4.3.27": "crypto/key/slh-dsa-shake-128f@2.16.840.1.101.3.4.3.27",
-	"2.16.840.1.101.3.4.3.28": "crypto/key/slh-dsa-shake-192s@2.16.840.1.101.3.4.3.28",
-	"2.16.840.1.101.3.4.3.29": "crypto/key/slh-dsa-shake-192f@2.16.840.1.101.3.4.3.29",
-	"2.16.840.1.101.3.4.3.30": "crypto/key/slh-dsa-shake-256s@2.16.840.1.101.3.4.3.30",
-	"2.16.840.1.101.3.4.3.31": "crypto/key/slh-dsa-shake-256f@2.16.840.1.101.3.4.3.31",
-
-	// XMSS / XMSS-MT (IETF, same OIDs show in SPKI)
-	"1.3.6.1.5.5.7.6.34": "crypto/key/xmss@1.3.6.1.5.5.7.6.34",
-	"1.3.6.1.5.5.7.6.35": "crypto/key/xmss-mt@1.3.6.1.5.5.7.6.35",
-
-	// HSS/LMS (IETF)
-	"1.2.840.113549.1.9.16.3.17": "crypto/key/hss-lms@1.2.840.113549.1.9.16.3.17",
-
-	// HQC (ISO/ETSI — commonly used OIDs)
-	"1.3.9999.6.1.1": "crypto/key/hqc-128@1.3.9999.6.1.1",
-	"1.3.9999.6.1.2": "crypto/key/hqc-192@1.3.9999.6.1.2",
-	"1.3.9999.6.1.3": "crypto/key/hqc-256@1.3.9999.6.1.3",
-}
+// spkiOIDRef was deleted here. It mapped SubjectPublicKeyInfo algorithm OIDs
+// to crypto/key/... bom-refs, but nothing in production ever read it -- its
+// only reader was its own unit test. It was also the single place ML-KEM
+// appeared anywhere in the codebase, which made ML-KEM look supported while an
+// actual ML-KEM key errored out in unsupportedPKCS8PrivateKey. ML-KEM now has
+// real registry entries in algorithm.go, and the bom-refs this map hardcoded
+// are derived from the key material by publicKeyComponents and
+// unsupportedPKIX.
 
 // getAlgorithmProperties generates crypto algorithm properties for a signature algorithm
 func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFallback string) (cdx.CryptoAlgorithmProperties, []cdx.Property, string) {

@@ -33,10 +33,13 @@ type expectedAlgorithm struct {
 	// pqc holds the size metadata. nil means the sizes are parameter-set
 	// dependent or unpublished, so no czertainly size properties may appear.
 	pqc isPqcInfo
+	// primitive is the CycloneDX cryptographic primitive the entry must carry.
+	primitive cdx.CryptoPrimitive
 }
 
 var (
 	signVerify    = []cdx.CryptoFunction{cdx.CryptoFunctionSign, cdx.CryptoFunctionVerify}
+	encapDecap    = []cdx.CryptoFunction{cdx.CryptoFunctionEncapsulate, cdx.CryptoFunctionDecapsulate}
 	nistCategory1 = ptr(1)
 	nistCategory2 = ptr(2)
 	nistCategory3 = ptr(3)
@@ -68,7 +71,7 @@ var wantRegistry = map[string]expectedAlgorithm{
 	"2.16.840.1.101.3.4.3.17": {
 		// RFC 9881: id-ml-dsa-44 ::= { ... nistAlgorithm(4) sigAlgs(3) 17 }
 		name: "ML-DSA-44", paramSetID: "44",
-		oid: "2.16.840.1.101.3.4.3.17", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.17", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 128,
 		// FIPS 204 Table 1: "Claimed security strength ... Category 2".
 		//
@@ -85,7 +88,7 @@ var wantRegistry = map[string]expectedAlgorithm{
 	"2.16.840.1.101.3.4.3.18": {
 		// RFC 9881: id-ml-dsa-65 ::= { ... sigAlgs(3) 18 }
 		name: "ML-DSA-65", paramSetID: "65",
-		oid: "2.16.840.1.101.3.4.3.18", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.18", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 192,           // FIPS 204 Table 1, lambda
 		nqsl:      nistCategory3, // FIPS 204 Table 1, Category 3
 		pqc:       pqcInfo{privKeySize: 4032, pubKeySize: 1952, signatureSize: 3309},
@@ -93,7 +96,7 @@ var wantRegistry = map[string]expectedAlgorithm{
 	"2.16.840.1.101.3.4.3.19": {
 		// RFC 9881: id-ml-dsa-87 ::= { ... sigAlgs(3) 19 }
 		name: "ML-DSA-87", paramSetID: "87",
-		oid: "2.16.840.1.101.3.4.3.19", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.19", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		// FIPS 204 Table 1 gives lambda = 256 for ML-DSA-87 and Category 5.
 		// This was 192 -- a duplicate of ML-DSA-65's row.
 		classical: 256,
@@ -113,39 +116,39 @@ var wantRegistry = map[string]expectedAlgorithm{
 
 	"2.16.840.1.101.3.4.3.20": {
 		name: "SLH-DSA-SHA2-128S", paramSetID: "128S",
-		oid: "2.16.840.1.101.3.4.3.20", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.20", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 128, nqsl: nistCategory1,
 		pqc: pqcInfo{privKeySize: 64, pubKeySize: 32, signatureSize: 7856},
 	},
 	"2.16.840.1.101.3.4.3.21": {
 		name: "SLH-DSA-SHA2-128F", paramSetID: "128F",
-		oid: "2.16.840.1.101.3.4.3.21", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.21", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 128, nqsl: nistCategory1,
 		pqc: pqcInfo{privKeySize: 64, pubKeySize: 32, signatureSize: 17088},
 	},
 	"2.16.840.1.101.3.4.3.22": {
 		name: "SLH-DSA-SHA2-192S", paramSetID: "192S",
-		oid: "2.16.840.1.101.3.4.3.22", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.22", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 192, nqsl: nistCategory3,
 		// 192-bit sets are 48/96, not the 32/64 of the 128-bit sets.
 		pqc: pqcInfo{privKeySize: 96, pubKeySize: 48, signatureSize: 16224},
 	},
 	"2.16.840.1.101.3.4.3.23": {
 		name: "SLH-DSA-SHA2-192F", paramSetID: "192F",
-		oid: "2.16.840.1.101.3.4.3.23", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.23", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 192, nqsl: nistCategory3,
 		pqc: pqcInfo{privKeySize: 96, pubKeySize: 48, signatureSize: 35664},
 	},
 	"2.16.840.1.101.3.4.3.24": {
 		name: "SLH-DSA-SHA2-256S", paramSetID: "256S",
-		oid: "2.16.840.1.101.3.4.3.24", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.24", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nistCategory5,
 		// sig 29792. The old value 17088 was SLH-DSA-*-128f's signature size.
 		pqc: pqcInfo{privKeySize: 128, pubKeySize: 64, signatureSize: 29792},
 	},
 	"2.16.840.1.101.3.4.3.25": {
 		name: "SLH-DSA-SHA2-256F", paramSetID: "256F",
-		oid: "2.16.840.1.101.3.4.3.25", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.25", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nistCategory5,
 		// sig 49856, not 37760 (which matches no parameter set at all).
 		pqc: pqcInfo{privKeySize: 128, pubKeySize: 64, signatureSize: 49856},
@@ -158,39 +161,89 @@ var wantRegistry = map[string]expectedAlgorithm{
 
 	"2.16.840.1.101.3.4.3.26": {
 		name: "SLH-DSA-SHAKE-128S", paramSetID: "128S",
-		oid: "2.16.840.1.101.3.4.3.26", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.26", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 128, nqsl: nistCategory1,
 		pqc: pqcInfo{privKeySize: 64, pubKeySize: 32, signatureSize: 7856},
 	},
 	"2.16.840.1.101.3.4.3.27": {
 		name: "SLH-DSA-SHAKE-128F", paramSetID: "128F",
-		oid: "2.16.840.1.101.3.4.3.27", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.27", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 128, nqsl: nistCategory1,
 		pqc: pqcInfo{privKeySize: 64, pubKeySize: 32, signatureSize: 17088},
 	},
 	"2.16.840.1.101.3.4.3.28": {
 		name: "SLH-DSA-SHAKE-192S", paramSetID: "192S",
-		oid: "2.16.840.1.101.3.4.3.28", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.28", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 192, nqsl: nistCategory3,
 		pqc: pqcInfo{privKeySize: 96, pubKeySize: 48, signatureSize: 16224},
 	},
 	"2.16.840.1.101.3.4.3.29": {
 		name: "SLH-DSA-SHAKE-192F", paramSetID: "192F",
-		oid: "2.16.840.1.101.3.4.3.29", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.29", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 192, nqsl: nistCategory3,
 		pqc: pqcInfo{privKeySize: 96, pubKeySize: 48, signatureSize: 35664},
 	},
 	"2.16.840.1.101.3.4.3.30": {
 		name: "SLH-DSA-SHAKE-256S", paramSetID: "256S",
-		oid: "2.16.840.1.101.3.4.3.30", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.30", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nistCategory5,
 		pqc: pqcInfo{privKeySize: 128, pubKeySize: 64, signatureSize: 29792},
 	},
 	"2.16.840.1.101.3.4.3.31": {
 		name: "SLH-DSA-SHAKE-256F", paramSetID: "256F",
-		oid: "2.16.840.1.101.3.4.3.31", functions: signVerify,
+		oid: "2.16.840.1.101.3.4.3.31", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nistCategory5,
 		pqc: pqcInfo{privKeySize: 128, pubKeySize: 64, signatureSize: 49856},
+	},
+
+	// ---------- ML-KEM (FIPS 203) ----------
+	//
+	// Object identifiers are NOT in FIPS 203, which assigns none. They come
+	// from the NIST CSOR algorithm registration page:
+	//   kems ::= { nistAlgorithms 4 }
+	//   id-alg-ml-kem-512  ::= { kems 1 }  = 2.16.840.1.101.3.4.4.1
+	//   id-alg-ml-kem-768  ::= { kems 2 }  = 2.16.840.1.101.3.4.4.2
+	//   id-alg-ml-kem-1024 ::= { kems 3 }  = 2.16.840.1.101.3.4.4.3
+	// Corroborated independently: `openssl list -public-key-algorithms` on
+	// OpenSSL 3.5.3 reports exactly these three OIDs for its ML-KEM
+	// implementations.
+	//
+	// Categories from FIPS 203 sec. 8: "ML-KEM-512 (security category 1),
+	// ML-KEM-768 (security category 3), ML-KEM-1024 (security category 5)".
+	// classical is FIPS 203 Table 2's "required RBG strength (bits)".
+	//
+	// Sizes from FIPS 203 Table 3, "Sizes (in bytes) of keys and ciphertexts
+	// of ML-KEM":
+	//                encapsulation key   decapsulation key   ciphertext
+	//   ML-KEM-512          800                1632             768
+	//   ML-KEM-768         1184                2400            1088
+	//   ML-KEM-1024        1568                3168            1568
+	// The ML-KEM-768 encapsulation key size is further confirmed by the test
+	// fixture: its SPKI BIT STRING is 1185 bytes = 1 unused-bits octet + 1184.
+	//
+	// cryptoFunctions are encapsulate/decapsulate, and the primitive is "kem".
+	// A KEM cannot sign, so no signature size is reported.
+
+	"2.16.840.1.101.3.4.4.1": {
+		name: "ML-KEM-512", paramSetID: "512",
+		oid: "2.16.840.1.101.3.4.4.1", functions: encapDecap,
+		primitive: cdx.CryptoPrimitiveKEM,
+		classical: 128, nqsl: nistCategory1,
+		pqc: kemInfo{encapKeySize: 800, decapKeySize: 1632, ciphertextSize: 768},
+	},
+	"2.16.840.1.101.3.4.4.2": {
+		name: "ML-KEM-768", paramSetID: "768",
+		oid: "2.16.840.1.101.3.4.4.2", functions: encapDecap,
+		primitive: cdx.CryptoPrimitiveKEM,
+		classical: 192, nqsl: nistCategory3,
+		pqc: kemInfo{encapKeySize: 1184, decapKeySize: 2400, ciphertextSize: 1088},
+	},
+	"2.16.840.1.101.3.4.4.3": {
+		name: "ML-KEM-1024", paramSetID: "1024",
+		oid: "2.16.840.1.101.3.4.4.3", functions: encapDecap,
+		primitive: cdx.CryptoPrimitiveKEM,
+		classical: 256, nqsl: nistCategory5,
+		pqc: kemInfo{encapKeySize: 1568, decapKeySize: 3168, ciphertextSize: 1568},
 	},
 
 	// ---------- Stateful hash-based signatures (SP 800-208) ----------
@@ -215,20 +268,20 @@ var wantRegistry = map[string]expectedAlgorithm{
 		//   identified-organization(3) dod(6) internet(1) security(5)
 		//   mechanisms(5) pkix(7) algorithms(6) 34 }
 		name: "XMSS", paramSetID: "xmss",
-		oid: "1.3.6.1.5.5.7.6.34", functions: signVerify,
+		oid: "1.3.6.1.5.5.7.6.34", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nil, pqc: nil,
 	},
 	"1.3.6.1.5.5.7.6.35": {
 		// RFC 9802: id-alg-xmssmt-hashsig ::= { ... algorithms(6) 35 }
 		name: "XMSS-MT", paramSetID: "xmss-mt",
-		oid: "1.3.6.1.5.5.7.6.35", functions: signVerify,
+		oid: "1.3.6.1.5.5.7.6.35", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nil, pqc: nil,
 	},
 	"1.2.840.113549.1.9.16.3.17": {
 		// RFC 9708: id-alg-hss-lms-hashsig ::= { iso(1) member-body(2)
 		//   us(840) rsadsi(113549) pkcs(1) pkcs9(9) smime(16) alg(3) 17 }
 		name: "HSS-LMS", paramSetID: "hss-lms",
-		oid: "1.2.840.113549.1.9.16.3.17", functions: signVerify,
+		oid: "1.2.840.113549.1.9.16.3.17", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nil, pqc: nil,
 	},
 
@@ -280,6 +333,7 @@ func TestRegistryMatchesStandards(t *testing.T) {
 			}
 
 			require.Equal(t, want.pqc, got.pqc, "pqc size metadata")
+			require.Equal(t, want.primitive, got.primitive, "primitive")
 		})
 	}
 
@@ -473,6 +527,14 @@ func assertSizeProps(t *testing.T, compo cdx.Component, want isPqcInfo) {
 			czertainly.AlgorithmPublicKeySize:  strconv.Itoa(w.pubKeySize),
 			czertainly.AlgorithmSignatureSize:  strconv.Itoa(w.signatureSize),
 		}, sizeProps)
+	case kemInfo:
+		require.Equal(t, map[string]string{
+			czertainly.AlgorithmPrivateKeySize: strconv.Itoa(w.decapKeySize),
+			czertainly.AlgorithmPublicKeySize:  strconv.Itoa(w.encapKeySize),
+			czertainly.AlgorithmCiphertextSize: strconv.Itoa(w.ciphertextSize),
+		}, sizeProps)
+		require.NotContains(t, sizeProps, czertainly.AlgorithmSignatureSize,
+			"a KEM cannot sign, so no signature size may be reported")
 	default:
 		t.Fatalf("unhandled pqc metadata type %T", want)
 	}

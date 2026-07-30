@@ -30,6 +30,12 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 	}
 
 	var primitive = cdx.CryptoPrimitiveSignature
+	if info.primitive != "" {
+		// A registry entry knows its own primitive. This is the only way an
+		// ML-KEM key gets reported as a "kem" rather than a signature scheme:
+		// no KeyUsage inspection can derive that.
+		primitive = info.primitive
+	}
 
 	var keyUsage x509.KeyUsage
 	if cert != nil {

@@ -127,8 +127,21 @@ func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (cdx.Component, error)
 	}
 
 	algo := info.componentWOBomRef(c.czertainly)
+	// This path set no primitive at all, so every PQC private key produced an
+	// algorithm component with the field missing, while the public-key path
+	// produced one with it set. Both now take it from the registry.
+	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 	return algo, nil
+}
+
+// registryPrimitive returns the primitive a registry entry declares, falling
+// back to signature for entries that do not state one.
+func registryPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
+	if info.primitive != "" {
+		return info.primitive
+	}
+	return cdx.CryptoPrimitiveSignature
 }
 
 func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err error) {
@@ -145,7 +158,9 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 	}
 
 	algo = info.componentWOBomRef(c.czertainly)
-	setAlgorithmPrimitive(&algo, cdx.CryptoPrimitiveSignature)
+	// Trust the registry's primitive. Hardcoding "signature" here reported an
+	// ML-KEM encapsulation key as a signature algorithm.
+	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
 	pubKeyValue, pubKeyHash := c.hashRawPublicKey(der)
