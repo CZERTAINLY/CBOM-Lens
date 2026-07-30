@@ -22,7 +22,7 @@ import (
 	"cuelang.org/go/cue/cuecontext"
 	"cuelang.org/go/encoding/yaml"
 	"github.com/creasty/defaults"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 
 	_ "embed"
 )
@@ -611,17 +611,17 @@ func probeDockerLikeSocket(ctx context.Context, sockPath string) (string, error)
 	// Build host URL
 	var host = fixDockerHost(sockPath)
 
-	cli, err := client.NewClientWithOpts(
-		client.WithHost(host),
-		client.WithAPIVersionNegotiation(), // negotiate highest mutually supported
-	)
+	cli, err := client.New(client.WithHost(host))
 	if err != nil {
 		return "", fmt.Errorf("new client: %w", err)
 	}
 	defer func() { _ = cli.Close() }()
 
-	if _, err = cli.Ping(ctx); err != nil {
-		// Distinguish dial errors
+	if _, err = cli.Ping(ctx, client.PingOptions{}); err != nil {
+		// Distinguish a host that is silent from one that refuses: the
+		// client passes context errors through undecorated, and the
+		// resulting *url.Error is a net.Error reporting Timeout, while a
+		// refused dial is replaced by its own error type.
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			return "", fmt.Errorf("ping timeout: %w", err)

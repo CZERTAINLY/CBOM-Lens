@@ -47,6 +47,16 @@ func (s *Map[E, D]) goWorkers(seq iter.Seq2[E, error]) {
 	s.g.Go(func() error {
 		for entry, nerr := range seq {
 			if nerr != nil {
+				// There is nothing to map, but the error must not be
+				// dropped: it is how a walker reports a source or an
+				// entry it could not read. The send is guarded like the
+				// one below, otherwise a consumer abandoning the
+				// iterator would leave this goroutine blocked forever.
+				select {
+				case <-s.gctx.Done():
+					return s.gctx.Err()
+				case s.mapped <- result[D]{e: nerr}:
+				}
 				continue
 			}
 			s.g.Go(func() error {
@@ -54,8 +64,7 @@ func (s *Map[E, D]) goWorkers(seq iter.Seq2[E, error]) {
 				select {
 				case <-s.gctx.Done():
 					return s.gctx.Err()
-				default:
-					s.mapped <- result[D]{d: d, e: scanErr}
+				case s.mapped <- result[D]{d: d, e: scanErr}:
 				}
 				return nil
 			})

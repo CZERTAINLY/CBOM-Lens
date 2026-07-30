@@ -5,10 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/CZERTAINLY/CBOM-lens/internal/dockertest"
 	"github.com/CZERTAINLY/CBOM-lens/internal/log"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
@@ -18,6 +20,132 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestImages_FakeDaemonEmpty(t *testing.T) {
+	daemon := dockertest.New(t)
+
+	config := model.ContainerConfig{
+		Name:   t.Name(),
+		Type:   "docker",
+		Host:   daemon.Host,
+		Images: nil,
+	}
+
+	idx := 0
+	counter := stats.New(t.Name())
+	for range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
+		idx++
+	}
+	require.Equal(t, 0, idx)
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		switch {
+		case strings.HasSuffix(key, "sources_total"):
+			exp = "1"
+		case strings.HasSuffix(key, "sources_errors"):
+			exp = "0"
+		}
+		require.Equal(t, exp, value, key)
+	}
+}
+
+func TestImages_FakeDaemonListError(t *testing.T) {
+	daemon := dockertest.New(t, dockertest.WithImages(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "image list failed", http.StatusInternalServerError)
+	}))
+
+	config := model.ContainerConfig{
+		Name:   t.Name(),
+		Type:   "docker",
+		Host:   daemon.Host,
+		Images: nil,
+	}
+
+	// The ImageList failure must surface to the caller as a single
+	// (nil, err) yield.
+	idx := 0
+	counter := stats.New(t.Name())
+	for entry, err := range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
+		require.Nil(t, entry)
+		require.Error(t, err)
+		idx++
+	}
+	require.Equal(t, 1, idx)
+	// a host whose images cannot be listed contributes nothing, so it is a
+	// source-level failure
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		switch {
+		case strings.HasSuffix(key, "sources_total"), strings.HasSuffix(key, "sources_errors"):
+			exp = "1"
+		}
+		require.Equal(t, exp, value, key)
+	}
+}
+
+// TestImages_FakeDaemonNoAPIVersionHeader locks the behavior against daemons
+// and proxies that answer /_ping without an Api-Version header: negotiation
+// cannot downgrade, the client stays at its maximum version, and the host is
+// still usable rather than being reported as a failed source.
+func TestImages_FakeDaemonNoAPIVersionHeader(t *testing.T) {
+	daemon := dockertest.New(t, dockertest.WithoutAPIVersion())
+
+	config := model.ContainerConfig{
+		Name:   t.Name(),
+		Type:   "docker",
+		Host:   daemon.Host,
+		Images: nil,
+	}
+
+	idx := 0
+	counter := stats.New(t.Name())
+	for entry, err := range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
+		t.Errorf("unexpected yield: entry=%v err=%v", entry, err)
+		idx++
+	}
+	require.Equal(t, 0, idx)
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		if strings.HasSuffix(key, "sources_total") {
+			exp = "1"
+		}
+		require.Equal(t, exp, value, key)
+	}
+}
+
+// TestImages_FakeDaemonImageLoadError covers a non-empty image list, the path
+// where ImageListResult.Items is read. The listed image does not exist, so it
+// fails to load: that is an entry-level failure, the source itself is fine.
+func TestImages_FakeDaemonImageLoadError(t *testing.T) {
+	daemon := dockertest.New(t, dockertest.WithImagesJSON(
+		`[{"Id":"sha256:deadbeef","RepoTags":["x:latest"]}]`))
+	// stereoscope builds its own daemon client from the environment
+	t.Setenv("DOCKER_HOST", daemon.Host)
+
+	config := model.ContainerConfig{
+		Name:   t.Name(),
+		Type:   "docker",
+		Host:   daemon.Host,
+		Images: nil,
+	}
+
+	idx := 0
+	counter := stats.New(t.Name())
+	for entry, err := range walk.Images(t.Context(), counter, []model.ContainerConfig{config}) {
+		require.Nil(t, entry)
+		require.Error(t, err)
+		idx++
+	}
+	require.Equal(t, 1, idx, "the single listed image must be attempted exactly once")
+	for key, value := range counter.Stats() {
+		var exp = "0"
+		switch {
+		case strings.HasSuffix(key, "sources_total"), strings.HasSuffix(key, "files_errors"):
+			exp = "1"
+		}
+		require.Equal(t, exp, value, key)
+	}
+}
 
 func TestWrongHost(t *testing.T) {
 	config := model.ContainerConfig{

@@ -1,7 +1,7 @@
 ########################
 # Build Stage
 ########################
-FROM golang:1.26.5-alpine3.23 AS builder
+FROM golang:1.26.5-alpine3.24 AS builder
 
 ARG VERSION=dev
 ENV CGO_ENABLED=0 \
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 ########################
 # Run Stage
 ########################
-FROM alpine:3.23
+FROM alpine:3.24
 
 LABEL org.opencontainers.image.authors="CZERTAINLY <support@czertainly.com>"
 

@@ -21,7 +21,6 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -290,7 +289,7 @@ service:
 			Dockerfile: "Dockerfile",
 		},
 		ExposedPorts: []string{"8443/tcp"},
-		WaitingFor:   wait.ForListeningPort(nat.Port("8443/tcp")).WithStartupTimeout(30 * time.Second),
+		WaitingFor:   wait.ForListeningPort("8443/tcp").WithStartupTimeout(30 * time.Second),
 	}
 
 	c, err := testcontainers.GenericContainer(t.Context(), testcontainers.GenericContainerRequest{
@@ -309,7 +308,7 @@ service:
 	}
 	require.NotEmpty(t, image)
 
-	mp, err := c.MappedPort(t.Context(), nat.Port("8443/tcp"))
+	mp, err := c.MappedPort(t.Context(), "8443/tcp")
 	require.NoError(t, err)
 
 	t.Logf("port: %s", mp.Port())

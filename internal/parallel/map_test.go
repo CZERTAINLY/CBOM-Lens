@@ -2,6 +2,7 @@ package parallel_test
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"testing"
 	"testing/synctest"
@@ -71,6 +72,78 @@ func TestMap(t *testing.T) {
 				require.Equal(t, tt.then.d, time.Since(start))
 			})
 		})
+	}
+}
+
+// TestMap_ForwardsInputErrors pins that an error yielded by the input
+// sequence reaches the consumer instead of being dropped: a walker reporting
+// an unreadable source must not disappear between the walk and the caller.
+func TestMap_ForwardsInputErrors(t *testing.T) {
+	t.Parallel()
+
+	f := func(_ context.Context, d time.Duration) (int, error) {
+		return int(d), nil
+	}
+
+	errBroken := errors.New("broken source")
+	// one good entry, one error, one good entry
+	seq := func(yield func(time.Duration, error) bool) {
+		if !yield(1*time.Second, nil) {
+			return
+		}
+		if !yield(0, errBroken) {
+			return
+		}
+		yield(2*time.Second, nil)
+	}
+
+	var got []int
+	var errs []error
+	for d, err := range parallel.NewMap(t.Context(), 2, f).Iter(seq) {
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		got = append(got, d)
+	}
+
+	require.Len(t, errs, 1)
+	require.ErrorIs(t, errs[0], errBroken)
+	// the error entry is not mapped, the healthy ones still are
+	require.ElementsMatch(t, []int{int(1 * time.Second), int(2 * time.Second)}, got)
+}
+
+// TestMap_AbandonedIterWithInputError guards the forwarding send: a consumer
+// that stops early must not leave the producer blocked on the channel.
+func TestMap_AbandonedIterWithInputError(t *testing.T) {
+	t.Parallel()
+
+	f := func(_ context.Context, d time.Duration) (int, error) {
+		return int(d), nil
+	}
+
+	// an endless stream of errors, so the channel stays full
+	seq := func(yield func(time.Duration, error) bool) {
+		for {
+			if !yield(0, errors.New("broken source")) {
+				return
+			}
+		}
+	}
+
+	// break out immediately; the deferred cancel must release the producer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range parallel.NewMap(t.Context(), 1, f).Iter(seq) {
+			break
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Iter did not return after the consumer stopped: the producer is blocked forwarding an error")
 	}
 }
 
