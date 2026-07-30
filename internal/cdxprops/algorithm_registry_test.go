@@ -1,6 +1,7 @@
 package cdxprops
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -538,4 +539,54 @@ func assertSizeProps(t *testing.T, compo cdx.Component, want isPqcInfo) {
 	default:
 		t.Fatalf("unhandled pqc metadata type %T", want)
 	}
+}
+
+// TestNistQuantumSecurityLevelOmittedInJSON checks the omission at the
+// serialization boundary, which is the only place it actually matters. A nil
+// pointer in Go is worthless if the encoder writes `"nistQuantumSecurityLevel":
+// 0` anyway, and 0 is a specific CycloneDX claim: "meets none of the
+// categories". SP 800-208 assigns the stateful schemes no category at all.
+func TestNistQuantumSecurityLevelOmittedInJSON(t *testing.T) {
+	t.Parallel()
+
+	t.Run("omitted for stateful hash-based signatures", func(t *testing.T) {
+		t.Parallel()
+
+		for _, oid := range []string{
+			"1.3.6.1.5.5.7.6.34",         // XMSS
+			"1.3.6.1.5.5.7.6.35",         // XMSS-MT
+			"1.2.840.113549.1.9.16.3.17", // HSS-LMS
+		} {
+			info := unsupportedAlgorithms[oid]
+			raw, err := json.Marshal(info.componentWOBomRef(true))
+			require.NoError(t, err)
+
+			require.NotContains(t, string(raw), "nistQuantumSecurityLevel",
+				"%s: SP 800-208 assigns no category, so the key must be absent", info.name)
+			require.NotContains(t, string(raw), "czertainly:component:algorithm:pqc:",
+				"%s: sizes are not derivable from the OID, so no size properties",
+				info.name)
+		}
+	})
+
+	t.Run("emitted when a standard assigns a category", func(t *testing.T) {
+		t.Parallel()
+
+		// Control: proves the assertion above is not passing merely because the
+		// encoder drops the field for everything.
+		info := unsupportedAlgorithms["2.16.840.1.101.3.4.3.18"] // ML-DSA-65
+		raw, err := json.Marshal(info.componentWOBomRef(false))
+		require.NoError(t, err)
+		require.Contains(t, string(raw), `"nistQuantumSecurityLevel":3`)
+	})
+
+	t.Run("emitted for an explicit zero", func(t *testing.T) {
+		t.Parallel()
+
+		info := algorithmInfo{name: "Hypothetical", nistQuantumSecurityLevel: ptr(0)}
+		raw, err := json.Marshal(info.componentWOBomRef(false))
+		require.NoError(t, err)
+		require.Contains(t, string(raw), `"nistQuantumSecurityLevel":0`,
+			"an explicit claim of 0 must be emitted, which is why the field is a pointer")
+	})
 }
