@@ -287,7 +287,7 @@
       }
     },
     {
-      "bom-ref": "crypto/algorithm/rsa-2048@a2394bcc-abe0-5eef-b8fe-7cd717aabc95",
+      "bom-ref": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0",
       "type": "cryptographic-asset",
       "name": "RSA-2048",
       "evidence": {
@@ -306,13 +306,14 @@
       "cryptoProperties": {
         "assetType": "algorithm",
         "algorithmProperties": {
-          "primitive": "signature",
+          "primitive": "pke",
           "parameterSetIdentifier": "2048",
           "executionEnvironment": "software-plain-ram",
           "cryptoFunctions": [
-            "decapsulate",
-            "encapsulate",
-            "sign"
+            "decrypt",
+            "encrypt",
+            "sign",
+            "verify"
           ],
           "classicalSecurityLevel": 112
         },
@@ -320,7 +321,7 @@
       }
     },
     {
-      "bom-ref": "crypto/algorithm/rsa-2048@b50476f3-6df7-52a4-a06b-ccce6a6f020d",
+      "bom-ref": "crypto/algorithm/rsa-2048@a11419cf-1522-5651-923d-17003bbaf47d",
       "type": "cryptographic-asset",
       "name": "RSA-2048",
       "evidence": {
@@ -336,8 +337,10 @@
           "parameterSetIdentifier": "2048",
           "executionEnvironment": "software-plain-ram",
           "cryptoFunctions": [
-            "decapsulate",
-            "encapsulate"
+            "decrypt",
+            "encrypt",
+            "sign",
+            "verify"
           ],
           "classicalSecurityLevel": 112
         },
@@ -598,7 +601,7 @@
             },
             {
               "type": "publicKey",
-              "ref": "crypto/algorithm/rsa-2048@a2394bcc-abe0-5eef-b8fe-7cd717aabc95"
+              "ref": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0"
             }
           ]
         },
@@ -680,7 +683,7 @@
           "relatedCryptographicAssets": [
             {
               "type": "algorithm",
-              "ref": "crypto/algorithm/rsa-2048@a2394bcc-abe0-5eef-b8fe-7cd717aabc95"
+              "ref": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0"
             }
           ]
         },
@@ -710,7 +713,7 @@
           "relatedCryptographicAssets": [
             {
               "type": "algorithm",
-              "ref": "crypto/algorithm/rsa-2048@a2394bcc-abe0-5eef-b8fe-7cd717aabc95"
+              "ref": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0"
             }
           ]
         },
@@ -738,7 +741,7 @@
           "relatedCryptographicAssets": [
             {
               "type": "algorithm",
-              "ref": "crypto/algorithm/rsa-2048@b50476f3-6df7-52a4-a06b-ccce6a6f020d"
+              "ref": "crypto/algorithm/rsa-2048@a11419cf-1522-5651-923d-17003bbaf47d"
             }
           ]
         },
@@ -825,7 +828,7 @@
     {
       "ref": "crypto/algorithm/sha-256-rsa@ba193caf-6df4-5601-a44b-84fb73ebac8a",
       "dependsOn": [
-        "crypto/algorithm/rsa-2048@a2394bcc-abe0-5eef-b8fe-7cd717aabc95",
+        "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0",
         "crypto/algorithm/sha-256@a8503480-feab-51bb-9368-6eb238279847"
       ]
     }
