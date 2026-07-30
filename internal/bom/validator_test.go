@@ -407,3 +407,31 @@ func TestValidator_UnsupportedVersion(t *testing.T) {
 	require.EqualError(t, errBytes, "unsupported BOM specification version: supported 1.6: got: 1.5")
 
 }
+
+func TestValidator_17(t *testing.T) {
+	v, err := bom.NewValidator(cdx.SpecVersion1_7)
+	require.NoError(t, err)
+
+	minimal := func(algProps string) []byte {
+		return []byte(`{
+			"bomFormat": "CycloneDX", "specVersion": "1.7", "version": 1,
+			"components": [{
+				"type": "cryptographic-asset", "name": "x", "bom-ref": "x@1",
+				"cryptoProperties": {
+					"assetType": "algorithm",
+					"algorithmProperties": {` + algProps + `}
+				}
+			}]
+		}`)
+	}
+
+	t.Run("valid ellipticCurve accepted", func(t *testing.T) {
+		require.NoError(t, v.ValidateBytes(minimal(`"ellipticCurve": "secg/secp256r1"`)))
+	})
+	t.Run("bare curve name rejected (closed enum)", func(t *testing.T) {
+		require.Error(t, v.ValidateBytes(minimal(`"ellipticCurve": "secp256r1"`)))
+	})
+	t.Run("bogus algorithmFamily rejected", func(t *testing.T) {
+		require.Error(t, v.ValidateBytes(minimal(`"algorithmFamily": "HQC"`)))
+	})
+}
