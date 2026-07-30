@@ -456,10 +456,16 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 			meta.paramSetID = curveName
 			meta.name = fmt.Sprintf("ECDSA-%s", curveName)
 
+			// Named-curve OIDs per RFC 5480 section 2.1.1.1 and bits of
+			// security per RFC 5480 section 4.
 			switch curveName {
 			case "P-224":
-				meta.oid = "1.2.840.10045.3.1.1"
-				meta.classicalSecurityLevel = 80
+				// secp224r1 ::= { iso(1) identified-organization(3)
+				//                 certicom(132) curve(0) 33 }
+				// 1.2.840.10045.3.1.1 is secp192r1, and 80 bits is
+				// secp192r1's security level. Both were wrong here.
+				meta.oid = "1.3.132.0.33"
+				meta.classicalSecurityLevel = 112
 			case "P-256":
 				meta.oid = "1.2.840.10045.3.1.7"
 				meta.classicalSecurityLevel = 128
