@@ -33,6 +33,12 @@ func TestNewBuilder(t *testing.T) {
 			wantErr:     false,
 		},
 		{
+			name:        "valid version 1.7",
+			config:      model.CBOM{Version: "1.7"},
+			wantVersion: cdx.SpecVersion1_7,
+			wantErr:     false,
+		},
+		{
 			name:    "unsupported version",
 			config:  model.CBOM{Version: "2.0"},
 			wantErr: true,

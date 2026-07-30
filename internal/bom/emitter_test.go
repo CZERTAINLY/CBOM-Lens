@@ -15,6 +15,12 @@ func TestEmitterFor(t *testing.T) {
 		require.Equal(t, cdx.SpecVersion1_6, emitter.SpecVersion())
 	})
 
+	t.Run("returns emitter for SpecVersion1_7", func(t *testing.T) {
+		emitter, err := emitterFor(cdx.SpecVersion1_7)
+		require.NoError(t, err)
+		require.Equal(t, cdx.SpecVersion1_7, emitter.SpecVersion())
+	})
+
 	t.Run("returns error for unsupported version", func(t *testing.T) {
 		emitter, err := emitterFor(cdx.SpecVersion1_5)
 		require.Error(t, err)

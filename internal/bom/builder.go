@@ -43,6 +43,7 @@ type Builder struct {
 func NewBuilder(config model.CBOM) (*Builder, error) {
 	var versions = map[string]cdx.SpecVersion{
 		"1.6": cdx.SpecVersion1_6,
+		"1.7": cdx.SpecVersion1_7,
 	}
 
 	version, ok := versions[config.Version]
