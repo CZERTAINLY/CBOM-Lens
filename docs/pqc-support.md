@@ -115,18 +115,24 @@ HQC-128/192/256. They are not HQC: in `oqs-provider`'s
 test asserts they stay out. Such an OID now produces an honest
 `unsupported fallback oid` miss instead of a confidently wrong HQC component.
 
-## Known defects
+## Primitives on the certificate path
 
-- **ML-KEM certificates report `primitive: signature`.**
-  `certHitToComponents` (`internal/cdxprops/x509.go`) overwrites the public-key
-  algorithm component's primitive with a hardcoded `signature` after the registry
-  has already set it. The `cryptoFunctions` remain correct
-  (`[decapsulate, encapsulate]`), so an ML-KEM certificate yields a
-  self-contradictory component. ML-KEM keys presented as PEM (`PUBLIC KEY` or
-  `PRIVATE KEY`) are unaffected and report `primitive: kem` correctly. Pinned by
-  `TestPQCPipeline_MLKEMCertificatePrimitiveIsKnownWrong`. The same call also
-  emits a PKE-classified RSA key as `signature` after hashing it as `pke`, so
-  fixing it shifts BOMRefs and requires a golden regeneration.
+A component's `primitive` is set by whichever function builds it, before that
+function hashes the component into its BOMRef. `certHitToComponents`
+(`internal/cdxprops/x509.go`) used to re-stamp a hardcoded `signature` onto the
+signature-algorithm and public-key-algorithm components afterwards. That was a
+no-op for the signature algorithm, but it discarded the public key's real
+primitive: an ML-KEM certificate reported `primitive: signature` alongside
+`cryptoFunctions: [decapsulate, encapsulate]`, and a keyEncipherment-only RSA
+key was hashed as `pke` but emitted as `signature`, leaving a BOMRef that did
+not describe its own contents.
+
+The re-stamping is gone, so both now report what they are. Three tests hold the
+line: `TestPQCPipeline_MLKEMCertificateReportsKEMPrimitive`,
+`TestCertHitToComponents_RSAEnciphermentKeyIsPKE`, and — as the general
+invariant — `TestCertHitToComponents_BOMRefsMatchContents`, which re-hashes
+every emitted `crypto/algorithm/` component and requires the result to
+reproduce its BOMRef, so any future mutation after hashing fails immediately.
 
 ## Test coverage
 

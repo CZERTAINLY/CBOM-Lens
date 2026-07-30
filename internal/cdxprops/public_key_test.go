@@ -1,11 +1,20 @@
 package cdxprops
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
+	"strings"
 	"testing"
+	"time"
+
+	cdx "github.com/CycloneDX/cyclonedx-go"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 )
@@ -27,4 +36,96 @@ func TestConverter_publicKeyComponents(t *testing.T) {
 
 	require.Equal(t, "ML-DSA-65", algo.Name)
 	require.Equal(t, "ML-DSA-65", key.Name)
+}
+
+// selfSignedRSACert builds an RSA certificate with the given KeyUsage. It exists
+// so the keyEncipherment path can be exercised without committing a fixture.
+func selfSignedRSACert(t *testing.T, usage x509.KeyUsage) *x509.Certificate {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "encipherment.example"},
+		NotBefore:    time.Unix(0, 0),
+		NotAfter:     time.Unix(1<<31, 0),
+		KeyUsage:     usage,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	return cert
+}
+
+// TestCertHitToComponents_RSAEnciphermentKeyIsPKE covers the classical half of
+// the primitive-overwrite defect. publicKeyComponents classifies an RSA key
+// whose KeyUsage is keyEncipherment only as "pke"; certHitToComponents used to
+// overwrite that with "signature" after the component had been hashed.
+func TestCertHitToComponents_RSAEnciphermentKeyIsPKE(t *testing.T) {
+	t.Parallel()
+
+	cert := selfSignedRSACert(t, x509.KeyUsageKeyEncipherment)
+
+	compos, _, err := NewConverter().certHitToComponents(t.Context(), model.CertHit{Cert: cert})
+	require.NoError(t, err)
+
+	var found bool
+	for _, compo := range compos {
+		if compo.CryptoProperties == nil ||
+			compo.CryptoProperties.AssetType != cdx.CryptoAssetTypeAlgorithm ||
+			!strings.HasPrefix(compo.Name, "RSA-") {
+			continue
+		}
+		require.NotNil(t, compo.CryptoProperties.AlgorithmProperties)
+		require.Equal(t, cdx.CryptoPrimitivePKE,
+			compo.CryptoProperties.AlgorithmProperties.Primitive,
+			"a keyEncipherment-only RSA key must be reported as pke, not signature")
+		found = true
+	}
+	require.True(t, found, "no RSA algorithm component emitted for the certificate")
+}
+
+// TestCertHitToComponents_BOMRefsMatchContents is the general form of the same
+// defect: a BOMRef is a hash of the component it names, so mutating a component
+// after BOMRefHash has run leaves a reference that no longer describes its own
+// contents. Re-hashing every emitted component must reproduce its BOMRef.
+func TestCertHitToComponents_BOMRefsMatchContents(t *testing.T) {
+	t.Parallel()
+
+	for name, cert := range map[string]*x509.Certificate{
+		"rsa keyEncipherment": selfSignedRSACert(t, x509.KeyUsageKeyEncipherment),
+		"rsa digitalSignature": selfSignedRSACert(t,
+			x509.KeyUsageDigitalSignature|x509.KeyUsageCertSign),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := NewConverter()
+			compos, _, err := c.certHitToComponents(t.Context(), model.CertHit{Cert: cert})
+			require.NoError(t, err)
+			require.NotEmpty(t, compos)
+
+			for _, compo := range compos {
+				// Only crypto/algorithm refs are hashes of the component JSON.
+				// crypto/key and crypto/certificate refs hash the key or the
+				// DER instead, so re-hashing the component cannot reproduce
+				// them and they are out of scope here.
+				refName, _, ok := strings.Cut(compo.BOMRef, "@")
+				if !ok || !strings.HasPrefix(refName, "crypto/algorithm/") {
+					continue
+				}
+				want := compo.BOMRef
+
+				rehashed := compo
+				c.BOMRefHash(&rehashed, refName)
+				require.Equal(t, want, rehashed.BOMRef,
+					"%s: BOMRef does not match a re-hash of its own contents, "+
+						"so the component was mutated after being hashed", compo.Name)
+			}
+		})
+	}
 }

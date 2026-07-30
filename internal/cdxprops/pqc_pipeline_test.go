@@ -203,24 +203,16 @@ func TestPQCPipeline_MalformedKeyDoesNotPanicOrFabricate(t *testing.T) {
 		"an unparseable key must produce no components, not a guessed algorithm")
 }
 
-// TestPQCPipeline_MLKEMCertificatePrimitiveIsKnownWrong pins a defect rather
-// than a desired behaviour, so it is visible instead of silent.
+// TestPQCPipeline_MLKEMCertificateReportsKEMPrimitive asserts that a
+// certificate carrying an ML-KEM public key describes it as a KEM.
 //
-// certHitToComponents (internal/cdxprops/x509.go) calls setAlgorithmPrimitive
-// with a hardcoded "signature" on the public-key algorithm component, after
-// publicKeyComponents has already set the registry's primitive AND hashed the
-// component. For an ML-KEM certificate the emitted result is therefore
-// self-contradictory: primitive "signature" alongside cryptoFunctions
-// [decapsulate, encapsulate].
-//
-// It is left unfixed here on purpose. The same call is what forces a
-// pke-classified RSA key to be emitted as "signature" after being hashed as
-// "pke", so changing it shifts BOMRefs and the 1.6 golden, and belongs in its
-// own change with its own regeneration. See the comment at x509.go:105.
-//
-// When that is fixed, this test should flip to asserting
-// cdx.CryptoPrimitiveKEM.
-func TestPQCPipeline_MLKEMCertificatePrimitiveIsKnownWrong(t *testing.T) {
+// certHitToComponents used to overwrite the primitive with a hardcoded
+// "signature" after publicKeyComponents had already set the registry value and
+// hashed the component, which produced a self-contradictory component:
+// primitive "signature" next to cryptoFunctions [decapsulate, encapsulate].
+// The primitive is now whatever publicKeyComponents hashed, so the component's
+// BOMRef and its contents agree.
+func TestPQCPipeline_MLKEMCertificateReportsKEMPrimitive(t *testing.T) {
 	t.Parallel()
 
 	raw := buildPQCDocument(t, cdxtest.MLKEM768Certificate)
@@ -238,12 +230,9 @@ func TestPQCPipeline_MLKEMCertificatePrimitiveIsKnownWrong(t *testing.T) {
 		if props == nil || props.CryptoFunctions == nil {
 			continue
 		}
-		// The functions are right, which is what makes the primitive visibly
-		// inconsistent inside one component.
 		require.Contains(t, *props.CryptoFunctions, cdx.CryptoFunctionEncapsulate)
-		require.Equal(t, cdx.CryptoPrimitiveSignature, props.Primitive,
-			"KNOWN DEFECT: x509.go overwrites the registry primitive. "+
-				"If this now reports \"kem\", the defect is fixed -- update this test.")
+		require.Equal(t, cdx.CryptoPrimitiveKEM, props.Primitive,
+			"an ML-KEM key must be reported as a kem, not a signature scheme")
 		found = true
 	}
 	require.True(t, found, "no ML-KEM-768 algorithm component in the certificate document")

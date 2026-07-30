@@ -295,7 +295,7 @@
       "cryptoProperties": {
         "assetType": "algorithm",
         "algorithmProperties": {
-          "primitive": "signature",
+          "primitive": "pke",
           "parameterSetIdentifier": "2048",
           "executionEnvironment": "software-plain-ram",
           "cryptoFunctions": [
