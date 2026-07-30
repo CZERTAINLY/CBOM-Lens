@@ -6,6 +6,40 @@ CBOM-Lens discovers certificates, keys, secrets, and algorithms across local fil
 
 ---
 
+## Why CBOM-Lens
+
+**The first CBOM producer to emit the CycloneDX 1.7 cryptography registry.**
+1.7 added two registry-backed fields to `algorithmProperties`, `algorithmFamily`
+and `ellipticCurve`, and CBOM-Lens is — as far as we can establish — the first
+tool to actually write them. As of 2026-07-30 `cdxgen` defaults to 1.7 and emits
+neither; `cyclonedx-cli` and the Python, JavaScript and .NET libraries drop both
+when converting; the reference `cyclonedx-core-java` only gained the capability
+in 13.0.0. That claim is dated and falsifiable on purpose: **find a producer that
+got there first and we will correct it.**
+
+**Post-quantum algorithms are detected, not guessed.** ML-DSA (FIPS 204),
+SLH-DSA (FIPS 205, all 12 parameter sets), ML-KEM (FIPS 203), XMSS, XMSS-MT and
+HSS-LMS are recognised from their OIDs and modelled with key sizes, signature
+sizes and NIST security categories transcribed from the standards, each with its
+citation recorded next to the value in the source. Where no authoritative source
+exists, the field is **omitted rather than invented** — stateful hash-based
+signatures carry no `nistQuantumSecurityLevel` because SP 800-208 assigns them
+none, and HQC and FN-DSA are not claimed at all because no OID has been assigned
+to them.
+
+**A wrong answer is treated as worse than no answer.** Both registry fields are
+closed enumerations — 93 families, 246 curves — where a single out-of-vocabulary
+value invalidates the entire document, so CBOM-Lens maps through total tables and
+omits on a miss instead of passing a string through. Curves that could only be
+guessed, such as one inferred from a signature digest or borrowed from a
+different certificate on the same port, are deliberately left unmapped. The
+vendored schema snapshot means validation runs fully offline.
+
+Details in [CycloneDX 1.7 cryptography registry](#cyclonedx-17-cryptography-registry)
+and [PQC support](docs/pqc-support.md).
+
+---
+
 ## Features
 
 - **Multiple scan targets**
@@ -183,8 +217,12 @@ How it is kept honest:
   value is checked against it by test. Validation runs fully offline.
 
 Set `cbom.version: "1.7"` in the config file to select 1.7 output; `"1.6"`
-remains the default. Deprecated 1.6 fields are still emitted alongside the new
-ones, since 1.7 deprecates by annotation only and consumers still read them.
+remains the default and stays the compatibility format. In 1.7 output the
+superseded reference fields (`signatureAlgorithmRef`, `subjectPublicKeyRef`,
+`algorithmRef`, `cryptoRefArray`) are **cleared** in favour of
+`relatedCryptographicAssets`, which cannot carry a dangling reference. The one
+field emitted twice is `curve`, kept alongside `ellipticCurve` because 1.7
+deprecates it by annotation only and most consumers still read it.
 
 ---
 

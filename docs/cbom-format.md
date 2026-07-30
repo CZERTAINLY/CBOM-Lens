@@ -16,7 +16,9 @@ CBOM-Lens emits **1.6 by default**. Set `cbom.version: "1.7"` in the configurati
 
 ### What 1.7 adds
 
-Upgrading is safe in both directions of reading: 1.7 removed nothing, and every field a 1.6 consumer expects is still present. Deprecations in 1.7 are annotations rather than constraints, so a 1.6 document also validates as 1.7 unchanged.
+The 1.7 schema itself removed nothing, and it deprecates by annotation rather than by constraint, so any 1.6 document also validates as 1.7 unchanged.
+
+CBOM-Lens's own 1.7 output is a different matter, and **1.6 stays the compatibility format**. Where 1.7 supersedes a field, the 1.7 output adopts the replacement and drops the original: the reference fields listed below are cleared in favour of `relatedCryptographicAssets`, and `certificateExtension` is migrated to `certificateFileExtension`. A consumer that reads only 1.6 field names will therefore miss those relationships in a 1.7 document. The single exception is `curve`, which is emitted alongside `ellipticCurve` — see below for why.
 
 For cryptographic assets, 1.7 adds three things worth knowing about:
 
