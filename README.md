@@ -1,6 +1,6 @@
 # CBOM-Lens
 
-CLI tool to scan filesystems, containers, and network ports for cryptographic assets and generate a CycloneDX CBOM 1.6.
+CLI tool to scan filesystems, containers, and network ports for cryptographic assets and generate a CycloneDX CBOM 1.6 or 1.7.
 
 CBOM-Lens discovers certificates, keys, secrets, and algorithms across local files, container images, and services, and emits a consistent Cryptographic Bill of Materials (CBOM) that can be uploaded to a CBOM-Repository or consumed by external applications.
 
@@ -12,9 +12,10 @@ CBOM-Lens discovers certificates, keys, secrets, and algorithms across local fil
   - Local **filesystem** (certificates, keys, secrets).
   - **Container images** from Docker/Podman.
   - **Network ports** using nmap (TLS and SSH detection).
-- **CycloneDX CBOM 1.6 output**
+- **CycloneDX CBOM 1.6 and 1.7 output**
   - Stable, content-based `bom-ref` identifiers to correlate the same cryptographic assets across sources.
   - Privacy-aware handling of private keys and algorithm components.
+  - **First known producer to emit the 1.7 cryptography registry fields** `algorithmFamily` and `ellipticCurve` — see below.
 - **Flexible operation modes**
   - One-shot **manual** runs (good for CI and ad-hoc scans).
   - **Timer** mode with cron expressions or ISO-8601 durations.
@@ -83,6 +84,7 @@ CBOM-Lens is configured via a single YAML file. The top-level structure is:
 - `filesystem`: filesystem scan settings.
 - `containers`: container scan settings.
 - `ports`: port scan settings.
+- `cbom`: CBOM output settings, including `version` (`"1.6"` default, or `"1.7"`).
 
 Typical patterns:
 
@@ -155,14 +157,54 @@ If you want to understand or extend CBOM-Lens:
 
 ---
 
+## CycloneDX 1.7 cryptography registry
+
+CycloneDX 1.7 added two registry-backed fields to `algorithmProperties`:
+`algorithmFamily` and `ellipticCurve`. Both are **closed enumerations** — 93
+permitted families, 246 curves, every curve namespaced like `secg/secp256r1`.
+One value outside the enum makes the whole document fail schema validation.
+
+**CBOM-Lens is the first known CBOM producer to emit them.** As of 2026-07-30,
+`cdxgen` defaults to 1.7 and writes neither field; `cyclonedx-cli` and the
+Python, JavaScript, and .NET libraries drop both silently when converting; and
+the reference `cyclonedx-core-java` gained the capability only in 13.0.0. If you
+find a producer that got there first, open an issue and we will correct this.
+
+How it is kept honest:
+
+- **Total mapping tables, no passthrough.** A value is emitted only when it maps
+  to a registry member. Anything unrecognised is omitted rather than guessed,
+  because a plausible-looking wrong curve is worse than a missing one.
+- **Only trustworthy sources map.** Curves inferred from a signature's digest,
+  or resolved from a different certificate on the same port, are deliberately
+  left unmapped — they are guesses, and a CBOM should not assert a guess.
+- **The enum is vendored and pinned.** The registry is a living document served
+  from an unversioned URL, so the schema snapshot is committed and every table
+  value is checked against it by test. Validation runs fully offline.
+
+Set `cbom.version: "1.7"` in the config file to select 1.7 output; `"1.6"`
+remains the default. Deprecated 1.6 fields are still emitted alongside the new
+ones, since 1.7 deprecates by annotation only and consumers still read them.
+
+---
+
 ## Post-Quantum Cryptography support
 
-CBOM-Lens can detect certain Post-Quantum Cryptography (PQC) algorithms in artifacts even though Go’s standard library does not yet implement them.
+CBOM-Lens detects Post-Quantum Cryptography (PQC) algorithms in artifacts even
+though Go's standard library does not yet implement most of them.
 
-- Detection support exists for the **ML-DS** family.
-- PQC algorithms are modelled as cryptographic algorithm assets with detailed properties (key sizes, signature sizes, security levels, etc.).
+- **ML-DSA** (FIPS 204), **SLH-DSA** (FIPS 205, all 12 parameter sets),
+  **ML-KEM** (FIPS 203), **XMSS**, **XMSS-MT**, and **HSS-LMS**.
+- Modelled as cryptographic algorithm assets with key sizes, signature sizes,
+  and NIST security categories transcribed from the standards, with the citation
+  recorded next to each value.
+- Values with no authoritative source are **omitted, not invented**. Stateful
+  hash signatures carry no `nistQuantumSecurityLevel`, because SP 800-208
+  assigns them no NIST category. HQC and FN-DSA are not detected at all: FIPS
+  206 and 207 are unpublished, so no assigned OID exists to match.
 
-For examples of how PQC algorithms are represented in CBOMs, see [CBOM output format](docs/cbom-format.md).
+For examples of how PQC algorithms are represented in CBOMs, see
+[CBOM output format](docs/cbom-format.md) and [PQC support](docs/pqc-support.md).
 
 ---
 
