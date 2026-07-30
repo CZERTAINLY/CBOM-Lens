@@ -56,3 +56,6 @@ tmp/
 
 # WINEPREFIX for a wine test
 /testing/registry/wine/
+
+# Planning artifacts kept on disk for the author, not shipped in the repo.
+/docs/superpowers/
