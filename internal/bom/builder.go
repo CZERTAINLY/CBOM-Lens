@@ -141,6 +141,18 @@ func (b *Builder) BOM(ctx context.Context) cdx.BOM {
 func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 	sr := b.safeRefs()
 
+	var rels []cbom.Relationship
+
+	// Extract crypto rels before the assets loop: sr.component below mutates
+	// shared nested pointers in place, so this reads the raw reference fields.
+	wire := make(map[string]struct{}, len(sr.refs))
+	for _, w := range sr.refs {
+		wire[w] = struct{}{}
+	}
+	for _, compop := range b.components {
+		rels = append(rels, cryptoRels(ctx, sr.refs, wire, compop)...)
+	}
+
 	assets := make([]cbom.Asset, 0, len(b.components))
 	for _, compop := range b.components {
 		if compop == nil {
@@ -161,7 +173,6 @@ func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 	// golden corpus pins the rendering). Edges whose endpoints do not resolve
 	// to a stored component are dropped: emitting a fabricated ref would be
 	// dangling, and minting one would be nondeterministic.
-	var rels []cbom.Relationship
 	for ref, depsp := range b.dependencies {
 		if depsp == nil {
 			continue
@@ -201,6 +212,56 @@ func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 		Timestamp:    b.clock().Format(time.RFC3339),
 		StatsProps:   statsProps,
 	}
+}
+
+// cryptoRels derives version-neutral crypto relationships from the embedded
+// 1.6 reference fields still written by the converters. Endpoints resolve
+// through refs (raw -> wire) with an identity fallback for already-canonical
+// values (model() mutates shared nested pointers in place on its first run —
+// pre-existing quirk). Unresolvable targets are dropped with a warning,
+// mirroring dependsOn handling. Transitional: this extraction retires per
+// converter as they migrate to emitting Rels natively.
+func cryptoRels(ctx context.Context, r refs, wire map[string]struct{}, compo *cdx.Component) []cbom.Relationship {
+	if compo == nil || compo.CryptoProperties == nil {
+		return nil
+	}
+	from := r[compo.BOMRef]
+	resolve := func(raw string) (string, bool) {
+		if to, ok := r[raw]; ok {
+			return to, true
+		}
+		if _, ok := wire[raw]; ok {
+			return raw, true
+		}
+		return "", false
+	}
+	var rels []cbom.Relationship
+	add := func(kind cbom.RelationshipKind, raw string) {
+		if raw == "" {
+			return
+		}
+		to, ok := resolve(raw)
+		if !ok {
+			slog.WarnContext(ctx, "dropping crypto relationship: target has no component",
+				"from", compo.BOMRef, "to", raw, "kind", string(kind))
+			return
+		}
+		rels = append(rels, cbom.Relationship{From: cbom.AssetRef(from), To: cbom.AssetRef(to), Kind: kind})
+	}
+	cp := compo.CryptoProperties
+	if cp.CertificateProperties != nil {
+		add(cbom.RelSignatureAlgorithm, string(cp.CertificateProperties.SignatureAlgorithmRef))
+		add(cbom.RelSubjectPublicKey, string(cp.CertificateProperties.SubjectPublicKeyRef))
+	}
+	if cp.RelatedCryptoMaterialProperties != nil {
+		add(cbom.RelMaterialAlgorithm, string(cp.RelatedCryptoMaterialProperties.AlgorithmRef))
+	}
+	if cp.ProtocolProperties != nil && cp.ProtocolProperties.CryptoRefArray != nil {
+		for _, ref := range *cp.ProtocolProperties.CryptoRefArray {
+			add(cbom.RelProtocolCrypto, string(ref))
+		}
+	}
+	return rels
 }
 
 // AsJSON encode the BOM into JSON format

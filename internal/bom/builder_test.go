@@ -794,3 +794,111 @@ func TestBuilder_ModelCanonicalRefs(t *testing.T) {
 	require.Equal(t, sigRef, rel.From)
 	require.Equal(t, keyRef, rel.To)
 }
+
+// relsOfKind filters m.Rels by kind.
+func relsOfKind(m cbom.BOMModel, kind cbom.RelationshipKind) []cbom.Relationship {
+	var out []cbom.Relationship
+	for _, r := range m.Rels {
+		if r.Kind == kind {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func TestBuilder_ModelExtractsCryptoRels(t *testing.T) {
+	newB := func() *Builder {
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b.components["alg@raw"] = &cdx.Component{BOMRef: "alg@raw", Name: "alg"}
+		b.components["key@raw"] = &cdx.Component{BOMRef: "key@raw", Name: "key"}
+		return b
+	}
+
+	t.Run("certificate refs become sig-alg and subject-public-key rels", func(t *testing.T) {
+		b := newB()
+		b.components["cert@raw"] = &cdx.Component{
+			BOMRef: "cert@raw", Name: "cert",
+			CryptoProperties: &cdx.CryptoProperties{
+				CertificateProperties: &cdx.CertificateProperties{
+					SignatureAlgorithmRef: cdx.BOMReference("alg@raw"),
+					SubjectPublicKeyRef:   cdx.BOMReference("key@raw"),
+				},
+			},
+		}
+		m := b.model(context.Background())
+
+		sig := relsOfKind(m, cbom.RelSignatureAlgorithm)
+		pub := relsOfKind(m, cbom.RelSubjectPublicKey)
+		require.Len(t, sig, 1)
+		require.Len(t, pub, 1)
+		require.Equal(t, cbom.AssetRef(safeRef("cert@raw")), sig[0].From)
+		require.Equal(t, cbom.AssetRef(safeRef("alg@raw")), sig[0].To)
+		require.Equal(t, cbom.AssetRef(safeRef("key@raw")), pub[0].To)
+	})
+
+	t.Run("material algorithmRef becomes material-algorithm rel", func(t *testing.T) {
+		b := newB()
+		b.components["mat@raw"] = &cdx.Component{
+			BOMRef: "mat@raw", Name: "mat",
+			CryptoProperties: &cdx.CryptoProperties{
+				RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+					AlgorithmRef: cdx.BOMReference("alg@raw"),
+				},
+			},
+		}
+		m := b.model(context.Background())
+		rels := relsOfKind(m, cbom.RelMaterialAlgorithm)
+		require.Len(t, rels, 1)
+		require.Equal(t, cbom.AssetRef(safeRef("alg@raw")), rels[0].To)
+	})
+
+	t.Run("cryptoRefArray becomes protocol-crypto rels preserving order", func(t *testing.T) {
+		b := newB()
+		refs := []cdx.BOMReference{"alg@raw", "key@raw"}
+		b.components["proto@raw"] = &cdx.Component{
+			BOMRef: "proto@raw", Name: "proto",
+			CryptoProperties: &cdx.CryptoProperties{
+				ProtocolProperties: &cdx.CryptoProtocolProperties{CryptoRefArray: &refs},
+			},
+		}
+		m := b.model(context.Background())
+		rels := relsOfKind(m, cbom.RelProtocolCrypto)
+		require.Len(t, rels, 2)
+		require.Equal(t, cbom.AssetRef(safeRef("alg@raw")), rels[0].To)
+		require.Equal(t, cbom.AssetRef(safeRef("key@raw")), rels[1].To)
+	})
+
+	t.Run("dangling crypto ref is dropped, not minted", func(t *testing.T) {
+		b := newB()
+		b.components["cert@raw"] = &cdx.Component{
+			BOMRef: "cert@raw", Name: "cert",
+			CryptoProperties: &cdx.CryptoProperties{
+				CertificateProperties: &cdx.CertificateProperties{
+					SignatureAlgorithmRef: cdx.BOMReference("ghost@raw"),
+				},
+			},
+		}
+		m := b.model(context.Background())
+		require.Empty(t, relsOfKind(m, cbom.RelSignatureAlgorithm))
+	})
+
+	t.Run("already-canonical ref resolves via identity", func(t *testing.T) {
+		// model() mutates shared nested pointers on first run (pre-existing
+		// quirk): a second run sees already-canonical refs. They must still
+		// resolve, keeping model() idempotent for crypto rels.
+		b := newB()
+		b.components["cert@raw"] = &cdx.Component{
+			BOMRef: "cert@raw", Name: "cert",
+			CryptoProperties: &cdx.CryptoProperties{
+				CertificateProperties: &cdx.CertificateProperties{
+					SignatureAlgorithmRef: cdx.BOMReference("alg@raw"),
+				},
+			},
+		}
+		first := b.model(context.Background())
+		second := b.model(context.Background())
+		require.Equal(t, relsOfKind(first, cbom.RelSignatureAlgorithm),
+			relsOfKind(second, cbom.RelSignatureAlgorithm))
+	})
+}
