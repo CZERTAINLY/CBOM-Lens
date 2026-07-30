@@ -32,7 +32,7 @@ func NewSupervisor(ctx context.Context, cfg model.Config) (*Supervisor, error) {
 	var supervisor = &Supervisor{
 		cfg: cfg.Service,
 	}
-	uploaders, err := uploaders(ctx, supervisor.cfg)
+	uploaders, err := uploaders(ctx, supervisor.cfg, cfg.CBOM.Version)
 	if err != nil {
 		return nil, fmt.Errorf("initializing uploaders: %w", err)
 	}
@@ -339,7 +339,7 @@ func newScheduler(ctx context.Context, cfgp *model.TimerSchedule, startFunc func
 	return d, s, nil
 }
 
-func uploaders(_ context.Context, cfg model.Service) ([]model.Uploader, error) {
+func uploaders(_ context.Context, cfg model.Service, cbomVersion string) ([]model.Uploader, error) {
 	if cfg.Dir == "" && cfg.Repository == nil {
 		return []model.Uploader{NewWriteUploader(os.Stdout)}, nil
 	}
@@ -353,7 +353,7 @@ func uploaders(_ context.Context, cfg model.Service) ([]model.Uploader, error) {
 	}
 
 	if cfg.Repository != nil {
-		u, err := NewBOMRepoUploader(cfg.Repository.URL)
+		u, err := NewBOMRepoUploader(cfg.Repository.URL, cbomVersion)
 		if err != nil {
 			return nil, err
 		}

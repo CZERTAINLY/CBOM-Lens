@@ -39,7 +39,7 @@ func TestNewBOMRepoUploaderFunc(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 
 			mu := parseURL(t, tc.serverURL)
-			u, err := NewBOMRepoUploader(mu)
+			u, err := NewBOMRepoUploader(mu, "1.6")
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
@@ -55,7 +55,7 @@ func TestDecodeUploadResponse(t *testing.T) {
 	err := mu.UnmarshalText([]byte("http://some-server.com"))
 	require.NoError(t, err)
 
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -307,7 +307,7 @@ func TestBOMRepoUploadNetworkError(t *testing.T) {
 	err := mu.UnmarshalText([]byte("http://some-server.com"))
 	require.NoError(t, err)
 
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -506,7 +506,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 			defer closeFunc()
 
 			mu := parseURL(t, s.URL)
-			u, err := NewBOMRepoUploader(mu)
+			u, err := NewBOMRepoUploader(mu, "1.6")
 			require.NoError(t, err)
 			require.NotNil(t, u)
 
@@ -539,7 +539,7 @@ func TestBOMRepoUploadFuncWithCallbackSuccess(t *testing.T) {
 	defer ts.Close()
 
 	mu := parseURL(t, ts.URL)
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -560,7 +560,7 @@ func TestBOMRepoUploadFuncWithCallbackFail(t *testing.T) {
 	defer ts.Close()
 
 	mu := parseURL(t, ts.URL)
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -577,4 +577,11 @@ func parseURL(t *testing.T, s string) model.URL {
 	err := u.UnmarshalText([]byte(s))
 	require.NoError(t, err)
 	return u
+}
+
+func TestContentTypeForVersion(t *testing.T) {
+	// The 1.6 string must stay byte-identical to the previous constant.
+	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.6", contentTypeForVersion("1.6"))
+	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.6", contentTypeForVersion(""))
+	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.7", contentTypeForVersion("1.7"))
 }

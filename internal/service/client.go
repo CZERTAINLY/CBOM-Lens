@@ -14,29 +14,37 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 )
 
-const (
-	uploadPath  = "api/v1/bom"
-	contentType = "application/vnd.cyclonedx+json; version = 1.6"
-)
+const uploadPath = "api/v1/bom"
+
+// contentTypeForVersion labels uploads with the configured CycloneDX spec
+// version. Empty (unset) keeps the historical 1.6 label byte-identical.
+func contentTypeForVersion(version string) string {
+	if version == "" {
+		version = "1.6"
+	}
+	return "application/vnd.cyclonedx+json; version = " + version
+}
 
 type UploadCallbackFunc func(error, string, string)
 
 type BOMRepoUploader struct {
-	requestURL string
-	client     *http.Client
+	requestURL  string
+	contentType string
+	client      *http.Client
 
 	uploadCallback UploadCallbackFunc
 }
 
-func NewBOMRepoUploader(serverURL model.URL) (*BOMRepoUploader, error) {
+func NewBOMRepoUploader(serverURL model.URL, version string) (*BOMRepoUploader, error) {
 	parsedURL := serverURL.Clone().AsURL()
 	parsedURL.Path = strings.TrimRight(parsedURL.Path, "/")
 
 	parsedURL.Path = fmt.Sprintf("%s/%s", parsedURL.Path, uploadPath)
 
 	c := &BOMRepoUploader{
-		requestURL: parsedURL.String(),
-		client:     &http.Client{},
+		requestURL:  parsedURL.String(),
+		contentType: contentTypeForVersion(version),
+		client:      &http.Client{},
 	}
 
 	return c, nil
@@ -55,7 +63,7 @@ func (c *BOMRepoUploader) Upload(ctx context.Context, jobName string, raw []byte
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
-	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Content-Type", c.contentType)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
