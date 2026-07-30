@@ -196,3 +196,23 @@ require (
 )
 
 tool go.uber.org/mock/mockgen
+
+// These modules reach the build list only as test-only requirements of our own
+// dependencies -- nothing cbom-lens imports resolves to them, so they are never
+// compiled or shipped (see the docker/docker link guard in check_pr.yml).  They
+// carry unfixable high-severity advisories, and the org SCA gate reads the
+// module graph rather than the import graph, so drop the edges outright:
+//
+//   github.com/docker/docker v25.0.5   CVE-2024-41110 (critical), CVE-2026-42306,
+//     CVE-2026-34040, CVE-2026-41567 -- required by Ullaakut/nmap; Moby stopped
+//     tagging this path after v28, so no clean version exists.
+//   github.com/containerd/containerd v1.7.33   CVE-2026-53492, CVE-2026-53489 --
+//     required by Ullaakut/nmap; fixed only in containerd/v2, which is already in
+//     the graph under its own path.
+//   github.com/open-policy-agent/opa v0.70.0   CVE-2025-46569 -- required by
+//     Microsoft/hcsshim, which still pins v0.70.0 as of v0.15.0-rc.3.
+exclude (
+	github.com/containerd/containerd v1.7.33
+	github.com/docker/docker v25.0.5+incompatible
+	github.com/open-policy-agent/opa v0.70.0
+)
