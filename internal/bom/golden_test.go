@@ -309,10 +309,17 @@ func TestGolden_1_7(t *testing.T) {
 		}
 	}
 	require.True(t, seenTypes["algorithm"], "corpus must exercise type=algorithm")
-	require.True(t, seenTypes["publicKey"], "corpus must exercise type=publicKey")
 	// The protocol's cryptoRefArray edge targets a certificate asset; the
 	// emitter labels it by target asset type.
 	require.True(t, seenTypes["certificate"], "corpus must exercise type=certificate")
+	// No publicKey edge exists yet, and that is the honest output rather than a
+	// gap in the corpus: certHitToComponents points subjectPublicKeyRef at the
+	// public key's ALGORITHM component, not at the key material (#204), so
+	// every such edge is target-labelled "algorithm". This assertion flips to
+	// requiring publicKey once #204 repoints the reference.
+	require.False(t, seenTypes["publicKey"],
+		"subjectPublicKeyRef still targets an algorithm component (#204); "+
+			"a publicKey label here would misdescribe the edge")
 
 	path := filepath.Join("testdata", "golden", "corpus-1.7.json")
 	if *update {

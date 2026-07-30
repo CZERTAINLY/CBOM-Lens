@@ -509,7 +509,7 @@
               "ref": "crypto/algorithm/sha-256-ecdsa@cc3b5016-e3d3-5617-a8c9-a136bbac834f"
             },
             {
-              "type": "publicKey",
+              "type": "algorithm",
               "ref": "crypto/algorithm/ecdsa-p-256@4ef9627d-b288-58e5-883e-d5276e5649c9"
             }
           ]
@@ -553,7 +553,7 @@
               "ref": "crypto/algorithm/ed25519@09a06737-88a1-5c7c-88c4-1e04b59b2da8"
             },
             {
-              "type": "publicKey",
+              "type": "algorithm",
               "ref": "crypto/algorithm/ed25519@d938c117-ccd1-5ddc-a984-993fe118ba4d"
             }
           ]
@@ -600,7 +600,7 @@
               "ref": "crypto/algorithm/sha-256-rsa@ba193caf-6df4-5601-a44b-84fb73ebac8a"
             },
             {
-              "type": "publicKey",
+              "type": "algorithm",
               "ref": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0"
             }
           ]

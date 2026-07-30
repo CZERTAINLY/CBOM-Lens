@@ -49,6 +49,15 @@ func TestCurveTables17_TrustedSourcesOnly(t *testing.T) {
 		_, ok = paramSet17[fabricated]
 		require.Truef(t, ok, "%q must be mapped via parameterSetIdentifier (trusted TLS group)", fabricated)
 	}
+	// publicKeySizeFromPkeyRef resolves a curve from the first certificate on
+	// the port, not from the cipher suite being described, so its lowercase
+	// spellings must stay unmapped: on a dual-certificate host they would put
+	// an EC curve on an RSA auth facet.
+	for _, untrusted := range []string{"p-224", "p-256", "p-384", "p-521"} {
+		_, ok := paramSet17[untrusted]
+		require.Falsef(t, ok,
+			"%q must not be mapped (derived from another certificate)", untrusted)
+	}
 	// Spot-check the trusted sources.
 	require.Equal(t, "secg/secp256r1", curveField17["nistp256"]) // SSH, RFC 5656
 	require.Equal(t, "other/Ed25519", curveField17["ed25519"])   // SSH, RFC 8709

@@ -128,6 +128,12 @@ func TestEmit17_CurveMapping(t *testing.T) {
 		mkAsset("ssh@1", "nistp256", ""),     // trusted SSH curve -> mapped
 		mkAsset("sig@1", "secp256r1", "256"), // fabricated -> omitted
 		mkAsset("key@1", "", "P-256"),        // SPKI param set -> mapped
+		// TLS auth facet. publicKeySizeFromPkeyRef derives this
+		// parameterSetIdentifier from the FIRST certificate on the port, not
+		// from the cipher suite's own certificate, so on a dual-certificate
+		// host an RSA auth facet can carry an EC certificate's curve. Mapping
+		// it would assert an elliptic curve on RSA.
+		mkAsset("RSA-p-256", "", "p-256"), // untrusted lowercase -> omitted
 	}}
 	bom := emit17{}.Emit(t.Context(), m)
 	byRef := map[string]*cdx.CryptoAlgorithmProperties{}
@@ -137,6 +143,9 @@ func TestEmit17_CurveMapping(t *testing.T) {
 	require.Equal(t, "secg/secp256r1", string(byRef["ssh@1"].EllipticCurve))
 	require.Empty(t, byRef["sig@1"].EllipticCurve)
 	require.Equal(t, "secg/secp256r1", string(byRef["key@1"].EllipticCurve))
+	require.Empty(t, byRef["RSA-p-256"].EllipticCurve,
+		"a parameterSetIdentifier derived from another certificate must not "+
+			"put a curve on an RSA component")
 
 	// Dual-emit: `curve` is deprecated-by-annotation in 1.7, not removed, and
 	// is not mutually exclusive with ellipticCurve. Clearing it would lose

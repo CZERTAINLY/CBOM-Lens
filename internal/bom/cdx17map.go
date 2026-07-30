@@ -20,8 +20,11 @@ import (
 //     (elliptic.Curve.Params().Name, "P-256" style) and TLS ECDHE kex facets
 //     (raw observed named groups from nmap ssl-enum-ciphers: bare secg
 //     names, x25519/ecdh_x25519, brainpool). Bare secg strings ARE trusted
-//     here — the fabricated writer never touches parameterSetIdentifier
-//     with curve names (it writes digest sizes like "256").
+//     here — curveInformation, the fabricating writer, only ever puts digest
+//     sizes like "256" in parameterSetIdentifier. One further writer is NOT
+//     trusted: publicKeySizeFromPkeyRef, feeding TLS auth facets, resolves a
+//     curve from the first certificate on the port instead of the suite's own,
+//     so its lowercase p-224..p-521 spellings are excluded (see the table).
 //   - nameCurve17 keys the component name, for algorithms whose OID fixes
 //     the curve outright.
 //
@@ -44,11 +47,15 @@ var paramSet17 = map[string]string{
 	"P-256": "secg/secp256r1",
 	"P-384": "secg/secp384r1",
 	"P-521": "secg/secp521r1",
-	// lowercase variants derived from refs by publicKeySizeFromPkeyRef
-	"p-224": "secg/secp224r1",
-	"p-256": "secg/secp256r1",
-	"p-384": "secg/secp384r1",
-	"p-521": "secg/secp521r1",
+	// NOTE: the lowercase p-224..p-521 spellings are deliberately absent.
+	// They reach parameterSetIdentifier only through publicKeySizeFromPkeyRef
+	// on TLS auth facets, which reads the FIRST certificate on the port rather
+	// than the cipher suite's own certificate. On a dual-certificate host an
+	// RSA auth facet therefore inherits an EC certificate's curve, and mapping
+	// it emitted "RSA-p-256" carrying ellipticCurve secg/secp256r1 -- a
+	// schema-valid false statement. Pinned by
+	// TestCurveTables17_TrustedSourcesOnly and TestEmit17_CurveMapping.
+	//
 	// TLS ECDHE named groups observed by nmap (raw kex_info).
 	"secp192r1":            "secg/secp192r1",
 	"secp224r1":            "secg/secp224r1",
