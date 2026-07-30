@@ -3,6 +3,9 @@ package cdxprops
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rsa"
+	"crypto/x509"
+	"math/big"
 	"slices"
 	"testing"
 
@@ -92,6 +95,33 @@ func TestExtractAlgorithmInfo_ECDSA(t *testing.T) {
 	}
 }
 
+// TestExtractAlgorithmInfo_RSA_Functions pins RSA's cryptoFunctions.
+//
+// The RSA branch declared [encapsulate, decapsulate]. Those are the KEM
+// functions; RSA as modelled here (PKCS#1 / PSS / OAEP over a plain RSA key)
+// is not a KEM. CycloneDX's cryptoFunctions enum has encrypt, decrypt, sign
+// and verify, which is what an RSA key can actually do, and which is what the
+// ECDSA and Ed25519 branches of this same function already declare for
+// themselves.
+func TestExtractAlgorithmInfo_RSA_Functions(t *testing.T) {
+	t.Parallel()
+
+	key := &rsa.PublicKey{N: new(big.Int).Lsh(big.NewInt(1), 2047), E: 65537}
+	got := extractAlgorithmInfo("RSA", rsaKeyAdapter{key})
+
+	require.Equal(t, "RSA-2048", got.name)
+	require.ElementsMatch(t, []cdx.CryptoFunction{
+		cdx.CryptoFunctionEncrypt,
+		cdx.CryptoFunctionDecrypt,
+		cdx.CryptoFunctionSign,
+		cdx.CryptoFunctionVerify,
+	}, got.cryptoFunctions)
+
+	require.NotContains(t, got.cryptoFunctions, cdx.CryptoFunctionEncapsulate,
+		"encapsulate is a KEM function and RSA is not modelled as a KEM here")
+	require.NotContains(t, got.cryptoFunctions, cdx.CryptoFunctionDecapsulate)
+}
+
 // TestCzertainlyPqcProps_PreservesExistingProps pins the append contract.
 //
 // czertainlyPqcProps appends to the slice it is handed, so its result must be
@@ -146,4 +176,80 @@ func TestExtractAlgorithmInfo_ECDSA_DistinctOIDs(t *testing.T) {
 		seen[info.oid] = info.name
 	}
 	require.Len(t, seen, 4)
+}
+
+// TestGetAlgorithmProperties_PQCCryptoFunctions covers the certificate path.
+//
+// getAlgorithmProperties hardcoded CryptoFunctions to [sign], which silently
+// overrode the registry for every PQC certificate: the algorithm component
+// built from a registry hit reported [sign, verify], while the signature
+// algorithm component built from the very same registry entry reported [sign].
+//
+// [sign] remains the default for the classical enum path, where there is no
+// registry entry to consult.
+func TestGetAlgorithmProperties_PQCCryptoFunctions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("registry hit uses the registry functions", func(t *testing.T) {
+		t.Parallel()
+
+		c := NewConverter()
+		// SLH-DSA-SHA2-128S. The signature algorithm enum is unknown to Go, so
+		// the OID fallback is the only source of truth.
+		props, _, hash := c.getAlgorithmProperties(
+			x509.UnknownSignatureAlgorithm, "2.16.840.1.101.3.4.3.20")
+
+		require.NotNil(t, props.CryptoFunctions)
+		require.ElementsMatch(t, []cdx.CryptoFunction{
+			cdx.CryptoFunctionSign,
+			cdx.CryptoFunctionVerify,
+		}, *props.CryptoFunctions)
+		require.True(t, sortedFunctions(*props.CryptoFunctions),
+			"emitted cryptoFunctions must be sorted")
+
+		require.Equal(t, "128S", props.ParameterSetIdentifier)
+		require.Equal(t, "SHA-256", hash, "SLH-DSA-SHA2 uses SHA-256 internally")
+
+		// FIPS 205 Table 2: SLH-DSA-SHA2-128s is category 1.
+		require.NotNil(t, props.NistQuantumSecurityLevel)
+		require.Equal(t, 1, *props.NistQuantumSecurityLevel)
+	})
+
+	t.Run("stateful scheme omits the quantum security level", func(t *testing.T) {
+		t.Parallel()
+
+		c := NewConverter()
+		// HSS-LMS: SP 800-208 assigns no category, so the field must not appear
+		// on the certificate path either.
+		props, _, _ := c.getAlgorithmProperties(
+			x509.UnknownSignatureAlgorithm, "1.2.840.113549.1.9.16.3.17")
+
+		require.Nil(t, props.NistQuantumSecurityLevel)
+		require.ElementsMatch(t, []cdx.CryptoFunction{
+			cdx.CryptoFunctionSign,
+			cdx.CryptoFunctionVerify,
+		}, *props.CryptoFunctions)
+	})
+
+	t.Run("classical enum path keeps the sign default", func(t *testing.T) {
+		t.Parallel()
+
+		c := NewConverter()
+		props, _, _ := c.getAlgorithmProperties(x509.SHA256WithRSA, "")
+
+		require.Equal(t, []cdx.CryptoFunction{cdx.CryptoFunctionSign},
+			*props.CryptoFunctions)
+	})
+
+	t.Run("unmatched fallback oid keeps the sign default", func(t *testing.T) {
+		t.Parallel()
+
+		c := NewConverter()
+		props, _, _ := c.getAlgorithmProperties(
+			x509.UnknownSignatureAlgorithm, "1.2.3.4.5.6.7.8")
+
+		require.Equal(t, []cdx.CryptoFunction{cdx.CryptoFunctionSign},
+			*props.CryptoFunctions)
+		require.Nil(t, props.NistQuantumSecurityLevel)
+	})
 }

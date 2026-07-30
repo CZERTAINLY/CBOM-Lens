@@ -102,6 +102,16 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	mainCertCompo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef = cdx.BOMReference(signatureAlgCompo.BOMRef)
 	mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyAlgCompo.BOMRef)
 
+	// HAZARD, deliberately left as-is: both calls run AFTER publicKeyComponents
+	// and certHitToSignatureAlgComponent have already computed BOMRefHash over
+	// these components. So an RSA key that publicKeyComponents classified as
+	// primitive "pke" (see the KeyUsage logic there) is hashed as "pke" but
+	// emitted as "signature" -- the ref no longer matches its own content.
+	//
+	// Moving these calls before the hash, or dropping the second one, changes
+	// every affected component's BOMRef and cascades into
+	// subjectPublicKeyRef, algorithmRef and dependencies. Fixing it is a
+	// deliberate, golden-shifting change; do not do it as a drive-by cleanup.
 	setAlgorithmPrimitive(&signatureAlgCompo, cdx.CryptoPrimitiveSignature)
 	setAlgorithmPrimitive(&publicKeyAlgCompo, cdx.CryptoPrimitiveSignature)
 

@@ -439,9 +439,14 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 	switch keyType {
 	case "RSA":
 		meta.oid = "1.2.840.113549.1.1.1"
+		// encapsulate/decapsulate are KEM functions. An rsaEncryption key is
+		// not a KEM: it encrypts, decrypts, signs and verifies. This matches
+		// what the ECDSA and Ed25519 cases below declare for themselves.
 		meta.cryptoFunctions = []cdx.CryptoFunction{
-			cdx.CryptoFunctionEncapsulate,
-			cdx.CryptoFunctionDecapsulate,
+			cdx.CryptoFunctionEncrypt,
+			cdx.CryptoFunctionDecrypt,
+			cdx.CryptoFunctionSign,
+			cdx.CryptoFunctionVerify,
 		}
 
 		// Try to extract size from actual key if available
@@ -583,6 +588,20 @@ func (a dsaKeyAdapter) BitLen() int {
 	return a.key.P.BitLen()
 }
 
+// sortedCryptoFunctions returns a sorted copy of fns, or nil when fns is
+// empty. Sorting keeps the emitted document stable, which matters because
+// component BOMRefs are content hashes over the serialized component.
+func sortedCryptoFunctions(fns []cdx.CryptoFunction) []cdx.CryptoFunction {
+	if len(fns) == 0 {
+		return nil
+	}
+	out := slices.Clone(fns)
+	slices.SortFunc(out, func(a, b cdx.CryptoFunction) int {
+		return strings.Compare(string(a), string(b))
+	})
+	return out
+}
+
 func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 	var nqsl *int
 	if i.nistQuantumSecurityLevel != nil {
@@ -592,15 +611,7 @@ func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 		nqsl = ptr(*i.nistQuantumSecurityLevel)
 	}
 
-	var sortedFunctions []cdx.CryptoFunction
-	if len(i.cryptoFunctions) > 0 {
-		// Sort crypto functions for consistent output
-		sortedFunctions = make([]cdx.CryptoFunction, len(i.cryptoFunctions))
-		copy(sortedFunctions, i.cryptoFunctions)
-		slices.SortFunc(sortedFunctions, func(a, b cdx.CryptoFunction) int {
-			return strings.Compare(string(a), string(b))
-		})
-	}
+	sortedFunctions := sortedCryptoFunctions(i.cryptoFunctions)
 
 	algoProps := &cdx.CryptoAlgorithmProperties{
 		ExecutionEnvironment:     cdx.CryptoExecutionEnvironmentSoftwarePlainRAM,

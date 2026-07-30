@@ -208,6 +208,10 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 		classicalSecurityLevel = 0
 	}
 
+	// [sign] is the default for the classical enum path above, which has no
+	// registry entry to consult. A registry hit below replaces it.
+	cryptoFunctions := []cdx.CryptoFunction{cdx.CryptoFunctionSign}
+
 	var props []cdx.Property
 	if oidFallback != "" && algorithmFamily == "Unknown" {
 		info, ok := unsupportedAlgorithms[oidFallback]
@@ -215,6 +219,12 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 			algorithmFamily = info.name
 			paramSetID = info.paramSetID
 			classicalSecurityLevel = info.classicalSecurityLevel
+			// Defer to the registry rather than overriding it with [sign].
+			// Reporting fewer functions than the algorithm component built
+			// from the same entry made the two disagree inside one document.
+			if fns := sortedCryptoFunctions(info.cryptoFunctions); fns != nil {
+				cryptoFunctions = fns
+			}
 			if info.nistQuantumSecurityLevel != nil {
 				// Copy the value; do not alias the shared registry entry.
 				nqsl = ptr(*info.nistQuantumSecurityLevel)
@@ -243,7 +253,7 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 		Primitive:                cdx.CryptoPrimitiveSignature,
 		ParameterSetIdentifier:   paramSetID,
 		ExecutionEnvironment:     execEnv,
-		CryptoFunctions:          &[]cdx.CryptoFunction{cdx.CryptoFunctionSign},
+		CryptoFunctions:          &cryptoFunctions,
 		ImplementationPlatform:   c.ImplementationPlatform(),
 		Padding:                  padding,
 		Curve:                    curveInformation(sigAlg),
