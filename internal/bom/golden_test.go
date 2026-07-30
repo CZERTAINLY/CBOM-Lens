@@ -232,3 +232,95 @@ func certFromNmapFixture(t *testing.T, host nmapv4.Host) *x509.Certificate {
 	t.Fatal("no ssl-cert PEM element found in nmap fixture")
 	return nil
 }
+
+func TestGolden_1_7(t *testing.T) {
+	b, err := NewBuilder(model.CBOM{Version: "1.7"})
+	require.NoError(t, err)
+	fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	b = b.WithClock(func() time.Time { return fixed }).
+		WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" }).
+		AppendDetections(context.Background(), fixtureDetections(t)...)
+
+	var buf bytes.Buffer
+	require.NoError(t, b.AsJSON(context.Background(), &buf))
+
+	v, err := NewValidator(cdx.SpecVersion1_7)
+	require.NoError(t, err)
+	require.NoError(t, v.ValidateBytes(buf.Bytes()), "1.7 output must validate against the 1.7 schema set")
+
+	// Zero tolerance for dangling refs in 1.7 (unlike 1.6's frozen allowlist).
+	var bom17 cdx.BOM
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &bom17))
+	assertRefIntegrity(t, &bom17, nil)
+
+	// Parsing coverage (#175 acceptance): the document must round-trip
+	// through the library decoder, not just encoding/json.
+	var decoded cdx.BOM
+	require.NoError(t, cdx.NewBOMDecoder(bytes.NewReader(buf.Bytes()), cdx.BOMFileFormatJSON).Decode(&decoded))
+	require.Equal(t, cdx.SpecVersion1_7, decoded.SpecVersion)
+
+	// The superseded 1.6 fields are schema-legal in 1.7 — assert absence
+	// explicitly. `curve` is deliberately NOT on this list: it is dual-emitted
+	// (see mapComponent17), because it is deprecated by annotation only, is not
+	// mutually exclusive with ellipticCurve, and carries curve information for
+	// every asset whose curve has no trusted 1.7 mapping.
+	for _, superseded := range []string{
+		`"signatureAlgorithmRef"`, `"subjectPublicKeyRef"`, `"algorithmRef"`,
+		`"cryptoRefArray"`, `"certificateExtension"`,
+	} {
+		require.NotContains(t, buf.String(), superseded,
+			"superseded 1.6 field must be absent from 1.7 output")
+	}
+
+	// Dual-emit, positively asserted: the fabricated sig-alg curve keeps its
+	// `curve` value and gains no ellipticCurve, while the real EC key's
+	// parameterSetIdentifier maps to a namespaced enum value.
+	require.Contains(t, buf.String(), `"curve": "secp256r1"`,
+		"deprecated curve must still be emitted in 1.7 (dual-emit)")
+	require.Contains(t, buf.String(), `"ellipticCurve": "secg/secp256r1"`,
+		"corpus must exercise the 1.7 ellipticCurve enum")
+
+	// The schema has no enum for relatedCryptographicAssets[].type — pin the
+	// vocabulary ourselves.
+	seenTypes := map[string]bool{}
+	for _, c := range *bom17.Components {
+		cp := c.CryptoProperties
+		if cp == nil {
+			continue
+		}
+		var lists []*[]cdx.RelatedCryptographicAsset
+		if cp.CertificateProperties != nil {
+			lists = append(lists, cp.CertificateProperties.RelatedCryptographicAssets)
+		}
+		if cp.RelatedCryptoMaterialProperties != nil {
+			lists = append(lists, cp.RelatedCryptoMaterialProperties.RelatedCryptographicAssets)
+		}
+		if cp.ProtocolProperties != nil {
+			lists = append(lists, cp.ProtocolProperties.RelatedCryptographicAssets)
+		}
+		for _, l := range lists {
+			if l == nil {
+				continue
+			}
+			for _, rca := range *l {
+				seenTypes[rca.Type] = true
+				require.Contains(t, []string{"algorithm", "publicKey", "certificate"}, rca.Type)
+			}
+		}
+	}
+	require.True(t, seenTypes["algorithm"], "corpus must exercise type=algorithm")
+	require.True(t, seenTypes["publicKey"], "corpus must exercise type=publicKey")
+	// The protocol's cryptoRefArray edge targets a certificate asset; the
+	// emitter labels it by target asset type.
+	require.True(t, seenTypes["certificate"], "corpus must exercise type=certificate")
+
+	path := filepath.Join("testdata", "golden", "corpus-1.7.json")
+	if *update {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
+		return
+	}
+	want, err := os.ReadFile(path)
+	require.NoError(t, err, "run: go test ./internal/bom -run TestGolden_1_7 -update")
+	require.Equal(t, string(want), buf.String())
+}
