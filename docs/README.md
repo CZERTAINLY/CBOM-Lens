@@ -1,6 +1,6 @@
 # CBOM-Lens Documentation
 
-CBOM-Lens is a CLI tool that scans filesystems, container images, and network ports to discover cryptographic assets and produces a CycloneDX CBOM 1.6. This directory contains operator, security, and developer documentation.
+CBOM-Lens is a CLI tool that scans filesystems, container images, and network ports to discover cryptographic assets and produces a CycloneDX CBOM 1.6 or 1.7. This directory contains operator, security, and developer documentation.
 
 ---
 

@@ -1,6 +1,6 @@
 # CBOM Output Format
 
-CBOM-Lens produces a Cryptographic Bill of Materials (CBOM) that conforms to the [CycloneDX BOM 1.6](https://cyclonedx.org/schema/bom-1.6.schema.json) specification.
+CBOM-Lens produces a Cryptographic Bill of Materials (CBOM) that conforms to the [CycloneDX BOM 1.6](https://cyclonedx.org/schema/bom-1.6.schema.json) or [1.7](https://cyclonedx.org/schema/bom-1.7.schema.json) specification.
 
 This document explains how CBOM-Lens models cryptographic assets and how it uses stable `bom-ref` identifiers.
 
@@ -8,12 +8,27 @@ For scanning strategies, see [Scanning use cases & best practices](scanning-use-
 
 ---
 
-## 1. CycloneDX 1.6
+## 1. Specification version
 
-- CBOM-Lens uses CycloneDX 1.6 as the base schema for its output.
-- Cryptographic assets (certificates, keys, algorithms, etc.) are represented as CycloneDX components with additional properties.
+Cryptographic assets (certificates, keys, algorithms, and so on) are represented as CycloneDX components with additional properties. The exact JSON structure is defined by the CycloneDX schema, with CBOM-Lens-specific conventions described below.
 
-The exact JSON structure is defined by the CycloneDX schema, with CBOM-Lens-specific conventions described below.
+CBOM-Lens emits **1.6 by default**. Set `cbom.version: "1.7"` in the configuration file to emit 1.7 instead. Output is validated against a schema embedded in the binary, so validation never requires network access.
+
+### What 1.7 adds
+
+Upgrading is safe in both directions of reading: 1.7 removed nothing, and every field a 1.6 consumer expects is still present. Deprecations in 1.7 are annotations rather than constraints, so a 1.6 document also validates as 1.7 unchanged.
+
+For cryptographic assets, 1.7 adds three things worth knowing about:
+
+**A registry of algorithm families and elliptic curves.** `algorithmProperties` gains `algorithmFamily` and `ellipticCurve`, whose permitted values come from a registry published alongside the specification. Both are *closed* enumerations — a value outside the registry makes the whole document fail validation, so CBOM-Lens emits them only where a scanned artifact maps to a registry entry, and omits them otherwise. A missing field means "not established"; it never means the algorithm is unrecognised. Curves are namespaced, for example `secg/secp256r1` rather than a bare `secp256r1`.
+
+`ellipticCurve` is emitted *alongside* the older `curve` field, not instead of it. `curve` remains valid in 1.7 and is only removed in CycloneDX 2.0, many consumers still read it, and several conversion tools silently discard the newer field — so emitting both is what keeps information from being lost in transit.
+
+**Typed relationships between crypto assets.** The individual reference fields (`signatureAlgorithmRef`, `subjectPublicKeyRef`, `algorithmRef`, `cryptoRefArray`) are superseded by a single `relatedCryptographicAssets` array of typed edges. CBOM-Lens builds these from its internal relationship model rather than by copying the old fields, which means a 1.7 document cannot contain a reference that points at nothing. The 1.6 output keeps the original fields for compatibility.
+
+**Richer certificate metadata.** `certificateProperties` gains a serial number, fingerprint, file extension, certificate state, parsed extensions, and lifecycle dates. CBOM-Lens populates the subset it can establish from the scanned certificate.
+
+Two smaller additions: the `key-wrap` primitive, and `tlsGroups` / `tlsSignatureSchemes` on cipher suites.
 
 ---
 
