@@ -30,17 +30,20 @@ var hashInfoMap2 = map[string]hashAlgorithmInfo{
 		ClassicalSecurityLevel: 0,
 		OID:                    "1.2.840.113549.2.2",
 	},
+	// RFC 8702 section 2 assigns the SHAKE identifiers under the NIST
+	// hashAlgs arc: id-shake128 = { ... csor(3) nistAlgorithm(4) 2 11 },
+	// id-shake256 = { ... csor(3) nistAlgorithm(4) 2 12 }.
 	"SHAKE128": {
 		Name:                   "SHAKE-128",
 		ParameterSetIdentifier: 128,
 		ClassicalSecurityLevel: 128,
-		OID:                    "2.16.840.1.101.3.6.5.3",
+		OID:                    "2.16.840.1.101.3.4.2.11",
 	},
 	"SHAKE256": {
 		Name:                   "SHAKE-256",
 		ParameterSetIdentifier: 256,
 		ClassicalSecurityLevel: 256,
-		OID:                    "2.16.840.1.101.3.6.5.4",
+		OID:                    "2.16.840.1.101.3.4.2.12",
 	},
 }
 
