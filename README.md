@@ -8,14 +8,11 @@ CBOM-Lens discovers certificates, keys, secrets, and algorithms across local fil
 
 ## Why CBOM-Lens
 
-**The first CBOM producer to emit the CycloneDX 1.7 cryptography registry.**
+**The first known CBOM producer to emit the CycloneDX 1.7 cryptography registry.**
 1.7 added two registry-backed fields to `algorithmProperties`, `algorithmFamily`
-and `ellipticCurve`, and CBOM-Lens is — as far as we can establish — the first
-tool to actually write them. As of 2026-07-30 `cdxgen` defaults to 1.7 and emits
-neither; `cyclonedx-cli` and the Python, JavaScript and .NET libraries drop both
-when converting; the reference `cyclonedx-core-java` only gained the capability
-in 13.0.0. That claim is dated and falsifiable on purpose: **find a producer that
-got there first and we will correct it.**
+and `ellipticCurve`, and CBOM-Lens writes them. The evidence for that claim, and
+the method for disproving it, is in
+[Appendix: registry adoption](docs/appendix-registry-adoption.md).
 
 **Post-quantum algorithms are detected, not guessed.** ML-DSA (FIPS 204),
 SLH-DSA (FIPS 205, all 12 parameter sets), ML-KEM (FIPS 203), XMSS, XMSS-MT and
@@ -198,11 +195,11 @@ CycloneDX 1.7 added two registry-backed fields to `algorithmProperties`:
 permitted families, 246 curves, every curve namespaced like `secg/secp256r1`.
 One value outside the enum makes the whole document fail schema validation.
 
-**CBOM-Lens is the first known CBOM producer to emit them.** As of 2026-07-30,
-`cdxgen` defaults to 1.7 and writes neither field; `cyclonedx-cli` and the
-Python, JavaScript, and .NET libraries drop both silently when converting; and
-the reference `cyclonedx-core-java` gained the capability only in 13.0.0. If you
-find a producer that got there first, open an issue and we will correct this.
+**CBOM-Lens is the first known CBOM producer to emit them.** The survey behind
+that claim — which tools were checked, what was found, and how to re-run it — is
+recorded in [Appendix: registry adoption](docs/appendix-registry-adoption.md).
+If you find a producer that got there first, open an issue and we will correct
+this.
 
 How it is kept honest:
 
