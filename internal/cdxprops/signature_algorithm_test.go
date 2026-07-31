@@ -128,10 +128,9 @@ func TestPqcSigOIDRefMap(t *testing.T) {
 	require.Equal(t, cdx.BOMReference("crypto/algorithm/xmss-hashsig@1.3.6.1.5.5.7.6.34"), pqcSigOIDRef["1.3.6.1.5.5.7.6.34"])
 }
 
-func TestSpkiOIDRefMap(t *testing.T) {
-	// spkiOIDRef is gone; it had no production reader. ML-KEM is now a real
-	// registry entry, and TestRegistryMatchesStandards covers it against
-	// FIPS 203 and the NIST CSOR.
+func TestRegistryHasMLKEMEntries(t *testing.T) {
+	// ML-KEM is a registry entry; TestRegistryMatchesStandards covers it
+	// against FIPS 203 and the NIST CSOR.
 	require.Contains(t, unsupportedAlgorithms, "2.16.840.1.101.3.4.4.1")
 	require.Equal(t, "ML-KEM-512", unsupportedAlgorithms["2.16.840.1.101.3.4.4.1"].name)
 	require.Equal(t, "XMSS", unsupportedAlgorithms["1.3.6.1.5.5.7.6.34"].name)

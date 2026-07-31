@@ -171,10 +171,15 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		_, pubKeyID, _ := strings.Cut(pubKeyCompo.BOMRef, "@")
 		privKeyAlgo, privKeyCompo := c.PrivateKey(ctx, pubKeyID, privKey)
 
-		compos = append(compos, []cdx.Component{
-			pubKeyAlgo, pubKeyCompo,
-			privKeyAlgo, privKeyCompo,
-		}...)
+		compos = append(compos, pubKeyAlgo, privKeyAlgo, privKeyCompo)
+		// publicKeyComponents yields no key component for a key it cannot
+		// identify. No key type currently reaches here in that state -- a DSA
+		// private key fails to parse and never lands in bundle.PrivateKeys --
+		// but appending a zero Component would put a nameless, ref-less entry
+		// into the document, which is the shape that crashed pem.go:33.
+		if pubKeyCompo.BOMRef != "" {
+			compos = append(compos, pubKeyCompo)
+		}
 	}
 
 	bundleCompos, err := c.restOfPEMBundleToCDX(ctx, bundle, bundle.Location)

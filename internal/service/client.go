@@ -16,13 +16,17 @@ import (
 
 const uploadPath = "api/v1/bom"
 
-// contentTypeForVersion labels uploads with a CycloneDX spec version. Empty
-// (unset) keeps the historical 1.6 label byte-identical.
+// contentTypeForVersion labels uploads with a CycloneDX spec version.
+//
+// The parameter is written in the RFC 7231 canonical form, token "=" token with
+// no surrounding whitespace. The previous spelling padded the "=" with spaces;
+// mime.ParseMediaType tolerates that and cbom-repository accepted it, but it is
+// not what the grammar says and nothing depends on the old bytes.
 func contentTypeForVersion(version string) string {
 	if version == "" {
 		version = "1.6"
 	}
-	return "application/vnd.cyclonedx+json; version = " + version
+	return "application/vnd.cyclonedx+json; version=" + version
 }
 
 // specVersionFromPayload reads specVersion out of an encoded BOM, returning ""

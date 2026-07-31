@@ -30,8 +30,18 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 	// Convert public keys
 	for _, pubKey := range bundle.PublicKeys {
 		algo, pubKeyCompo := c.publicKeyComponents(ctx, getPublicKeyAlgorithm(pubKey), pubKey, nil)
-		pubKeyCompo.CryptoProperties.RelatedCryptoMaterialProperties.Format = "PEM"
 		components = append(components, algo)
+		// publicKeyComponents yields no key component when the key cannot be
+		// identified — a DSA PUBLIC KEY block parses via ParsePKIXPublicKey but
+		// MarshalPKIXPublicKey refuses *dsa.PublicKey, and with no certificate
+		// there is no SPKI to hash instead. Appending the zero Component here
+		// and setting Format on it dereferenced a nil CryptoProperties and took
+		// the whole scan down. The Format assignment was redundant anyway: the
+		// dispatch loop in PEMBundle sets it for every component, nil-checking
+		// first.
+		if pubKeyCompo.BOMRef == "" {
+			continue
+		}
 		components = append(components, pubKeyCompo)
 	}
 

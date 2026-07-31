@@ -582,9 +582,9 @@ func parseURL(t *testing.T, s string) model.URL {
 
 func TestContentTypeForVersion(t *testing.T) {
 	// The 1.6 string must stay byte-identical to the previous constant.
-	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.6", contentTypeForVersion("1.6"))
-	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.6", contentTypeForVersion(""))
-	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.7", contentTypeForVersion("1.7"))
+	require.Equal(t, "application/vnd.cyclonedx+json; version=1.6", contentTypeForVersion("1.6"))
+	require.Equal(t, "application/vnd.cyclonedx+json; version=1.6", contentTypeForVersion(""))
+	require.Equal(t, "application/vnd.cyclonedx+json; version=1.7", contentTypeForVersion("1.7"))
 }
 
 // TestUpload_ContentTypeFollowsDocument pins that the uploaded document decides

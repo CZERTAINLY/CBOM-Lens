@@ -99,7 +99,6 @@ var wantRegistry = map[string]expectedAlgorithm{
 		name: "ML-DSA-87", paramSetID: "87",
 		oid: "2.16.840.1.101.3.4.3.19", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		// FIPS 204 Table 1 gives lambda = 256 for ML-DSA-87 and Category 5.
-		// This was 192 -- a duplicate of ML-DSA-65's row.
 		classical: 256,
 		nqsl:      nistCategory5,
 		pqc:       pqcInfo{privKeySize: 4896, pubKeySize: 2592, signatureSize: 4627},
@@ -144,7 +143,7 @@ var wantRegistry = map[string]expectedAlgorithm{
 		name: "SLH-DSA-SHA2-256S", paramSetID: "256S",
 		oid: "2.16.840.1.101.3.4.3.24", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 256, nqsl: nistCategory5,
-		// sig 29792. The old value 17088 was SLH-DSA-*-128f's signature size.
+		// sig 29792, RFC 9909 App. B Table 1.
 		pqc: pqcInfo{privKeySize: 128, pubKeySize: 64, signatureSize: 29792},
 	},
 	"2.16.840.1.101.3.4.3.25": {

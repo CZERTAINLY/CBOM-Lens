@@ -12,6 +12,7 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
 	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	pemscan "github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
 
 	"github.com/stretchr/testify/require"
 )
@@ -128,5 +129,38 @@ func TestConverter_PEM(t *testing.T) {
 
 	for idx, c := range components {
 		t.Logf("%d: name=%s, description=%s", idx, c.Name, c.Description)
+	}
+}
+
+// TestPEMBundle_StandaloneDSAPublicKeyDoesNotPanic covers the crash that
+// shipped undetected because nothing fed a *dsa.PublicKey through
+// bundle.PublicKeys.
+//
+// Go parses a DSA PUBLIC KEY block happily but refuses to marshal
+// *dsa.PublicKey, so publicKeyComponents cannot identify the key and returns no
+// key component. restOfPEMBundleToCDX then dereferenced its CryptoProperties
+// unconditionally and panicked, aborting the whole scan on one input file.
+func TestPEMBundle_StandaloneDSAPublicKeyDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	data, err := cdxtest.TestData(cdxtest.DSA2048PublicKey)
+	require.NoError(t, err)
+
+	bundle, err := pemscan.Scanner{}.Scan(t.Context(), data, cdxtest.DSA2048PublicKey)
+	require.NoError(t, err)
+	require.NotEmpty(t, bundle.PublicKeys, "fixture must reach bundle.PublicKeys, or this proves nothing")
+
+	var d *model.Detection
+	require.NotPanics(t, func() {
+		d = cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	})
+	require.NotNil(t, d)
+
+	// Whatever is emitted must be well formed: no component may carry a nil
+	// CryptoProperties, and none may have an empty name or ref.
+	for _, compo := range d.Components {
+		require.NotEmpty(t, compo.Name, "component with no name")
+		require.NotEmpty(t, compo.BOMRef, "component with no bom-ref")
+		require.NotNil(t, compo.CryptoProperties, "%s has nil CryptoProperties", compo.Name)
 	}
 }

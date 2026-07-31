@@ -34,6 +34,11 @@ const MLKEM768PrivateKey = "testdata/ml-kem-768-private-key.pem"
 const MLKEM768PublicKey = "testdata/ml-kem-768-public-key.pem"
 const MLKEM768Certificate = "testdata/ml-kem-768-cert.pem"
 
+// DSA2048PublicKey is a standalone DSA public key. Go parses it via
+// x509.ParsePKIXPublicKey but x509.MarshalPKIXPublicKey refuses *dsa.PublicKey,
+// which is the asymmetry that crashed restOfPEMBundleToCDX.
+const DSA2048PublicKey = "testdata/dsa-2048-public-key.pem"
+
 // can be validated via openssl
 // openssl pkey -pubin -in internal/cdxprops/cdxtest/testdata/ml-dsa-65-public-key.pem -outform DER | openssl dgst -sha256
 const MLDSA65PublicKeyHash = "sha256:bbf687535068e46b92b1a13fddb94cf59149624484986b8435bda6e1ee1536a3"

@@ -49,8 +49,16 @@ func (emit17) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {
 		if !ok {
 			continue // RelDependsOn renders via regroupDependsOn below
 		}
-		if r.Kind == cbom.RelProtocolCrypto && assetTypes[string(r.To)] == cdx.CryptoAssetTypeCertificate {
-			typ = "certificate"
+		// Derive from the target rather than defaulting to "algorithm": a
+		// protocol's crypto refs point at algorithms and certificates today, but
+		// a ref at key material would otherwise be mislabelled an algorithm.
+		if r.Kind == cbom.RelProtocolCrypto {
+			switch assetTypes[string(r.To)] {
+			case cdx.CryptoAssetTypeCertificate:
+				typ = "certificate"
+			case cdx.CryptoAssetTypeRelatedCryptoMaterial:
+				typ = "publicKey"
+			}
 		}
 		// Safety net, not the normal path. Since #204 the reference targets the
 		// key material, so this edge renders as "publicKey" -- the shape the

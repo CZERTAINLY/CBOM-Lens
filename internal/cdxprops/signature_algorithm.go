@@ -56,15 +56,6 @@ var pqcSigOIDRef = map[string]cdx.BOMReference{
 	"1.3.6.1.5.5.7.6.35":         "crypto/algorithm/xmssmt-hashsig@1.3.6.1.5.5.7.6.35",          // XMSS^MT
 }
 
-// spkiOIDRef was deleted here. It mapped SubjectPublicKeyInfo algorithm OIDs
-// to crypto/key/... bom-refs, but nothing in production ever read it -- its
-// only reader was its own unit test. It was also the single place ML-KEM
-// appeared anywhere in the codebase, which made ML-KEM look supported while an
-// actual ML-KEM key errored out in unsupportedPKCS8PrivateKey. ML-KEM now has
-// real registry entries in algorithm.go, and the bom-refs this map hardcoded
-// are derived from the key material by publicKeyComponents and
-// unsupportedPKIX.
-
 // getAlgorithmProperties generates crypto algorithm properties for a signature algorithm
 func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFallback string) (cdx.CryptoAlgorithmProperties, []cdx.Property, string) {
 	var algorithmFamily string

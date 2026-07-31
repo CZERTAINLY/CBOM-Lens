@@ -606,8 +606,7 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 			case "P-224":
 				// secp224r1 ::= { iso(1) identified-organization(3)
 				//                 certicom(132) curve(0) 33 }
-				// 1.2.840.10045.3.1.1 is secp192r1, and 80 bits is
-				// secp192r1's security level. Both were wrong here.
+				// RFC 5480 sec. 2.1.1.1; 112-bit level per sec. 4.
 				meta.oid = "1.3.132.0.33"
 				meta.classicalSecurityLevel = ptr(112)
 			case "P-256":
