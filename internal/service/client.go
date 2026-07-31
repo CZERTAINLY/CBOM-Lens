@@ -16,15 +16,22 @@ import (
 
 const uploadPath = "api/v1/bom"
 
-// contentTypeForVersion labels uploads with a CycloneDX spec version.
+// contentTypeForVersion labels uploads with a CycloneDX spec version, falling
+// back to 1.6 for anything it does not recognise.
+//
+// The clamp makes the function total rather than relying on its callers: a value
+// carrying a ";" would otherwise append a second media-type parameter, and the
+// two call sites have different provenance -- one the startup configuration, one
+// the encoded document. Both are checked elsewhere, but "unreachable" is a
+// property of today's callers, not of this function.
 //
 // The parameter is written in the RFC 7231 canonical form, token "=" token with
 // no surrounding whitespace. The previous spelling padded the "=" with spaces;
 // mime.ParseMediaType tolerates that and cbom-repository accepted it, but it is
 // not what the grammar says and nothing depends on the old bytes.
 func contentTypeForVersion(version string) string {
-	if version == "" {
-		version = "1.6"
+	if _, ok := supportedSpecVersions[version]; !ok {
+		version = defaultSpecVersion
 	}
 	return "application/vnd.cyclonedx+json; version=" + version
 }
@@ -40,6 +47,9 @@ var supportedSpecVersions = map[string]struct{}{
 	"1.6": {},
 	"1.7": {},
 }
+
+// defaultSpecVersion matches the cbom.version configuration default.
+const defaultSpecVersion = "1.6"
 
 // specVersionFromPayload reads specVersion out of an encoded BOM, returning ""
 // when the document does not declare one, cannot be parsed, or names a version

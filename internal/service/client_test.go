@@ -673,3 +673,23 @@ func TestSpecVersionFromPayload_RejectsUnknownVersions(t *testing.T) {
 		})
 	}
 }
+
+// TestContentTypeForVersion_ClampsUnknownValues pins that no caller can put an
+// arbitrary string into the header. The two call sites have different
+// provenance -- startup configuration and the encoded document -- and both are
+// checked elsewhere, but the clamp means the function does not depend on that.
+func TestContentTypeForVersion_ClampsUnknownValues(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"1.6", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.7", "application/vnd.cyclonedx+json; version=1.7"},
+		{"", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.5", "application/vnd.cyclonedx+json; version=1.6"},
+		{"2.0", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.6; charset=x", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.6\r\nX-Injected: y", "application/vnd.cyclonedx+json; version=1.6"},
+	} {
+		t.Run(tt.in, func(t *testing.T) {
+			require.Equal(t, tt.want, contentTypeForVersion(tt.in))
+		})
+	}
+}
