@@ -51,6 +51,13 @@ To address this security concern, CBOM-Lens post-processes the CBOM after correl
 > [!WARNING]
 > Component references (`bom-ref`) are unique within a single CBOM document only. The same cryptographic component discovered in separate scans will receive different UUIDs in each resulting CBOM.
 
+> [!WARNING]
+> A `bom-ref` is derived from the component's contents, so **correcting a component's data moves its
+> reference**. A release that fixes a wrong primitive, cipher function or key size will change the
+> refs of the affected components even though the document format is unchanged. If you join records
+> on `bom-ref` across releases, treat a ref change as "the same asset, described more accurately"
+> rather than as a new asset, and consult the release notes for the specific refs that moved.
+
 ---
 
 ## 3. Example algorithm component
