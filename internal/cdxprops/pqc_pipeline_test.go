@@ -34,6 +34,14 @@ import (
 // them, feeds them to the Builder, and returns the emitted JSON.
 func buildPQCDocument(t *testing.T, fixtures ...string) []byte {
 	t.Helper()
+	return buildPQCDocumentVersion(t, "1.6", fixtures...)
+}
+
+// buildPQCDocumentVersion is buildPQCDocument with the spec version chosen, so
+// the post-quantum path can be exercised against the 1.7 emitter and its
+// closed-enum registry fields rather than only against 1.6.
+func buildPQCDocumentVersion(t *testing.T, version string, fixtures ...string) []byte {
+	t.Helper()
 
 	c := cdxprops.NewConverter().
 		WithCzertainlyExtensions(true).
@@ -52,7 +60,7 @@ func buildPQCDocument(t *testing.T, fixtures ...string) []byte {
 		detections = append(detections, *d)
 	}
 
-	b, err := bom.NewBuilder(model.CBOM{Version: "1.6"})
+	b, err := bom.NewBuilder(model.CBOM{Version: version})
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -248,4 +256,60 @@ func TestPQCPipeline_MLKEMCertificateReportsKEMPrimitive(t *testing.T) {
 		found = true
 	}
 	require.True(t, found, "no ML-KEM-768 algorithm component in the certificate document")
+}
+
+// TestPQCPipeline_1_7RegistryFields closes the gap where no post-quantum asset
+// ever reached the 1.7 emitter: the corpus contains none, and this file's other
+// tests all built 1.6 documents, so the ML-DSA / ML-KEM / SLH-DSA rules that are
+// the bulk of cdx17map.go were exercised only by their unit table and no PQC
+// document was ever validated against the 1.7 schema set.
+//
+// That matters more here than for a classical algorithm: algorithmFamily is a
+// closed enumeration, so an unmapped post-quantum family is not a missing field
+// but an invalid document -- and AsJSON validates, so reaching the assertions
+// below at all proves the document conforms.
+func TestPQCPipeline_1_7RegistryFields(t *testing.T) {
+	t.Parallel()
+
+	raw := buildPQCDocumentVersion(t, "1.7",
+		cdxtest.MLDSA65PrivateKey,
+		cdxtest.SLHDSASHA2128sPrivateKey,
+		cdxtest.MLKEM768PublicKey,
+	)
+
+	var doc struct {
+		SpecVersion string `json:"specVersion"`
+		Components  []struct {
+			Name             string `json:"name"`
+			CryptoProperties struct {
+				AlgorithmProperties struct {
+					AlgorithmFamily string `json:"algorithmFamily"`
+					EllipticCurve   string `json:"ellipticCurve"`
+				} `json:"algorithmProperties"`
+			} `json:"cryptoProperties"`
+		} `json:"components"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	require.Equal(t, "1.7", doc.SpecVersion)
+
+	families := map[string]string{}
+	for _, c := range doc.Components {
+		if f := c.CryptoProperties.AlgorithmProperties.AlgorithmFamily; f != "" {
+			families[f] = c.Name
+		}
+	}
+
+	for _, want := range []string{"ML-DSA", "SLH-DSA", "ML-KEM"} {
+		require.Contains(t, families, want,
+			"post-quantum family %q must reach the 1.7 registry field; got %v", want, families)
+	}
+
+	// No post-quantum algorithm here is on a curve, so asserting the absence
+	// guards against a mapping table reaching for one.
+	for _, c := range doc.Components {
+		if f := c.CryptoProperties.AlgorithmProperties.AlgorithmFamily; f == "ML-DSA" || f == "SLH-DSA" || f == "ML-KEM" {
+			require.Empty(t, c.CryptoProperties.AlgorithmProperties.EllipticCurve,
+				"%s is not an elliptic-curve algorithm", c.Name)
+		}
+	}
 }

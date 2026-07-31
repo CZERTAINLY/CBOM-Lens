@@ -1,9 +1,12 @@
 package bom
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
@@ -212,4 +215,55 @@ func TestEmit17_RelationshipKindExhaustive(t *testing.T) {
 		}
 		require.Equalf(t, 1, got, "kind %q must render exactly one relatedCryptographicAssets entry", kind)
 	}
+}
+
+// TestEmit17_RepeatedEmitIsStable pins that emit17 does not mutate Builder
+// state. mapComponent17 clears the deprecated reference fields, and
+// Asset.Component shares nested pointers with the Builder, so a clone that
+// leaks the original leaves the second emission missing the very relationships
+// the first one rendered. Emitting twice from one Builder is the shortest
+// expression of that invariant.
+func TestEmit17_RepeatedEmitIsStable(t *testing.T) {
+	b, err := NewBuilder(model.CBOM{Version: "1.7"})
+	require.NoError(t, err)
+
+	b.components["cert@raw"] = &cdx.Component{
+		BOMRef: "cert@raw",
+		Name:   "cert",
+		Type:   cdx.ComponentTypeCryptographicAsset,
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType: cdx.CryptoAssetTypeCertificate,
+			CertificateProperties: &cdx.CertificateProperties{
+				SignatureAlgorithmRef: "alg@raw",
+				SubjectPublicKeyRef:   "key@raw",
+				CertificateExtension:  ".pem",
+			},
+		},
+	}
+	b.components["alg@raw"] = &cdx.Component{
+		BOMRef: "alg@raw", Name: "alg", Type: cdx.ComponentTypeCryptographicAsset,
+		CryptoProperties: &cdx.CryptoProperties{AssetType: cdx.CryptoAssetTypeAlgorithm},
+	}
+	b.components["key@raw"] = &cdx.Component{
+		BOMRef: "key@raw", Name: "key", Type: cdx.ComponentTypeCryptographicAsset,
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+				Type: cdx.RelatedCryptoMaterialTypePublicKey,
+			},
+		},
+	}
+	b = b.WithClock(func() time.Time { return time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC) }).
+		WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" })
+
+	var first, second bytes.Buffer
+	require.NoError(t, b.AsJSON(t.Context(), &first))
+	require.NoError(t, b.AsJSON(t.Context(), &second))
+	require.Equal(t, first.String(), second.String(),
+		"emitting twice from one Builder must be byte-identical; a leaked clone "+
+			"would drop the relationships cleared by the first pass")
+
+	// And the relationships must actually be present, so the comparison above
+	// cannot pass by both emissions being equally empty.
+	require.Contains(t, first.String(), "relatedCryptographicAssets")
 }

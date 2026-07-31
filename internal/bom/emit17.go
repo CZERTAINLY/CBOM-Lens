@@ -2,7 +2,6 @@ package bom
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"strings"
 
@@ -110,21 +109,61 @@ func (emit17) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {
 	}
 }
 
-// cloneComponent deep-copies a component via JSON round-trip. Asset.Component
-// shares nested pointers with Builder state; emit17 mutates crypto
-// properties, so it must own its copy.
+// cloneComponent copies the parts of a component that mapComponent17 mutates.
+// Asset.Component shares nested pointers with live Builder state, so emit17
+// must own its copy or a second BOM() call would see cleared reference fields.
+//
+// Copying explicitly rather than round-tripping through JSON: the round-trip
+// returned the ORIGINAL on a marshal error and mapComponent17 then mutated it,
+// corrupting Builder state on exactly the path that was supposed to be safe.
+// "Marshal cannot fail" does not hold in general either -- cyclonedx-go defines
+// failing marshalers for License, CertificateState, CertificateExtension,
+// PatentChoice and AsserterChoice. This version cannot fail, and drops two JSON
+// passes per component.
+//
+// Only cryptoProperties and its sub-structs are cloned, because that is all
+// mapComponent17 writes to. If it grows to mutate anything else, extend this.
 func cloneComponent(c cdx.Component) cdx.Component {
-	data, err := json.Marshal(c)
-	if err != nil {
-		// cdx.Component is a plain data struct; marshal cannot fail for
-		// values the Builder stores. Keep the original on the impossible path.
+	if c.CryptoProperties == nil {
 		return c
 	}
-	var out cdx.Component
-	if err := json.Unmarshal(data, &out); err != nil {
-		return c
+
+	cp := *c.CryptoProperties
+
+	if cp.AlgorithmProperties != nil {
+		ap := *cp.AlgorithmProperties
+		cp.AlgorithmProperties = &ap
 	}
-	return out
+	if cp.CertificateProperties != nil {
+		certp := *cp.CertificateProperties
+		cp.CertificateProperties = &certp
+	}
+	if cp.RelatedCryptoMaterialProperties != nil {
+		matp := *cp.RelatedCryptoMaterialProperties
+		cp.RelatedCryptoMaterialProperties = &matp
+	}
+	if cp.ProtocolProperties != nil {
+		pp := *cp.ProtocolProperties
+		if pp.CipherSuites != nil {
+			suites := make([]cdx.CipherSuite, len(*pp.CipherSuites))
+			copy(suites, *pp.CipherSuites)
+			// canonicalizeSuiteAlgorithms replaces these wholesale, but copy
+			// them so the Builder's slices are never aliased in the interim.
+			for i := range suites {
+				if suites[i].Algorithms == nil {
+					continue
+				}
+				algs := make([]cdx.BOMReference, len(*suites[i].Algorithms))
+				copy(algs, *suites[i].Algorithms)
+				suites[i].Algorithms = &algs
+			}
+			pp.CipherSuites = &suites
+		}
+		cp.ProtocolProperties = &pp
+	}
+
+	c.CryptoProperties = &cp
+	return c
 }
 
 // mapComponent17 applies the 1.6→1.7 field migration to one (cloned)

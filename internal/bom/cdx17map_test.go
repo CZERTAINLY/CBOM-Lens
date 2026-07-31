@@ -131,3 +131,107 @@ func TestAlgorithmFamily17(t *testing.T) {
 		}
 	}
 }
+
+// TestCurveTables17_ExactMappings pins every curve mapping by value.
+//
+// TestCurveTables17_ValuesAreInEnum only checks that each target is *somewhere*
+// in the 246-entry enum, which a wrong-but-valid target passes: mapping
+// secp384r1 to secg/secp521r1, or secp192r1 to secg/secp192k1 (both k1 and r1
+// are enum members), would go unnoticed. A full literal is the only form that
+// catches a transposition, and the two-directional comparison makes an added or
+// removed row a test failure rather than a silent change.
+func TestCurveTables17_ExactMappings(t *testing.T) {
+	want := map[string]map[string]string{
+		"curveField17": {
+			// RFC 5656 sec. 10.1: nistpN is secpNr1. RFC 8709 for ed25519.
+			// Note the enum spells the Edwards curve "Ed25519", capitalised,
+			// unlike the secg/ entries -- transcribe, do not normalise.
+			"nistp256": "secg/secp256r1",
+			"nistp384": "secg/secp384r1",
+			"nistp521": "secg/secp521r1",
+			"ed25519":  "other/Ed25519",
+		},
+		"nameCurve17": {
+			"Ed25519": "other/Ed25519", // OID 1.3.101.112
+		},
+	}
+	got := map[string]map[string]string{
+		"curveField17": curveField17,
+		"nameCurve17":  nameCurve17,
+	}
+
+	for table, wantRows := range want {
+		gotRows := got[table]
+		require.Equal(t, len(wantRows), len(gotRows),
+			"%s changed size: rows were added or removed without updating this test", table)
+		for from, to := range wantRows {
+			actual, ok := gotRows[from]
+			require.Truef(t, ok, "%s lost the mapping for %q", table, from)
+			require.Equalf(t, to, actual, "%s[%q]", table, from)
+		}
+		for from := range gotRows {
+			_, ok := wantRows[from]
+			require.Truef(t, ok, "%s gained an unreviewed mapping for %q", table, from)
+		}
+	}
+
+	// paramSet17 in full. This is the table where a transposition is easiest to
+	// miss and most damaging: both secg/secp192r1 and secg/secp192k1 are enum
+	// members, so swapping r1 for k1 would assert the wrong curve about a real
+	// key while passing every enum-membership check.
+	wantParamSet := map[string]string{
+		"P-224":                "secg/secp224r1",
+		"P-256":                "secg/secp256r1",
+		"P-384":                "secg/secp384r1",
+		"P-521":                "secg/secp521r1",
+		"secp192r1":            "secg/secp192r1",
+		"secp224r1":            "secg/secp224r1",
+		"secp256r1":            "secg/secp256r1",
+		"secp384r1":            "secg/secp384r1",
+		"secp521r1":            "secg/secp521r1",
+		"secp256k1":            "secg/secp256k1",
+		"x25519":               "other/Curve25519",
+		"ecdh_x25519":          "other/Curve25519",
+		"x448":                 "other/Curve448",
+		"ecdh_x448":            "other/Curve448",
+		"brainpoolP256r1":      "brainpool/brainpoolP256r1",
+		"brainpoolP384r1":      "brainpool/brainpoolP384r1",
+		"brainpoolP512r1":      "brainpool/brainpoolP512r1",
+		"brainpoolP256r1tls13": "brainpool/brainpoolP256r1",
+		"brainpoolP384r1tls13": "brainpool/brainpoolP384r1",
+		"brainpoolP512r1tls13": "brainpool/brainpoolP512r1",
+	}
+	require.Equal(t, len(wantParamSet), len(paramSet17),
+		"paramSet17 changed size: rows were added or removed without updating this test")
+	for from, to := range wantParamSet {
+		actual, ok := paramSet17[from]
+		require.Truef(t, ok, "paramSet17 lost the mapping for %q", from)
+		require.Equalf(t, to, actual, "paramSet17[%q]", from)
+	}
+	for from := range paramSet17 {
+		_, ok := wantParamSet[from]
+		require.Truef(t, ok, "paramSet17 gained an unreviewed mapping for %q", from)
+	}
+}
+
+// TestAlgorithmFamily17_TablesAreInEnum walks the family tables themselves,
+// rather than only the values the case list in TestAlgorithmFamily17 happens to
+// produce. That left RIPEMD, MD2, MD4, MD5, BLAKE2, ML-KEM and RSASSA-PSS
+// unguarded: all valid at HEAD, none pinned, so a typo in any of them would
+// have produced an invalid document with no test failing.
+func TestAlgorithmFamily17_TablesAreInEnum(t *testing.T) {
+	families := defsEnum(t, "algorithmFamiliesEnum")
+
+	for name, family := range familyExact {
+		_, ok := families[family]
+		require.Truef(t, ok,
+			"familyExact[%q] = %q is not in algorithmFamiliesEnum (registry drift?)", name, family)
+	}
+	for _, p := range familyPrefix {
+		_, ok := families[p.family]
+		require.Truef(t, ok,
+			"familyPrefix %q -> %q is not in algorithmFamiliesEnum (registry drift?)", p.prefix, p.family)
+	}
+	require.NotEmpty(t, familyExact)
+	require.NotEmpty(t, familyPrefix)
+}
