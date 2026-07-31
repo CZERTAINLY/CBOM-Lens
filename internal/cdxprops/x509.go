@@ -100,7 +100,15 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	)
 	certificateRelatedProperties(&mainCertCompo, hit.Cert)
 	mainCertCompo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef = cdx.BOMReference(signatureAlgCompo.BOMRef)
-	mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyAlgCompo.BOMRef)
+	// The subject public key reference names the KEY, not the algorithm that
+	// key uses (#204). The specification's own 1.7 conformance fixtures make
+	// the distinction visible: a certificate relates to an "algorithm" and a
+	// "publicKey", and those are different assets. Pointing this at the
+	// algorithm component collapsed the two into one kind, so a consumer
+	// walking certificate-to-key edges landed on an algorithm.
+	if publicKeyCompo.BOMRef != "" {
+		mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyCompo.BOMRef)
+	}
 
 	// Each component's primitive is set by whichever function built it, before
 	// that function hashed it into a BOMRef. Do not re-stamp primitives here: a

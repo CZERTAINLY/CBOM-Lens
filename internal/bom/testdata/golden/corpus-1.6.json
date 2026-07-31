@@ -487,7 +487,7 @@
           "notValidBefore": "2026-07-27T13:35:00Z",
           "notValidAfter": "2046-07-22T13:35:00Z",
           "signatureAlgorithmRef": "crypto/algorithm/sha-256-ecdsa@cc3b5016-e3d3-5617-a8c9-a136bbac834f",
-          "subjectPublicKeyRef": "crypto/algorithm/ecdsa-p-256@4ef9627d-b288-58e5-883e-d5276e5649c9",
+          "subjectPublicKeyRef": "crypto/key/ecdsa-p-256@823fb799-8521-59bf-8e82-a78baf0e1daa",
           "certificateFormat": "X.509",
           "certificateExtension": ".pem"
         },
@@ -523,7 +523,7 @@
           "notValidBefore": "2026-07-27T13:35:00Z",
           "notValidAfter": "2046-07-22T13:35:00Z",
           "signatureAlgorithmRef": "crypto/algorithm/ed25519@09a06737-88a1-5c7c-88c4-1e04b59b2da8",
-          "subjectPublicKeyRef": "crypto/algorithm/ed25519@d938c117-ccd1-5ddc-a984-993fe118ba4d",
+          "subjectPublicKeyRef": "crypto/key/ed25519@f5edef3c-85d9-5b3a-ae14-b7aaac1a70e0",
           "certificateFormat": "X.509",
           "certificateExtension": ".pem"
         },
@@ -562,7 +562,7 @@
           "notValidBefore": "2025-07-25T00:00:00Z",
           "notValidAfter": "2026-07-24T23:59:59Z",
           "signatureAlgorithmRef": "crypto/algorithm/sha-256-rsa@ba193caf-6df4-5601-a44b-84fb73ebac8a",
-          "subjectPublicKeyRef": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0",
+          "subjectPublicKeyRef": "crypto/key/rsa-2048@3d136069-8bc9-5281-85be-5b768dde13fc",
           "certificateFormat": "X.509",
           "certificateExtension": ".pem"
         },

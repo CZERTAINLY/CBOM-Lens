@@ -53,11 +53,12 @@ func (emit17) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {
 		if r.Kind == cbom.RelProtocolCrypto && assetTypes[string(r.To)] == cdx.CryptoAssetTypeCertificate {
 			typ = "certificate"
 		}
-		// certHitToComponents points subjectPublicKeyRef at the public key's
-		// ALGORITHM component rather than the key material (tracked in #204).
-		// Until that is corrected, describe what the edge actually targets: an
-		// algorithm asset labelled "publicKey" misleads every consumer walking
-		// certificate-to-key edges.
+		// Safety net, not the normal path. Since #204 the reference targets the
+		// key material, so this edge renders as "publicKey" -- the shape the
+		// specification's own 1.7 conformance fixtures use, where a certificate
+		// relates to an "algorithm" and a "publicKey". If some other converter
+		// ever points it at an algorithm again, describe what the edge actually
+		// targets rather than mislabelling it.
 		if r.Kind == cbom.RelSubjectPublicKey && assetTypes[string(r.To)] == cdx.CryptoAssetTypeAlgorithm {
 			typ = "algorithm"
 		}

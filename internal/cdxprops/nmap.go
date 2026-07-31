@@ -124,7 +124,11 @@ func publicKeySizeFromPkeyRef(ref string) string {
 	if len(parts) == 0 {
 		return ""
 	}
+	// Accepts both shapes: the reference points at the key component
+	// (crypto/key/...) since #204, and at the algorithm component in older
+	// documents. Both encode the size in the same name suffix.
 	algo := strings.TrimPrefix(parts[0], "crypto/algorithm/")
+	algo = strings.TrimPrefix(algo, "crypto/key/")
 	if ret, ok := strings.CutPrefix(algo, "rsa-"); ok {
 		return ret // e.g., "2048"
 	}
