@@ -560,8 +560,8 @@ func TestBuilder_SafeRefs(t *testing.T) {
 		builder, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
 
-		builder.components["comp-1"] = &cdx.Component{BOMRef: "comp-1", Name: "test1"}
-		builder.components["comp-2"] = &cdx.Component{BOMRef: "comp-2", Name: "test2"}
+		builder.components["comp-1"] = &cdx.Component{BOMRef: "comp-1", Name: "test1", Type: cdx.ComponentTypeCryptographicAsset}
+		builder.components["comp-2"] = &cdx.Component{BOMRef: "comp-2", Name: "test2", Type: cdx.ComponentTypeCryptographicAsset}
 
 		safeRefs := builder.safeRefs()
 
@@ -576,7 +576,7 @@ func TestBuilder_SafeRefs(t *testing.T) {
 		builder, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
 
-		builder.components["comp-1"] = &cdx.Component{BOMRef: "comp-1", Name: "test1"}
+		builder.components["comp-1"] = &cdx.Component{BOMRef: "comp-1", Name: "test1", Type: cdx.ComponentTypeCryptographicAsset}
 		builder.components["comp-2"] = nil
 
 		safeRefs := builder.safeRefs()
@@ -592,8 +592,8 @@ func TestBuilder_StableOrdering(t *testing.T) {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
 		// two components + one dependency; map iteration order is randomized per range
-		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b"}
-		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b", Type: cdx.ComponentTypeCryptographicAsset}
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a", Type: cdx.ComponentTypeCryptographicAsset}
 		deps := []string{"a@1"}
 		b.dependencies["b@2"] = &deps
 		return b
@@ -650,9 +650,9 @@ func TestBuilder_BOMDeterministic(t *testing.T) {
 	newB := func() *Builder {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
-		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b"}
-		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
-		b.components["c@3"] = &cdx.Component{BOMRef: "c@3", Name: "c"}
+		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b", Type: cdx.ComponentTypeCryptographicAsset}
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a", Type: cdx.ComponentTypeCryptographicAsset}
+		b.components["c@3"] = &cdx.Component{BOMRef: "c@3", Name: "c", Type: cdx.ComponentTypeCryptographicAsset}
 		b.dependencies["b@2"] = &[]string{"a@1", "c@3"}
 		b.dependencies["a@1"] = &[]string{"c@3"}
 		fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -687,7 +687,7 @@ func TestBuilder_ModelDependencyEdgeSemantics(t *testing.T) {
 	t.Run("nil dependsOn entry is omitted", func(t *testing.T) {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
-		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a", Type: cdx.ComponentTypeCryptographicAsset}
 		b.dependencies["a@1"] = nil
 
 		m := b.model(context.Background())
@@ -700,7 +700,7 @@ func TestBuilder_ModelDependencyEdgeSemantics(t *testing.T) {
 	t.Run("empty dependsOn entry is omitted", func(t *testing.T) {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
-		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a", Type: cdx.ComponentTypeCryptographicAsset}
 		b.dependencies["a@1"] = &[]string{}
 
 		m := b.model(context.Background())
@@ -718,8 +718,8 @@ func TestBuilder_DanglingDependencyRefs(t *testing.T) {
 	newB := func() *Builder {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
-		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a"}
-		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b"}
+		b.components["a@1"] = &cdx.Component{BOMRef: "a@1", Name: "a", Type: cdx.ComponentTypeCryptographicAsset}
+		b.components["b@2"] = &cdx.Component{BOMRef: "b@2", Name: "b", Type: cdx.ComponentTypeCryptographicAsset}
 		fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 		return b.WithClock(func() time.Time { return fixed }).
 			WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" })
@@ -769,8 +769,8 @@ func TestBuilder_ModelCanonicalRefs(t *testing.T) {
 	b, err := NewBuilder(model.CBOM{Version: "1.6"})
 	require.NoError(t, err)
 
-	b.components["sig@raw"] = &cdx.Component{BOMRef: "sig@raw", Name: "sig"}
-	b.components["key@raw"] = &cdx.Component{BOMRef: "key@raw", Name: "key"}
+	b.components["sig@raw"] = &cdx.Component{BOMRef: "sig@raw", Name: "sig", Type: cdx.ComponentTypeCryptographicAsset}
+	b.components["key@raw"] = &cdx.Component{BOMRef: "key@raw", Name: "key", Type: cdx.ComponentTypeCryptographicAsset}
 	b.dependencies["sig@raw"] = &[]string{"key@raw"}
 
 	m := b.model(context.Background())
@@ -816,8 +816,8 @@ func TestBuilder_ModelExtractsCryptoRels(t *testing.T) {
 	newB := func() *Builder {
 		b, err := NewBuilder(model.CBOM{Version: "1.6"})
 		require.NoError(t, err)
-		b.components["alg@raw"] = &cdx.Component{BOMRef: "alg@raw", Name: "alg"}
-		b.components["key@raw"] = &cdx.Component{BOMRef: "key@raw", Name: "key"}
+		b.components["alg@raw"] = &cdx.Component{BOMRef: "alg@raw", Name: "alg", Type: cdx.ComponentTypeCryptographicAsset}
+		b.components["key@raw"] = &cdx.Component{BOMRef: "key@raw", Name: "key", Type: cdx.ComponentTypeCryptographicAsset}
 		return b
 	}
 
@@ -907,4 +907,48 @@ func TestBuilder_ModelExtractsCryptoRels(t *testing.T) {
 		require.Equal(t, relsOfKind(first, cbom.RelSignatureAlgorithm),
 			relsOfKind(second, cbom.RelSignatureAlgorithm))
 	})
+}
+
+// TestAsJSON_RefusesInvalidDocument proves the validator is on the emit path
+// and not merely available. 1.7's registry fields are closed enumerations and
+// CBOM-Lens is the only producer emitting them, so an out-of-vocabulary value
+// would reach consumers unchallenged; AsJSON is the last place to stop it.
+func TestAsJSON_RefusesInvalidDocument(t *testing.T) {
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			b, err := NewBuilder(model.CBOM{Version: version})
+			require.NoError(t, err)
+
+			// assetType is a closed enum in both versions, so this is invalid
+			// for either schema without depending on a 1.7-only field.
+			b.components["crypto/algorithm/bogus@0"] = &cdx.Component{
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				Name:   "bogus",
+				BOMRef: "crypto/algorithm/bogus@0",
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetType("not-a-real-asset-type"),
+				},
+			}
+
+			var buf bytes.Buffer
+			err = b.AsJSON(t.Context(), &buf)
+			require.Error(t, err, "an invalid document must not be emitted")
+			require.Contains(t, err.Error(), "refusing to emit")
+			require.Zero(t, buf.Len(), "nothing may be written when validation fails")
+		})
+	}
+}
+
+// TestAsJSON_EmitsValidDocument is the positive half: the guard must not reject
+// what the emitters actually produce.
+func TestAsJSON_EmitsValidDocument(t *testing.T) {
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			b, err := NewBuilder(model.CBOM{Version: version})
+			require.NoError(t, err)
+			var buf bytes.Buffer
+			require.NoError(t, b.AsJSON(t.Context(), &buf))
+			require.NotZero(t, buf.Len())
+		})
+	}
 }

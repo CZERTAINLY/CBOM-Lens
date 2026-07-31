@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
@@ -434,4 +436,40 @@ func TestValidator_17(t *testing.T) {
 	t.Run("bogus algorithmFamily rejected", func(t *testing.T) {
 		require.Error(t, v.ValidateBytes(minimal(`"algorithmFamily": "HQC"`)))
 	})
+}
+
+// TestValidator_AcceptsUpstreamConformanceFixtures is a positive control on the
+// vendored schema set, using the specification's own examples of valid 1.7
+// cryptography documents.
+//
+// Every other validator test feeds it either a document CBOM-Lens produced or a
+// hand-written invalid one. Neither can detect a schema snapshot that is subtly
+// wrong, or a $ref registered under a URI that never resolves so a subschema is
+// silently skipped: a validator that accepts everything passes those tests too.
+// Feeding it something external, known-good and not of our making is what makes
+// "the enum is genuinely enforced" a tested claim rather than an assumption.
+func TestValidator_AcceptsUpstreamConformanceFixtures(t *testing.T) {
+	dir := filepath.Join("testdata", "spec-conformance")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	v, err := bom.NewValidator(cdx.SpecVersion1_7)
+	require.NoError(t, err)
+
+	var checked int
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		t.Run(e.Name(), func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			require.NoError(t, err)
+			require.NoError(t, v.ValidateBytes(raw),
+				"upstream conformance fixture must validate against the vendored 1.7 schema set")
+		})
+		checked++
+	}
+	// Guards against the fixtures being moved or renamed away, which would
+	// otherwise make this test vacuously green.
+	require.NotZero(t, checked, "no conformance fixtures found in %s", dir)
 }

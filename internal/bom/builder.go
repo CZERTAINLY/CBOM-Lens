@@ -1,6 +1,7 @@
 package bom
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ func init() {
 // Builder is a builder pattern for a CycloneDX BOM structure
 type Builder struct {
 	version      cdx.SpecVersion
+	validator    Validator
 	components   map[string]*cdx.Component
 	dependencies map[string]*[]string
 	counter      *stats.Stats
@@ -56,8 +58,16 @@ func NewBuilder(config model.CBOM) (*Builder, error) {
 		return nil, fmt.Errorf("unsupported cbom spec version %s: %w", config.Version, err)
 	}
 
+	// Built here so an unusable schema set fails at construction rather than
+	// after a full scan has already been paid for.
+	validator, err := NewValidator(version)
+	if err != nil {
+		return nil, fmt.Errorf("preparing the %s schema set: %w", config.Version, err)
+	}
+
 	return &Builder{
 		version:      version,
+		validator:    validator,
 		components:   make(map[string]*cdx.Component),
 		dependencies: make(map[string]*[]string),
 		clock:        func() time.Time { return time.Now().UTC() },
@@ -265,10 +275,31 @@ func cryptoRels(ctx context.Context, r refs, wire map[string]struct{}, compo *cd
 	return rels
 }
 
-// AsJSON encode the BOM into JSON format
+// AsJSON encodes the BOM into JSON format, validating it against the vendored
+// schema set for the Builder's spec version before anything is written.
+//
+// Validation is on the emit path rather than only in tests because 1.7's
+// registry fields are closed enumerations: a single out-of-vocabulary value
+// invalidates the whole document. CBOM-Lens is currently the only producer
+// emitting those fields, so no downstream tool would catch such a document —
+// refusing to write it is the only place the mistake can still be caught. The
+// schema set is embedded, so this costs no network access.
 func (b *Builder) AsJSON(ctx context.Context, w io.Writer) error {
 	bom := b.BOM(ctx)
-	return cdx.NewBOMEncoder(w, cdx.BOMFileFormatJSON).SetPretty(true).Encode(&bom)
+
+	// Encode once: validate the exact bytes that will be written, rather than
+	// re-encoding and validating a second rendering of the same document.
+	var buf bytes.Buffer
+	if err := cdx.NewBOMEncoder(&buf, cdx.BOMFileFormatJSON).SetPretty(true).Encode(&bom); err != nil {
+		return err
+	}
+
+	if err := b.validator.ValidateBytes(buf.Bytes()); err != nil {
+		return fmt.Errorf("refusing to emit a CBOM that fails %s schema validation: %w", b.version, err)
+	}
+
+	_, err := w.Write(buf.Bytes())
+	return err
 }
 
 // Add (append) an evidence.occurrence location if non-empty.
