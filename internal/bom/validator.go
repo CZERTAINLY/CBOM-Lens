@@ -44,6 +44,16 @@ var schemaSets = map[cdx.SpecVersion]schemaSet{
 			{uri: "http://cyclonedx.org/schema/jsf-0.82.schema.json", path: "schemas/jsf-0.82.schema.json"},
 		},
 	},
+	cdx.SpecVersion1_7: {
+		main: "schemas/bom-1.7.schema.json",
+		subs: []subschema{
+			{uri: "http://cyclonedx.org/schema/spdx.schema.json", path: "schemas/spdx.schema.json"},
+			{uri: "http://cyclonedx.org/schema/jsf-0.82.schema.json", path: "schemas/jsf-0.82.schema.json"},
+			// The crypto registry (ellipticCurvesEnum, algorithmFamiliesEnum)
+			// lives in its own file in 1.7 and has zero external $refs itself.
+			{uri: "http://cyclonedx.org/schema/cryptography-defs.schema.json", path: "schemas/cryptography-defs.schema.json"},
+		},
+	},
 }
 
 // Validator validates the CycloneDX BOM against the schema

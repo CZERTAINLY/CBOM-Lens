@@ -24,6 +24,12 @@ const (
 	AlgorithmPrivateKeySize = "czertainly:component:algorithm:pqc:private_key_size"
 	AlgorithmPublicKeySize  = "czertainly:component:algorithm:pqc:public_key_size"
 	AlgorithmSignatureSize  = "czertainly:component:algorithm:pqc:signature_size"
+
+	// AlgorithmCiphertextSize is the KEM ciphertext size in bytes. KEMs reuse
+	// AlgorithmPublicKeySize for the encapsulation key and
+	// AlgorithmPrivateKeySize for the decapsulation key, and never emit
+	// AlgorithmSignatureSize, because a KEM cannot sign.
+	AlgorithmCiphertextSize = "czertainly:component:algorithm:pqc:ciphertext_size"
 )
 
 func CertificateProperties(

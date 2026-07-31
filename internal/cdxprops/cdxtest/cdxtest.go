@@ -16,6 +16,29 @@ const MLDSA65PrivateKey = "testdata/ml-dsa-65-private-key.pem"
 const MLDSA65PublicKey = "testdata/ml-dsa-65-public-key.pem"
 const MLDSA65Certificate = "testdata/ml-dsa-65-cert.pem"
 
+// MLDSA65MalformedPrivateKey is a valid PEM envelope wrapping truncated DER.
+// It exercises the analyzeParseError negative path: the PEM scanner accepts
+// the block, then ASN.1 parsing of the PKCS#8 structure fails.
+const MLDSA65MalformedPrivateKey = "testdata/ml-dsa-65-malformed-private-key.pem"
+
+// SLH-DSA-SHA2-128s: the smallest SLH-DSA parameter set, and the one RFC 9909
+// App. C uses for its own examples.
+const SLHDSASHA2128sPrivateKey = "testdata/slh-dsa-sha2-128s-private-key.pem"
+const SLHDSASHA2128sPublicKey = "testdata/slh-dsa-sha2-128s-public-key.pem"
+const SLHDSASHA2128sCertificate = "testdata/slh-dsa-sha2-128s-cert.pem"
+
+// ML-KEM-768, the parameter set FIPS 203 recommends as the default. The
+// certificate's subjectPublicKeyInfo is ML-KEM-768 but it is signed with
+// ML-DSA-65, because a KEM cannot sign anything, including itself.
+const MLKEM768PrivateKey = "testdata/ml-kem-768-private-key.pem"
+const MLKEM768PublicKey = "testdata/ml-kem-768-public-key.pem"
+const MLKEM768Certificate = "testdata/ml-kem-768-cert.pem"
+
+// DSA2048PublicKey is a standalone DSA public key. Go parses it via
+// x509.ParsePKIXPublicKey but x509.MarshalPKIXPublicKey refuses *dsa.PublicKey,
+// which is the asymmetry that crashed restOfPEMBundleToCDX.
+const DSA2048PublicKey = "testdata/dsa-2048-public-key.pem"
+
 // can be validated via openssl
 // openssl pkey -pubin -in internal/cdxprops/cdxtest/testdata/ml-dsa-65-public-key.pem -outform DER | openssl dgst -sha256
 const MLDSA65PublicKeyHash = "sha256:bbf687535068e46b92b1a13fddb94cf59149624484986b8435bda6e1ee1536a3"

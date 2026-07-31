@@ -262,7 +262,7 @@ func TestDetector(t *testing.T) {
 			then: model.ErrNoMatch,
 		},
 		{
-			scenario: "ML-KEM-1024-PRIVATE-KEY (PQC, PKCS#8)",
+			scenario: "ML-DSA-65-PRIVATE-KEY (PQC, PKCS#8)",
 			given: func(t *testing.T) given {
 				pk, err := cdxtest.TestData(cdxtest.MLDSA65PrivateKey)
 				require.NoError(t, err)

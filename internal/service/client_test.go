@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,7 +40,7 @@ func TestNewBOMRepoUploaderFunc(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 
 			mu := parseURL(t, tc.serverURL)
-			u, err := NewBOMRepoUploader(mu)
+			u, err := NewBOMRepoUploader(mu, "1.6")
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
@@ -55,7 +56,7 @@ func TestDecodeUploadResponse(t *testing.T) {
 	err := mu.UnmarshalText([]byte("http://some-server.com"))
 	require.NoError(t, err)
 
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -307,7 +308,7 @@ func TestBOMRepoUploadNetworkError(t *testing.T) {
 	err := mu.UnmarshalText([]byte("http://some-server.com"))
 	require.NoError(t, err)
 
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -506,7 +507,7 @@ func TestBOMRepoUploadFunc(t *testing.T) {
 			defer closeFunc()
 
 			mu := parseURL(t, s.URL)
-			u, err := NewBOMRepoUploader(mu)
+			u, err := NewBOMRepoUploader(mu, "1.6")
 			require.NoError(t, err)
 			require.NotNil(t, u)
 
@@ -539,7 +540,7 @@ func TestBOMRepoUploadFuncWithCallbackSuccess(t *testing.T) {
 	defer ts.Close()
 
 	mu := parseURL(t, ts.URL)
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -560,7 +561,7 @@ func TestBOMRepoUploadFuncWithCallbackFail(t *testing.T) {
 	defer ts.Close()
 
 	mu := parseURL(t, ts.URL)
-	u, err := NewBOMRepoUploader(mu)
+	u, err := NewBOMRepoUploader(mu, "1.6")
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
@@ -577,4 +578,118 @@ func parseURL(t *testing.T, s string) model.URL {
 	err := u.UnmarshalText([]byte(s))
 	require.NoError(t, err)
 	return u
+}
+
+func TestContentTypeForVersion(t *testing.T) {
+	// RFC 7231 canonical form: no whitespace around the parameter's '='.
+	require.Equal(t, "application/vnd.cyclonedx+json; version=1.6", contentTypeForVersion("1.6"))
+	require.Equal(t, "application/vnd.cyclonedx+json; version=1.6", contentTypeForVersion(""))
+	require.Equal(t, "application/vnd.cyclonedx+json; version=1.7", contentTypeForVersion("1.7"))
+}
+
+// TestUpload_ContentTypeFollowsDocument pins that the uploaded document decides
+// the media-type version parameter, not the startup configuration.
+//
+// The uploader is built once from cfg.CBOM.Version at supervisor start, but the
+// emitted specVersion is per-job: ConfigureJob replaces the whole model.Scan,
+// which carries its own CBOM section, so a Core-supplied cbom.version can
+// differ from the one the uploader was constructed with. cbom-repository
+// rejects any mismatch between the declared version and the document's own
+// specVersion with 400, so a stale label breaks every upload.
+func TestUpload_ContentTypeFollowsDocument(t *testing.T) {
+	tests := []struct {
+		name        string
+		configured  string
+		payload     string
+		wantVersion string
+	}{
+		{
+			name:        "job overrides the configured version",
+			configured:  "1.6",
+			payload:     `{"bomFormat":"CycloneDX","specVersion":"1.7","version":1}`,
+			wantVersion: "1.7",
+		},
+		{
+			name:        "job downgrades the configured version",
+			configured:  "1.7",
+			payload:     `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`,
+			wantVersion: "1.6",
+		},
+		{
+			name:        "no specVersion in the payload falls back to the configuration",
+			configured:  "1.7",
+			payload:     `{"bomFormat":"CycloneDX","version":1}`,
+			wantVersion: "1.7",
+		},
+		{
+			name:        "unparseable payload falls back to the configuration",
+			configured:  "1.6",
+			payload:     `not json`,
+			wantVersion: "1.6",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Get("Content-Type")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer ts.Close()
+
+			u, err := NewBOMRepoUploader(parseURL(t, ts.URL), tt.configured)
+			require.NoError(t, err)
+			require.NoError(t, u.Upload(t.Context(), "job", []byte(tt.payload)))
+
+			_, params, err := mime.ParseMediaType(got)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantVersion, params["version"],
+				"declared version must match the document, header was %q", got)
+		})
+	}
+}
+
+// TestSpecVersionFromPayload_RejectsUnknownVersions pins that only a version
+// cbom-lens emits can reach the Content-Type header. Upload takes raw bytes
+// across a subprocess boundary, so a document naming something else must not
+// have its value concatenated into a media type.
+func TestSpecVersionFromPayload_RejectsUnknownVersions(t *testing.T) {
+	for _, tt := range []struct {
+		name, payload, want string
+	}{
+		{"1.6", `{"specVersion":"1.6"}`, "1.6"},
+		{"1.7", `{"specVersion":"1.7"}`, "1.7"},
+		{"unsupported version", `{"specVersion":"1.5"}`, ""},
+		{"future version", `{"specVersion":"2.0"}`, ""},
+		{"parameter injection", `{"specVersion":"1.6; charset=x"}`, ""},
+		{"absent", `{"bomFormat":"CycloneDX"}`, ""},
+		{"not json", `nope`, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, specVersionFromPayload([]byte(tt.payload)))
+		})
+	}
+}
+
+// TestContentTypeForVersion_ClampsUnknownValues pins that no caller can put an
+// arbitrary string into the header. The two call sites have different
+// provenance -- startup configuration and the encoded document -- and both are
+// checked elsewhere, but the clamp means the function does not depend on that.
+func TestContentTypeForVersion_ClampsUnknownValues(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"1.6", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.7", "application/vnd.cyclonedx+json; version=1.7"},
+		{"", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.5", "application/vnd.cyclonedx+json; version=1.6"},
+		{"2.0", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.6; charset=x", "application/vnd.cyclonedx+json; version=1.6"},
+		{"1.6\r\nX-Injected: y", "application/vnd.cyclonedx+json; version=1.6"},
+	} {
+		t.Run(tt.in, func(t *testing.T) {
+			require.Equal(t, tt.want, contentTypeForVersion(tt.in))
+		})
+	}
 }

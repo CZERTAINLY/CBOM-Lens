@@ -14,29 +14,87 @@ import (
 	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 )
 
-const (
-	uploadPath  = "api/v1/bom"
-	contentType = "application/vnd.cyclonedx+json; version = 1.6"
-)
+const uploadPath = "api/v1/bom"
+
+// contentTypeForVersion labels uploads with a CycloneDX spec version, falling
+// back to 1.6 for anything it does not recognise.
+//
+// The clamp makes the function total rather than relying on its callers: a value
+// carrying a ";" would otherwise append a second media-type parameter, and the
+// two call sites have different provenance -- one the startup configuration, one
+// the encoded document. Both are checked elsewhere, but "unreachable" is a
+// property of today's callers, not of this function.
+//
+// The parameter is written in the RFC 7231 canonical form, token "=" token with
+// no surrounding whitespace. The previous spelling padded the "=" with spaces;
+// mime.ParseMediaType tolerates that and cbom-repository accepted it, but it is
+// not what the grammar says and nothing depends on the old bytes.
+func contentTypeForVersion(version string) string {
+	if _, ok := supportedSpecVersions[version]; !ok {
+		version = defaultSpecVersion
+	}
+	return "application/vnd.cyclonedx+json; version=" + version
+}
+
+// supportedSpecVersions are the versions cbom-lens emits. The payload-derived
+// version is checked against this set before it can reach a header: Upload takes
+// raw bytes across a subprocess boundary, and a value such as "1.6; x=y" would
+// otherwise inject a second media-type parameter. Our own emitter cannot produce
+// that -- AsJSON validates specVersion against a schema enum first -- but the
+// value's provenance is now the document rather than validated configuration,
+// so it gets checked where it is consumed.
+var supportedSpecVersions = map[string]struct{}{
+	"1.6": {},
+	"1.7": {},
+}
+
+// defaultSpecVersion matches the cbom.version configuration default.
+const defaultSpecVersion = "1.6"
+
+// specVersionFromPayload reads specVersion out of an encoded BOM, returning ""
+// when the document does not declare one, cannot be parsed, or names a version
+// cbom-lens does not emit.
+//
+// The document has to be the authority for the declared version. The uploader
+// is constructed once from cfg.CBOM.Version, but the emitted specVersion is
+// per-job: ConfigureJob replaces the whole model.Scan and that carries its own
+// CBOM section, so a Core-supplied cbom.version in discovery mode need not
+// match the startup configuration. cbom-repository rejects any mismatch between
+// the declared version and the document's specVersion with 400, so labelling
+// from stale configuration would fail every upload.
+func specVersionFromPayload(raw []byte) string {
+	var doc struct {
+		SpecVersion string `json:"specVersion"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	if _, ok := supportedSpecVersions[doc.SpecVersion]; !ok {
+		return ""
+	}
+	return doc.SpecVersion
+}
 
 type UploadCallbackFunc func(error, string, string)
 
 type BOMRepoUploader struct {
-	requestURL string
-	client     *http.Client
+	requestURL  string
+	contentType string
+	client      *http.Client
 
 	uploadCallback UploadCallbackFunc
 }
 
-func NewBOMRepoUploader(serverURL model.URL) (*BOMRepoUploader, error) {
+func NewBOMRepoUploader(serverURL model.URL, version string) (*BOMRepoUploader, error) {
 	parsedURL := serverURL.Clone().AsURL()
 	parsedURL.Path = strings.TrimRight(parsedURL.Path, "/")
 
 	parsedURL.Path = fmt.Sprintf("%s/%s", parsedURL.Path, uploadPath)
 
 	c := &BOMRepoUploader{
-		requestURL: parsedURL.String(),
-		client:     &http.Client{},
+		requestURL:  parsedURL.String(),
+		contentType: contentTypeForVersion(version),
+		client:      &http.Client{},
 	}
 
 	return c, nil
@@ -54,6 +112,12 @@ func (c *BOMRepoUploader) Upload(ctx context.Context, jobName string, raw []byte
 	}
 	if req.Header == nil {
 		req.Header = make(http.Header)
+	}
+	// The document being uploaded wins; c.contentType is only the fallback for
+	// a payload that declares no specVersion.
+	contentType := c.contentType
+	if v := specVersionFromPayload(raw); v != "" {
+		contentType = contentTypeForVersion(v)
 	}
 	req.Header.Set("Content-Type", contentType)
 

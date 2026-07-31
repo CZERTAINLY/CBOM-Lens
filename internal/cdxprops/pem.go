@@ -30,8 +30,18 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 	// Convert public keys
 	for _, pubKey := range bundle.PublicKeys {
 		algo, pubKeyCompo := c.publicKeyComponents(ctx, getPublicKeyAlgorithm(pubKey), pubKey, nil)
-		pubKeyCompo.CryptoProperties.RelatedCryptoMaterialProperties.Format = "PEM"
 		components = append(components, algo)
+		// publicKeyComponents yields no key component when the key cannot be
+		// identified — a DSA PUBLIC KEY block parses via ParsePKIXPublicKey but
+		// MarshalPKIXPublicKey refuses *dsa.PublicKey, and with no certificate
+		// there is no SPKI to hash instead. Appending the zero Component here
+		// and setting Format on it dereferenced a nil CryptoProperties and took
+		// the whole scan down. The Format assignment was redundant anyway: the
+		// dispatch loop in PEMBundle sets it for every component, nil-checking
+		// first.
+		if pubKeyCompo.BOMRef == "" {
+			continue
+		}
 		components = append(components, pubKeyCompo)
 	}
 
@@ -127,8 +137,21 @@ func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (cdx.Component, error)
 	}
 
 	algo := info.componentWOBomRef(c.czertainly)
+	// This path set no primitive at all, so every PQC private key produced an
+	// algorithm component with the field missing, while the public-key path
+	// produced one with it set. Both now take it from the registry.
+	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 	return algo, nil
+}
+
+// registryPrimitive returns the primitive a registry entry declares, falling
+// back to signature for entries that do not state one.
+func registryPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
+	if info.primitive != "" {
+		return info.primitive
+	}
+	return cdx.CryptoPrimitiveSignature
 }
 
 func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err error) {
@@ -145,7 +168,9 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 	}
 
 	algo = info.componentWOBomRef(c.czertainly)
-	setAlgorithmPrimitive(&algo, cdx.CryptoPrimitiveSignature)
+	// Trust the registry's primitive. Hardcoding "signature" here reported an
+	// ML-KEM encapsulation key as a signature algorithm.
+	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
 	pubKeyValue, pubKeyHash := c.hashRawPublicKey(der)

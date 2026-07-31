@@ -100,11 +100,27 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	)
 	certificateRelatedProperties(&mainCertCompo, hit.Cert)
 	mainCertCompo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef = cdx.BOMReference(signatureAlgCompo.BOMRef)
-	mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyAlgCompo.BOMRef)
+	// The subject public key reference names the KEY, not the algorithm that
+	// key uses (#204). The specification's own 1.7 conformance fixtures make
+	// the distinction visible: a certificate relates to an "algorithm" and a
+	// "publicKey", and those are different assets. Pointing this at the
+	// algorithm component collapsed the two into one kind, so a consumer
+	// walking certificate-to-key edges landed on an algorithm.
+	if publicKeyCompo.BOMRef != "" {
+		mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyCompo.BOMRef)
+	}
 
-	setAlgorithmPrimitive(&signatureAlgCompo, cdx.CryptoPrimitiveSignature)
-	setAlgorithmPrimitive(&publicKeyAlgCompo, cdx.CryptoPrimitiveSignature)
-
+	// Each component's primitive is set by whichever function built it, before
+	// that function hashed it into a BOMRef. Do not re-stamp primitives here: a
+	// BOMRef is a hash of the component's own contents, so mutating a component
+	// after it has been hashed leaves a reference that no longer describes what
+	// it names. TestCertHitToComponents_BOMRefsMatchContents pins this.
+	//
+	// This previously forced "signature" onto both components. It was a no-op
+	// for the signature algorithm, which getAlgorithmProperties already builds
+	// as a signature, but it silently discarded the public key's real primitive
+	// -- reporting a keyEncipherment RSA key as a signature scheme and an
+	// ML-KEM key as a signature rather than a kem.
 	compos := []cdx.Component{
 		mainCertCompo,
 		signatureAlgCompo,
@@ -115,7 +131,6 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	var deps []cdx.Dependency
 
 	if hashAlgCompo != nil {
-		setAlgorithmPrimitive(hashAlgCompo, cdx.CryptoPrimitiveHash)
 		compos = append(compos, *hashAlgCompo)
 
 		deps = []cdx.Dependency{

@@ -1,7 +1,9 @@
 package bom
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,6 +35,7 @@ func init() {
 // Builder is a builder pattern for a CycloneDX BOM structure
 type Builder struct {
 	version      cdx.SpecVersion
+	validator    Validator
 	components   map[string]*cdx.Component
 	dependencies map[string]*[]string
 	counter      *stats.Stats
@@ -43,6 +46,7 @@ type Builder struct {
 func NewBuilder(config model.CBOM) (*Builder, error) {
 	var versions = map[string]cdx.SpecVersion{
 		"1.6": cdx.SpecVersion1_6,
+		"1.7": cdx.SpecVersion1_7,
 	}
 
 	version, ok := versions[config.Version]
@@ -55,8 +59,16 @@ func NewBuilder(config model.CBOM) (*Builder, error) {
 		return nil, fmt.Errorf("unsupported cbom spec version %s: %w", config.Version, err)
 	}
 
+	// Built here so an unusable schema set fails at construction rather than
+	// after a full scan has already been paid for.
+	validator, err := NewValidator(version)
+	if err != nil {
+		return nil, fmt.Errorf("preparing the %s schema set: %w", config.Version, err)
+	}
+
 	return &Builder{
 		version:      version,
+		validator:    validator,
 		components:   make(map[string]*cdx.Component),
 		dependencies: make(map[string]*[]string),
 		clock:        func() time.Time { return time.Now().UTC() },
@@ -141,6 +153,18 @@ func (b *Builder) BOM(ctx context.Context) cdx.BOM {
 func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 	sr := b.safeRefs()
 
+	var rels []cbom.Relationship
+
+	// Extract crypto rels before the assets loop: sr.component below mutates
+	// shared nested pointers in place, so this reads the raw reference fields.
+	wire := make(map[string]struct{}, len(sr.refs))
+	for _, w := range sr.refs {
+		wire[w] = struct{}{}
+	}
+	for _, compop := range b.components {
+		rels = append(rels, cryptoRels(ctx, sr.refs, wire, compop)...)
+	}
+
 	assets := make([]cbom.Asset, 0, len(b.components))
 	for _, compop := range b.components {
 		if compop == nil {
@@ -161,7 +185,6 @@ func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 	// golden corpus pins the rendering). Edges whose endpoints do not resolve
 	// to a stored component are dropped: emitting a fabricated ref would be
 	// dangling, and minting one would be nondeterministic.
-	var rels []cbom.Relationship
 	for ref, depsp := range b.dependencies {
 		if depsp == nil {
 			continue
@@ -203,10 +226,114 @@ func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 	}
 }
 
-// AsJSON encode the BOM into JSON format
+// cryptoRels derives version-neutral crypto relationships from the embedded
+// 1.6 reference fields still written by the converters. Endpoints resolve
+// through refs (raw -> wire) with an identity fallback for already-canonical
+// values (model() mutates shared nested pointers in place on its first run —
+// pre-existing quirk). Unresolvable targets are dropped with a warning,
+// mirroring dependsOn handling. Transitional: this extraction retires per
+// converter as they migrate to emitting Rels natively.
+func cryptoRels(ctx context.Context, r refs, wire map[string]struct{}, compo *cdx.Component) []cbom.Relationship {
+	if compo == nil || compo.CryptoProperties == nil {
+		return nil
+	}
+	from := r[compo.BOMRef]
+	resolve := func(raw string) (string, bool) {
+		if to, ok := r[raw]; ok {
+			return to, true
+		}
+		if _, ok := wire[raw]; ok {
+			return raw, true
+		}
+		return "", false
+	}
+	var rels []cbom.Relationship
+	add := func(kind cbom.RelationshipKind, raw string) {
+		if raw == "" {
+			return
+		}
+		to, ok := resolve(raw)
+		if !ok {
+			slog.WarnContext(ctx, "dropping crypto relationship: target has no component",
+				"from", compo.BOMRef, "to", raw, "kind", string(kind))
+			return
+		}
+		rels = append(rels, cbom.Relationship{From: cbom.AssetRef(from), To: cbom.AssetRef(to), Kind: kind})
+	}
+	cp := compo.CryptoProperties
+	if cp.CertificateProperties != nil {
+		add(cbom.RelSignatureAlgorithm, string(cp.CertificateProperties.SignatureAlgorithmRef))
+		add(cbom.RelSubjectPublicKey, string(cp.CertificateProperties.SubjectPublicKeyRef))
+	}
+	if cp.RelatedCryptoMaterialProperties != nil {
+		add(cbom.RelMaterialAlgorithm, string(cp.RelatedCryptoMaterialProperties.AlgorithmRef))
+	}
+	if cp.ProtocolProperties != nil && cp.ProtocolProperties.CryptoRefArray != nil {
+		for _, ref := range *cp.ProtocolProperties.CryptoRefArray {
+			add(cbom.RelProtocolCrypto, string(ref))
+		}
+	}
+	return rels
+}
+
+// AsJSON encodes the BOM into JSON format, validating it against the vendored
+// schema set for the Builder's spec version before anything is written.
+//
+// Validation is on the emit path rather than only in tests because 1.7's
+// registry fields are closed enumerations: a single out-of-vocabulary value
+// invalidates the whole document. CBOM-Lens is currently the only producer
+// emitting those fields, so no downstream tool would catch such a document --
+// refusing to write it is the only place the mistake can still be caught. The
+// schema set is embedded, so this costs no network access.
 func (b *Builder) AsJSON(ctx context.Context, w io.Writer) error {
 	bom := b.BOM(ctx)
+
+	// Validate the compact encoding: JSON Schema is whitespace-insensitive, so
+	// the pretty form would only inflate peak memory without validating
+	// anything more.
+	var compact bytes.Buffer
+	if err := cdx.NewBOMEncoder(&compact, cdx.BOMFileFormatJSON).Encode(&bom); err != nil {
+		return err
+	}
+
+	// Validate against the version this Builder was constructed for, not
+	// against whatever specVersion happens to be encoded. Rediscovering the
+	// version from the payload would make validation follow the document,
+	// so an emitter writing the wrong specVersion would be checked against
+	// the wrong schema and pass.
+	if err := b.validateAs(b.version, compact.Bytes()); err != nil {
+		return err
+	}
+
 	return cdx.NewBOMEncoder(w, cdx.BOMFileFormatJSON).SetPretty(true).Encode(&bom)
+}
+
+// validateAs checks raw against the schema for version, first confirming that
+// the document declares that version. The declared-version check is what makes
+// an emitter/configuration mismatch an error instead of a silent pass: the two
+// are independent inputs, and cbom-repository rejects any document whose
+// specVersion disagrees with what the uploader declared.
+func (b *Builder) validateAs(version cdx.SpecVersion, raw []byte) error {
+	var declared struct {
+		SpecVersion cdx.SpecVersion `json:"specVersion"`
+	}
+	if err := json.Unmarshal(raw, &declared); err != nil {
+		return fmt.Errorf("reading specVersion from the encoded BOM: %w", err)
+	}
+	if declared.SpecVersion != version {
+		return fmt.Errorf(
+			"refusing to emit a CBOM: builder is %s but the document declares %s",
+			version, declared.SpecVersion)
+	}
+
+	schema, err := b.validator.versionToSchema(version)
+	if err != nil {
+		return err
+	}
+	if err := b.validator.validateBytes(schema, raw); err != nil {
+		return fmt.Errorf("refusing to emit a CBOM that fails %s schema validation: %w", version, err)
+	}
+	return nil
 }
 
 // Add (append) an evidence.occurrence location if non-empty.

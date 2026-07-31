@@ -244,7 +244,7 @@ func doRun(cmd *cobra.Command, args []string) error {
 			}
 			uploaders = append(uploaders, u)
 		}
-		bomUploader, err := service.NewBOMRepoUploader(config.Service.Repository.URL)
+		bomUploader, err := service.NewBOMRepoUploader(config.Service.Repository.URL, config.CBOM.Version)
 		if err != nil {
 			return err
 		}

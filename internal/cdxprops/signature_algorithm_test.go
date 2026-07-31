@@ -128,9 +128,12 @@ func TestPqcSigOIDRefMap(t *testing.T) {
 	require.Equal(t, cdx.BOMReference("crypto/algorithm/xmss-hashsig@1.3.6.1.5.5.7.6.34"), pqcSigOIDRef["1.3.6.1.5.5.7.6.34"])
 }
 
-func TestSpkiOIDRefMap(t *testing.T) {
-	require.Equal(t, cdx.BOMReference("crypto/key/ml-kem-512@2.16.840.1.101.3.4.4.1"), spkiOIDRef["2.16.840.1.101.3.4.4.1"])
-	require.Equal(t, cdx.BOMReference("crypto/key/xmss@1.3.6.1.5.5.7.6.34"), spkiOIDRef["1.3.6.1.5.5.7.6.34"])
+func TestRegistryHasMLKEMEntries(t *testing.T) {
+	// ML-KEM is a registry entry; TestRegistryMatchesStandards covers it
+	// against FIPS 203 and the NIST CSOR.
+	require.Contains(t, unsupportedAlgorithms, "2.16.840.1.101.3.4.4.1")
+	require.Equal(t, "ML-KEM-512", unsupportedAlgorithms["2.16.840.1.101.3.4.4.1"].name)
+	require.Equal(t, "XMSS", unsupportedAlgorithms["1.3.6.1.5.5.7.6.34"].name)
 }
 
 func TestCurveInformation2(t *testing.T) {
@@ -192,26 +195,28 @@ func TestConverter_getAlgorithmProperties(t *testing.T) {
 		wantParamSetID string
 		wantHash       string
 		wantPadding    cdx.CryptoPadding
-		wantClassical  int
+		// nil means the field must be omitted: an unrecognised algorithm has no
+		// established classical level, which 0 would wrongly assert.
+		wantClassical *int
 	}{
-		{"MD2WithRSA", false, x509.MD2WithRSA, "RSASSA-PKCS1", "128", "MD2", "", 0},
-		{"MD5WithRSA", false, x509.MD5WithRSA, "RSASSA-PKCS1", "128", "MD5", "", 0},
-		{"SHA1WithRSA", false, x509.SHA1WithRSA, "RSASSA-PKCS1", "160", "SHA-1", "", 0},
-		{"SHA256WithRSA", false, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, 112},
-		{"SHA384WithRSA", false, x509.SHA384WithRSA, "RSASSA-PKCS1", "384", "SHA-384", cdx.CryptoPaddingPKCS1v15, 128},
-		{"SHA512WithRSA", false, x509.SHA512WithRSA, "RSASSA-PKCS1", "512", "SHA-512", cdx.CryptoPaddingPKCS1v15, 256},
-		{"SHA256WithRSAPSS", false, x509.SHA256WithRSAPSS, "RSASSA-PSS", "256", "SHA-256", "", 112},
-		{"SHA384WithRSAPSS", false, x509.SHA384WithRSAPSS, "RSASSA-PSS", "384", "SHA-384", "", 128},
-		{"SHA512WithRSAPSS", false, x509.SHA512WithRSAPSS, "RSASSA-PSS", "512", "SHA-512", "", 256},
-		{"ECDSAWithSHA1", false, x509.ECDSAWithSHA1, "ECDSA", "160", "SHA-1", "", 0},
-		{"ECDSAWithSHA256", false, x509.ECDSAWithSHA256, "ECDSA", "256", "SHA-256", "", 128},
-		{"ECDSAWithSHA384", false, x509.ECDSAWithSHA384, "ECDSA", "384", "SHA-384", "", 192},
-		{"ECDSAWithSHA512", false, x509.ECDSAWithSHA512, "ECDSA", "512", "SHA-512", "", 256},
-		{"DSAWithSHA1", false, x509.DSAWithSHA1, "DSA", "160", "SHA-1", "", 0},
-		{"DSAWithSHA256", false, x509.DSAWithSHA256, "DSA", "256", "SHA-256", "", 112},
-		{"PureEd25519", false, x509.PureEd25519, "EdDSA", "256", "SHA-512", "", 128},
-		{"Unknown", false, x509.SignatureAlgorithm(999), "Unknown", "0", "", "", 0},
-		{"SHA256WithRSA czertainly", true, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, 112},
+		{"MD2WithRSA", false, x509.MD2WithRSA, "RSASSA-PKCS1", "128", "MD2", "", ptr(0)},
+		{"MD5WithRSA", false, x509.MD5WithRSA, "RSASSA-PKCS1", "128", "MD5", "", ptr(0)},
+		{"SHA1WithRSA", false, x509.SHA1WithRSA, "RSASSA-PKCS1", "160", "SHA-1", "", ptr(0)},
+		{"SHA256WithRSA", false, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, ptr(112)},
+		{"SHA384WithRSA", false, x509.SHA384WithRSA, "RSASSA-PKCS1", "384", "SHA-384", cdx.CryptoPaddingPKCS1v15, ptr(128)},
+		{"SHA512WithRSA", false, x509.SHA512WithRSA, "RSASSA-PKCS1", "512", "SHA-512", cdx.CryptoPaddingPKCS1v15, ptr(256)},
+		{"SHA256WithRSAPSS", false, x509.SHA256WithRSAPSS, "RSASSA-PSS", "256", "SHA-256", "", ptr(112)},
+		{"SHA384WithRSAPSS", false, x509.SHA384WithRSAPSS, "RSASSA-PSS", "384", "SHA-384", "", ptr(128)},
+		{"SHA512WithRSAPSS", false, x509.SHA512WithRSAPSS, "RSASSA-PSS", "512", "SHA-512", "", ptr(256)},
+		{"ECDSAWithSHA1", false, x509.ECDSAWithSHA1, "ECDSA", "160", "SHA-1", "", ptr(0)},
+		{"ECDSAWithSHA256", false, x509.ECDSAWithSHA256, "ECDSA", "256", "SHA-256", "", ptr(128)},
+		{"ECDSAWithSHA384", false, x509.ECDSAWithSHA384, "ECDSA", "384", "SHA-384", "", ptr(192)},
+		{"ECDSAWithSHA512", false, x509.ECDSAWithSHA512, "ECDSA", "512", "SHA-512", "", ptr(256)},
+		{"DSAWithSHA1", false, x509.DSAWithSHA1, "DSA", "160", "SHA-1", "", ptr(0)},
+		{"DSAWithSHA256", false, x509.DSAWithSHA256, "DSA", "256", "SHA-256", "", ptr(112)},
+		{"PureEd25519", false, x509.PureEd25519, "EdDSA", "256", "SHA-512", "", ptr(128)},
+		{"Unknown", false, x509.SignatureAlgorithm(999), "Unknown", "0", "", "", nil},
+		{"SHA256WithRSA czertainly", true, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, ptr(112)},
 	}
 
 	for _, tt := range tests {
@@ -228,8 +233,15 @@ func TestConverter_getAlgorithmProperties(t *testing.T) {
 			if got.Padding != tt.wantPadding {
 				t.Errorf("Padding = %v, want %v", got.Padding, tt.wantPadding)
 			}
-			if got.ClassicalSecurityLevel == nil || *got.ClassicalSecurityLevel != tt.wantClassical {
-				t.Errorf("ClassicalSecurityLevel = %v, want %v", got.ClassicalSecurityLevel, tt.wantClassical)
+			switch {
+			case tt.wantClassical == nil:
+				if got.ClassicalSecurityLevel != nil {
+					t.Errorf("ClassicalSecurityLevel = %v, want it omitted", *got.ClassicalSecurityLevel)
+				}
+			case got.ClassicalSecurityLevel == nil:
+				t.Errorf("ClassicalSecurityLevel omitted, want %v", *tt.wantClassical)
+			case *got.ClassicalSecurityLevel != *tt.wantClassical:
+				t.Errorf("ClassicalSecurityLevel = %v, want %v", *got.ClassicalSecurityLevel, *tt.wantClassical)
 			}
 			if tt.czertainly {
 				if len(props) == 0 || props[0].Value != tt.wantFamily {

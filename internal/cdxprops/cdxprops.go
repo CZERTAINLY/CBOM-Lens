@@ -168,13 +168,26 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 			pubKey,
 			nil,
 		)
+		// publicKeyComponents yields nothing for a key it cannot identify, and
+		// the private key's own ref is derived from the public key's digest. An
+		// empty pubKeyID would give every such private key the ref
+		// crypto/private_key/<alg>@ with no digest, and since Builder keys
+		// components by bom-ref, distinct private keys would collapse into one
+		// — the same defect fixed for public keys, one field over.
+		//
+		// No key type reaches this state today: a DSA private key fails to parse
+		// and post-quantum private keys land in ParseErrors, so neither enters
+		// bundle.PrivateKeys. Guarded because the pem.go crash was also
+		// unreachable until a change elsewhere made it reachable.
 		_, pubKeyID, _ := strings.Cut(pubKeyCompo.BOMRef, "@")
+		if pubKeyID == "" {
+			slog.WarnContext(ctx, "skipping private key: its public key could not be identified",
+				"bundle.location", bundle.Location)
+			continue
+		}
 		privKeyAlgo, privKeyCompo := c.PrivateKey(ctx, pubKeyID, privKey)
 
-		compos = append(compos, []cdx.Component{
-			pubKeyAlgo, pubKeyCompo,
-			privKeyAlgo, privKeyCompo,
-		}...)
+		compos = append(compos, pubKeyAlgo, pubKeyCompo, privKeyAlgo, privKeyCompo)
 	}
 
 	bundleCompos, err := c.restOfPEMBundleToCDX(ctx, bundle, bundle.Location)

@@ -26,39 +26,7 @@ func (emit16) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {
 		components = append(components, c)
 	}
 
-	// Dependencies: regroup RelDependsOn edges by From into one dependsOn
-	// array per distinct From. m.Rels is stable-sorted by From (see
-	// cbom.BOMModel's ordering contract), so same-From edges are consecutive
-	// and in original order; the resulting Dependency slice is ordered by Ref.
-	dependencies := make([]cdx.Dependency, 0)
-	var (
-		curFrom  cbom.AssetRef
-		curDeps  []string
-		haveFrom bool
-	)
-	flush := func() {
-		if !haveFrom {
-			return
-		}
-		deps := curDeps
-		dependencies = append(dependencies, cdx.Dependency{
-			Ref:          string(curFrom),
-			Dependencies: &deps,
-		})
-	}
-	for _, r := range m.Rels {
-		if r.Kind != cbom.RelDependsOn {
-			continue
-		}
-		if !haveFrom || r.From != curFrom {
-			flush()
-			curFrom = r.From
-			curDeps = nil
-			haveFrom = true
-		}
-		curDeps = append(curDeps, string(r.To))
-	}
-	flush()
+	dependencies := regroupDependsOn(m.Rels)
 
 	// Metadata.Properties is non-nil only when a stats counter was attached
 	// (a fresh counter yields a non-nil empty slice, rendered as []).
@@ -102,4 +70,39 @@ func (emit16) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {
 		Dependencies: &dependencies,
 		Properties:   &[]cdx.Property{},
 	}
+}
+
+// regroupDependsOn renders RelDependsOn edges into cdx dependency rows,
+// regrouping consecutive same-From edges (m.Rels ordering contract) into one
+// dependsOn array. m.Rels is stable-sorted by From, so same-From edges are
+// consecutive and in original order; the resulting slice is ordered by Ref.
+// Shared by emit16 and emit17.
+func regroupDependsOn(rels []cbom.Relationship) []cdx.Dependency {
+	dependencies := make([]cdx.Dependency, 0)
+	var (
+		curFrom  cbom.AssetRef
+		curDeps  []string
+		haveFrom bool
+	)
+	flush := func() {
+		if !haveFrom {
+			return
+		}
+		deps := curDeps
+		dependencies = append(dependencies, cdx.Dependency{Ref: string(curFrom), Dependencies: &deps})
+	}
+	for _, r := range rels {
+		if r.Kind != cbom.RelDependsOn {
+			continue
+		}
+		if !haveFrom || r.From != curFrom {
+			flush()
+			curFrom = r.From
+			curDeps = nil
+			haveFrom = true
+		}
+		curDeps = append(curDeps, string(r.To))
+	}
+	flush()
+	return dependencies
 }

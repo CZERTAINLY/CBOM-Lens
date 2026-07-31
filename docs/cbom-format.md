@@ -1,6 +1,6 @@
 # CBOM Output Format
 
-CBOM-Lens produces a Cryptographic Bill of Materials (CBOM) that conforms to the [CycloneDX BOM 1.6](https://cyclonedx.org/schema/bom-1.6.schema.json) specification.
+CBOM-Lens produces a Cryptographic Bill of Materials (CBOM) that conforms to the [CycloneDX BOM 1.6](https://cyclonedx.org/schema/bom-1.6.schema.json) or [1.7](https://cyclonedx.org/schema/bom-1.7.schema.json) specification.
 
 This document explains how CBOM-Lens models cryptographic assets and how it uses stable `bom-ref` identifiers.
 
@@ -8,12 +8,31 @@ For scanning strategies, see [Scanning use cases & best practices](scanning-use-
 
 ---
 
-## 1. CycloneDX 1.6
+## 1. Specification version
 
-- CBOM-Lens uses CycloneDX 1.6 as the base schema for its output.
-- Cryptographic assets (certificates, keys, algorithms, etc.) are represented as CycloneDX components with additional properties.
+Cryptographic assets (certificates, keys, algorithms, and so on) are represented as CycloneDX components with additional properties. The exact JSON structure is defined by the CycloneDX schema, with CBOM-Lens-specific conventions described below.
 
-The exact JSON structure is defined by the CycloneDX schema, with CBOM-Lens-specific conventions described below.
+CBOM-Lens emits **1.6 by default**. Set `cbom.version: "1.7"` in the configuration file to emit 1.7 instead. The schema set for both versions is vendored into the binary, and every emitted document is validated against it before being written or uploaded — a document that fails validation is refused rather than produced. Validation never requires network access.
+
+### What 1.7 adds
+
+The 1.7 schema itself removed nothing, and it deprecates by annotation rather than by constraint, so any 1.6 document also validates as 1.7 unchanged.
+
+CBOM-Lens's own 1.7 output is a different matter, and **1.6 stays the compatibility format**. Where 1.7 supersedes a field, the 1.7 output adopts the replacement and drops the original: the reference fields listed below are cleared in favour of `relatedCryptographicAssets`, and `certificateExtension` is migrated to `certificateFileExtension`. A consumer that reads only 1.6 field names will therefore miss those relationships in a 1.7 document. The single exception is `curve`, which is emitted alongside `ellipticCurve` — see below for why.
+
+For cryptographic assets, 1.7 adds three things worth knowing about:
+
+**A registry of algorithm families and elliptic curves.** `algorithmProperties` gains `algorithmFamily` and `ellipticCurve`, whose permitted values come from a registry published alongside the specification. Both are *closed* enumerations — a value outside the registry makes the whole document fail validation, so CBOM-Lens emits them only where a scanned artifact maps to a registry entry, and omits them otherwise. A missing field means "not established"; it never means the algorithm is unrecognised. Curves are namespaced, for example `secg/secp256r1` rather than a bare `secp256r1`.
+
+`ellipticCurve` is emitted *alongside* the older `curve` field, not instead of it. `curve` remains valid in 1.7 and is only removed in CycloneDX 2.0, many consumers still read it, and several conversion tools silently discard the newer field — so emitting both is what keeps information from being lost in transit.
+
+**Typed relationships between crypto assets.** The individual reference fields (`signatureAlgorithmRef`, `subjectPublicKeyRef`, `algorithmRef`, `cryptoRefArray`) are superseded by a single `relatedCryptographicAssets` array of typed edges. CBOM-Lens builds these from its internal relationship model rather than by copying the old fields, which means a 1.7 document cannot contain a reference that points at nothing. The 1.6 output keeps the original fields for compatibility.
+
+**Richer certificate metadata.** `certificateProperties` gains a serial number, fingerprint, file extension, certificate state, parsed extensions, and lifecycle dates (creation, activation, deactivation, revocation).
+
+Of those, CBOM-Lens currently populates **only `certificateFileExtension`**, migrated from 1.6's `certificateExtension`. The serial number, certificate state, parsed extensions and lifecycle dates are not emitted. The certificate fingerprints *are* emitted, but as component-level `hashes` rather than in `certificateProperties.fingerprint`. Populating the rest is future work.
+
+Two smaller additions: the `key-wrap` primitive, and `tlsGroups` / `tlsSignatureSchemes` on cipher suites.
 
 ---
 
@@ -33,6 +52,13 @@ To address this security concern, CBOM-Lens post-processes the CBOM after correl
 
 > [!WARNING]
 > Component references (`bom-ref`) are unique within a single CBOM document only. The same cryptographic component discovered in separate scans will receive different UUIDs in each resulting CBOM.
+
+> [!WARNING]
+> A `bom-ref` is derived from the component's contents, so **correcting a component's data moves its
+> reference**. A release that fixes a wrong primitive, cipher function or key size will change the
+> refs of the affected components even though the document format is unchanged. If you join records
+> on `bom-ref` across releases, treat a ref change as "the same asset, described more accurately"
+> rather than as a new asset, and consult the release notes for the specific refs that moved.
 
 ---
 
@@ -63,7 +89,7 @@ Example of an algorithm component in a CBOM:
 
 Go's standard library does not (yet) implement PQC algorithms, but CBOM-Lens can still **detect** and model them where present.
 
-Support currently includes members of the **ML-DS** family (e.g., `ML-DSA-65`).
+Recognised families are **ML-DSA** (FIPS 204), **SLH-DSA** (FIPS 205, all 12 parameter sets), **ML-KEM** (FIPS 203), **XMSS**, **XMSS-MT** and **HSS-LMS**. See [PQC support](pqc-support.md) for the per-algorithm detail and for what is deliberately not claimed.
 
 Example (truncated) CBOM entry:
 
@@ -99,6 +125,8 @@ Example (truncated) CBOM entry:
 ```
 
 This representation captures algorithm characteristics and their occurrences while still using stable `bom-ref` identifiers.
+
+The property set depends on what the algorithm is. A signature scheme carries `private_key_size`, `public_key_size` and `signature_size`, as above. A KEM has no signature, so ML-KEM carries `czertainly:component:algorithm:pqc:ciphertext_size` in place of `signature_size`, with the encapsulation and decapsulation key sizes reported as the public and private key sizes. See [PQC support](pqc-support.md) for the per-algorithm detail.
 
 ---
 

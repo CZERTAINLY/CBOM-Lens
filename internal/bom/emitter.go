@@ -19,6 +19,8 @@ func emitterFor(v cdx.SpecVersion) (Emitter, error) {
 	switch v {
 	case cdx.SpecVersion1_6:
 		return emit16{}, nil
+	case cdx.SpecVersion1_7:
+		return emit17{}, nil
 	default:
 		return nil, fmt.Errorf("no emitter for spec version %s", v)
 	}

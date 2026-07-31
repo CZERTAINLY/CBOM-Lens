@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -245,19 +246,32 @@ func (s *Server) RegisterConnector(ctx context.Context) error {
 	return nil
 }
 
+// isJSONResponse reports whether the response body is JSON, ignoring media-type
+// parameters. A verbatim comparison against "application/json" fails on the
+// entirely ordinary "application/json; charset=UTF-8", which would skip the
+// body decoding below and turn an idempotent re-registration into an error --
+// the same failure mode the 409 branch exists to prevent, one status code over.
+func isJSONResponse(resp *http.Response) bool {
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		return false
+	}
+	return mediaType == "application/json"
+}
+
 func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
-	// Note: When registering an already previously registered connector, the czertainly core
+	// Note: When registering an already previously registered connector, Core
 	// will return message with a text similar to:
 	//	`["Connector(s) with same kinds already exists:<name-of-kind>"]`
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		slog.Debug("Czertainly core connector successfully registered.")
+		slog.Debug("Connector successfully registered.")
 		return nil
 	case http.StatusBadRequest:
 		fallthrough
 	case http.StatusNotFound:
-		if resp.Header.Get("Content-Type") == "application/json" {
+		if isJSONResponse(resp) {
 			type registerResp struct {
 				Message string `json:"message"`
 			}
@@ -267,7 +281,7 @@ func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
 				return fmt.Errorf("status code %d", resp.StatusCode)
 			}
 			if strings.Contains(rr.Message, "already exists") {
-				slog.Debug("Czertainly core connector already registered.")
+				slog.Debug("Connector already registered.")
 				return nil
 			}
 
@@ -276,7 +290,7 @@ func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
 		return fmt.Errorf("status code %d", resp.StatusCode)
 
 	case http.StatusUnprocessableEntity:
-		if resp.Header.Get("Content-Type") == "application/json" {
+		if isJSONResponse(resp) {
 			type registerResp []string
 			var rr registerResp
 			if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
@@ -286,7 +300,7 @@ func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
 			var sb strings.Builder
 			for _, cpy := range rr {
 				if strings.Contains(cpy, "already exists") {
-					slog.Debug("Czertainly core connector already registered.")
+					slog.Debug("Connector already registered.")
 					return nil
 				}
 				fmt.Fprintf(&sb, "%s ", cpy)
@@ -294,6 +308,21 @@ func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
 			return fmt.Errorf("status code: %d, message: %s", resp.StatusCode, sb.String())
 		}
 		return fmt.Errorf("status code %d", resp.StatusCode)
+
+	case http.StatusConflict:
+		// Core maps AlreadyExistException to 409 CONFLICT, so this is the
+		// status a restart of an already-registered cbom-lens gets. The
+		// connector Core needs already exists, which is the outcome
+		// registration was after, so treat it as success and carry on serving.
+		// Returning an error here made cbom-lens startable exactly once per
+		// Core instance.
+		//
+		// The body is deliberately not inspected: on this endpoint a conflict
+		// cannot mean anything but a clash with an existing connector, and the
+		// message-sniffing the branches above do is fragile anyway — it
+		// compares Content-Type verbatim, so a charset parameter defeats it.
+		slog.DebugContext(ctx, "Connector already registered.")
+		return nil
 
 	default:
 		return fmt.Errorf("unexpected status code returned: %d", resp.StatusCode)
