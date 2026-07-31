@@ -29,8 +29,21 @@ func contentTypeForVersion(version string) string {
 	return "application/vnd.cyclonedx+json; version=" + version
 }
 
+// supportedSpecVersions are the versions cbom-lens emits. The payload-derived
+// version is checked against this set before it can reach a header: Upload takes
+// raw bytes across a subprocess boundary, and a value such as "1.6; x=y" would
+// otherwise inject a second media-type parameter. Our own emitter cannot produce
+// that -- AsJSON validates specVersion against a schema enum first -- but the
+// value's provenance is now the document rather than validated configuration,
+// so it gets checked where it is consumed.
+var supportedSpecVersions = map[string]struct{}{
+	"1.6": {},
+	"1.7": {},
+}
+
 // specVersionFromPayload reads specVersion out of an encoded BOM, returning ""
-// when the document does not declare one or cannot be parsed.
+// when the document does not declare one, cannot be parsed, or names a version
+// cbom-lens does not emit.
 //
 // The document has to be the authority for the declared version. The uploader
 // is constructed once from cfg.CBOM.Version, but the emitted specVersion is
@@ -44,6 +57,9 @@ func specVersionFromPayload(raw []byte) string {
 		SpecVersion string `json:"specVersion"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	if _, ok := supportedSpecVersions[doc.SpecVersion]; !ok {
 		return ""
 	}
 	return doc.SpecVersion

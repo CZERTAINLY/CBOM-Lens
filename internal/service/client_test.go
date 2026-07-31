@@ -581,7 +581,7 @@ func parseURL(t *testing.T, s string) model.URL {
 }
 
 func TestContentTypeForVersion(t *testing.T) {
-	// The 1.6 string must stay byte-identical to the previous constant.
+	// RFC 7231 canonical form: no whitespace around the parameter's '='.
 	require.Equal(t, "application/vnd.cyclonedx+json; version=1.6", contentTypeForVersion("1.6"))
 	require.Equal(t, "application/vnd.cyclonedx+json; version=1.6", contentTypeForVersion(""))
 	require.Equal(t, "application/vnd.cyclonedx+json; version=1.7", contentTypeForVersion("1.7"))
@@ -648,6 +648,28 @@ func TestUpload_ContentTypeFollowsDocument(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.wantVersion, params["version"],
 				"declared version must match the document, header was %q", got)
+		})
+	}
+}
+
+// TestSpecVersionFromPayload_RejectsUnknownVersions pins that only a version
+// cbom-lens emits can reach the Content-Type header. Upload takes raw bytes
+// across a subprocess boundary, so a document naming something else must not
+// have its value concatenated into a media type.
+func TestSpecVersionFromPayload_RejectsUnknownVersions(t *testing.T) {
+	for _, tt := range []struct {
+		name, payload, want string
+	}{
+		{"1.6", `{"specVersion":"1.6"}`, "1.6"},
+		{"1.7", `{"specVersion":"1.7"}`, "1.7"},
+		{"unsupported version", `{"specVersion":"1.5"}`, ""},
+		{"future version", `{"specVersion":"2.0"}`, ""},
+		{"parameter injection", `{"specVersion":"1.6; charset=x"}`, ""},
+		{"absent", `{"bomFormat":"CycloneDX"}`, ""},
+		{"not json", `nope`, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, specVersionFromPayload([]byte(tt.payload)))
 		})
 	}
 }
