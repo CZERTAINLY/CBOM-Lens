@@ -84,7 +84,7 @@ func TestExtractAlgorithmInfo_ECDSA(t *testing.T) {
 
 			require.Equal(t, tt.wantName, got.name, "component name")
 			require.Equal(t, tt.wantOID, got.oid, "named-curve OID (RFC 5480 2.1.1.1)")
-			require.Equal(t, tt.wantClassical, got.classicalSecurityLevel,
+			require.Equal(t, tt.wantClassical, *got.classicalSecurityLevel,
 				"bits of security (RFC 5480 section 4)")
 			require.Equal(t, tt.wantKeySize, got.keySize)
 			require.Equal(t, []cdx.CryptoFunction{

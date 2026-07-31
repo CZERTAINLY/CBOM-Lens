@@ -22,13 +22,16 @@ func ptr[T any](v T) *T {
 
 // Internal shared structure for algorithm metadata
 type algorithmInfo struct {
-	name                   string
-	oid                    string
-	paramSetID             string
-	keySize                int
-	algorithmName          string
-	cryptoFunctions        []cdx.CryptoFunction
-	classicalSecurityLevel int
+	name            string
+	oid             string
+	paramSetID      string
+	keySize         int
+	algorithmName   string
+	cryptoFunctions []cdx.CryptoFunction
+	// nil means "not established". A real 0 (MD5, SHA-1) is a claim; absence
+	// is not. Emitting 0 for an unrecognised algorithm asserted that it has
+	// zero bits of classical security, which is a different statement.
+	classicalSecurityLevel *int
 	// nistQuantumSecurityLevel is a pointer so that "no standard assigns a
 	// category" (nil, field omitted) stays distinguishable from the genuine
 	// claim "meets none of the NIST categories" (ptr(0), field emitted as 0).
@@ -87,7 +90,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   128,
+		classicalSecurityLevel:   ptr(128),
 		nistQuantumSecurityLevel: ptr(2),
 		pqc: pqcInfo{
 			privKeySize:   2560,
@@ -106,7 +109,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   192,
+		classicalSecurityLevel:   ptr(192),
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
 			privKeySize:   4032,
@@ -125,7 +128,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   256,
+		classicalSecurityLevel:   ptr(256),
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
 			privKeySize:   4896,
@@ -151,7 +154,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   128,
+		classicalSecurityLevel:   ptr(128),
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
 			privKeySize:   64,
@@ -170,7 +173,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   128,
+		classicalSecurityLevel:   ptr(128),
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
 			privKeySize:   64,
@@ -189,7 +192,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   192,
+		classicalSecurityLevel:   ptr(192),
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
 			privKeySize:   96,
@@ -208,7 +211,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   192,
+		classicalSecurityLevel:   ptr(192),
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
 			privKeySize:   96,
@@ -227,7 +230,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   256,
+		classicalSecurityLevel:   ptr(256),
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
 			privKeySize:   128,
@@ -246,7 +249,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   256,
+		classicalSecurityLevel:   ptr(256),
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
 			privKeySize:   128,
@@ -268,7 +271,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   128,
+		classicalSecurityLevel:   ptr(128),
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
 			privKeySize:   64,
@@ -287,7 +290,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   128,
+		classicalSecurityLevel:   ptr(128),
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: pqcInfo{
 			privKeySize:   64,
@@ -306,7 +309,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   192,
+		classicalSecurityLevel:   ptr(192),
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
 			privKeySize:   96,
@@ -325,7 +328,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   192,
+		classicalSecurityLevel:   ptr(192),
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: pqcInfo{
 			privKeySize:   96,
@@ -344,7 +347,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   256,
+		classicalSecurityLevel:   ptr(256),
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
 			privKeySize:   128,
@@ -363,7 +366,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionVerify,
 		},
 		primitive:                cdx.CryptoPrimitiveSignature,
-		classicalSecurityLevel:   256,
+		classicalSecurityLevel:   ptr(256),
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: pqcInfo{
 			privKeySize:   128,
@@ -396,7 +399,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionDecapsulate,
 		},
 		primitive:                cdx.CryptoPrimitiveKEM,
-		classicalSecurityLevel:   128,
+		classicalSecurityLevel:   ptr(128),
 		nistQuantumSecurityLevel: ptr(1),
 		pqc: kemInfo{
 			encapKeySize:   800,
@@ -415,7 +418,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionDecapsulate,
 		},
 		primitive:                cdx.CryptoPrimitiveKEM,
-		classicalSecurityLevel:   192,
+		classicalSecurityLevel:   ptr(192),
 		nistQuantumSecurityLevel: ptr(3),
 		pqc: kemInfo{
 			encapKeySize:   1184,
@@ -434,7 +437,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			cdx.CryptoFunctionDecapsulate,
 		},
 		primitive:                cdx.CryptoPrimitiveKEM,
-		classicalSecurityLevel:   256,
+		classicalSecurityLevel:   ptr(256),
 		nistQuantumSecurityLevel: ptr(5),
 		pqc: kemInfo{
 			encapKeySize:   1568,
@@ -460,7 +463,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 		// classicalSecurityLevel assumes the n=32 (SHA-256) parameter
 		// families. The AlgorithmIdentifier does not carry the parameter set,
 		// so this is the best available approximation; see docs/pqc-support.md.
-		classicalSecurityLevel: 256,
+		classicalSecurityLevel: ptr(256),
 		// nistQuantumSecurityLevel is deliberately unset. SP 800-208 assigns
 		// no NIST security category to stateful hash-based signatures. The
 		// field must be omitted rather than set to 0, because CycloneDX
@@ -485,7 +488,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 		// classicalSecurityLevel assumes the n=32 (SHA-256) parameter
 		// families. The AlgorithmIdentifier does not carry the parameter set,
 		// so this is the best available approximation; see docs/pqc-support.md.
-		classicalSecurityLevel: 256,
+		classicalSecurityLevel: ptr(256),
 		// nistQuantumSecurityLevel is deliberately unset. SP 800-208 assigns
 		// no NIST security category to stateful hash-based signatures. The
 		// field must be omitted rather than set to 0, because CycloneDX
@@ -513,7 +516,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 		// classicalSecurityLevel assumes the n=32 (SHA-256) parameter
 		// families. The AlgorithmIdentifier does not carry the parameter set,
 		// so this is the best available approximation; see docs/pqc-support.md.
-		classicalSecurityLevel: 256,
+		classicalSecurityLevel: ptr(256),
 		// nistQuantumSecurityLevel is deliberately unset. SP 800-208 assigns
 		// no NIST security category to stateful hash-based signatures. The
 		// field must be omitted rather than set to 0, because CycloneDX
@@ -566,13 +569,13 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 			meta.algorithmName = fmt.Sprintf("crypto/algorithm/rsa-%d", meta.keySize)
 			switch meta.keySize {
 			case 1024:
-				meta.classicalSecurityLevel = 80
+				meta.classicalSecurityLevel = ptr(80)
 			case 2048:
-				meta.classicalSecurityLevel = 112
+				meta.classicalSecurityLevel = ptr(112)
 			case 3072:
-				meta.classicalSecurityLevel = 128
+				meta.classicalSecurityLevel = ptr(128)
 			case 4096:
-				meta.classicalSecurityLevel = 152
+				meta.classicalSecurityLevel = ptr(152)
 			}
 		} else {
 			meta.name = "RSA"
@@ -606,16 +609,16 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 				// 1.2.840.10045.3.1.1 is secp192r1, and 80 bits is
 				// secp192r1's security level. Both were wrong here.
 				meta.oid = "1.3.132.0.33"
-				meta.classicalSecurityLevel = 112
+				meta.classicalSecurityLevel = ptr(112)
 			case "P-256":
 				meta.oid = "1.2.840.10045.3.1.7"
-				meta.classicalSecurityLevel = 128
+				meta.classicalSecurityLevel = ptr(128)
 			case "P-384":
 				meta.oid = "1.3.132.0.34"
-				meta.classicalSecurityLevel = 192
+				meta.classicalSecurityLevel = ptr(192)
 			case "P-521":
 				meta.oid = "1.3.132.0.35"
-				meta.classicalSecurityLevel = 256
+				meta.classicalSecurityLevel = ptr(256)
 			default:
 				meta.oid = "1.2.840.10045.2.1"
 			}
@@ -631,7 +634,7 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 		meta.oid = "1.3.101.112" //NOSONAR - this is OID and not IP address
 		meta.paramSetID = "256"
 		meta.keySize = 256
-		meta.classicalSecurityLevel = 128
+		meta.classicalSecurityLevel = ptr(128)
 		meta.cryptoFunctions = []cdx.CryptoFunction{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
@@ -649,11 +652,11 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 			meta.keySize = dsaKey.BitLen()
 			switch dsaKey.BitLen() {
 			case 1024:
-				meta.classicalSecurityLevel = 80
+				meta.classicalSecurityLevel = ptr(80)
 			case 2048:
-				meta.classicalSecurityLevel = 112
+				meta.classicalSecurityLevel = ptr(112)
 			case 3072:
-				meta.classicalSecurityLevel = 128
+				meta.classicalSecurityLevel = ptr(128)
 			}
 			meta.paramSetID = fmt.Sprintf("%d", meta.keySize)
 			meta.name = fmt.Sprintf("DSA-%d", meta.keySize)
@@ -724,7 +727,7 @@ func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 
 	algoProps := &cdx.CryptoAlgorithmProperties{
 		ExecutionEnvironment:     cdx.CryptoExecutionEnvironmentSoftwarePlainRAM,
-		ClassicalSecurityLevel:   &i.classicalSecurityLevel,
+		ClassicalSecurityLevel:   i.classicalSecurityLevel,
 		NistQuantumSecurityLevel: nqsl,
 	}
 	if len(sortedFunctions) > 0 {

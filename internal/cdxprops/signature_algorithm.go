@@ -71,7 +71,8 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 	var hash string
 	var paramSetID string
 	var padding cdx.CryptoPadding
-	var classicalSecurityLevel int
+	// nil until something establishes it; the Unknown default leaves it unset.
+	var classicalSecurityLevel *int
 	// nil means the field is omitted. See algorithmInfo for why this is a
 	// pointer rather than an int.
 	var nqsl *int
@@ -81,101 +82,107 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 		algorithmFamily = "RSASSA-PKCS1"
 		paramSetID = "128" // MD2 digest size
 		hash = "MD2"
+		// Broken: no collision resistance left. Stated, not inherited
+		// from the zero value, so it reads as a claim rather than a gap.
+		classicalSecurityLevel = ptr(0)
 
 	case x509.MD5WithRSA:
 		algorithmFamily = "RSASSA-PKCS1"
 		paramSetID = "128" // MD5 digest size
 		hash = "MD5"
+		classicalSecurityLevel = ptr(0) // Broken
 
 	case x509.SHA1WithRSA:
 		algorithmFamily = "RSASSA-PKCS1"
 		paramSetID = "160" // SHA-1 digest size
 		hash = "SHA-1"
+		classicalSecurityLevel = ptr(0) // Broken
 
 	case x509.SHA256WithRSA:
 		algorithmFamily = "RSASSA-PKCS1"
 		paramSetID = "256" // SHA-256 digest size
 		padding = cdx.CryptoPaddingPKCS1v15
 		hash = "SHA-256"
-		classicalSecurityLevel = 112
+		classicalSecurityLevel = ptr(112)
 
 	case x509.SHA384WithRSA:
 		algorithmFamily = "RSASSA-PKCS1"
 		paramSetID = "384" // SHA-384 digest size
 		padding = cdx.CryptoPaddingPKCS1v15
 		hash = "SHA-384"
-		classicalSecurityLevel = 128
+		classicalSecurityLevel = ptr(128)
 
 	case x509.SHA512WithRSA:
 		algorithmFamily = "RSASSA-PKCS1"
 		paramSetID = "512" // SHA-512 digest size
 		padding = cdx.CryptoPaddingPKCS1v15
 		hash = "SHA-512"
-		classicalSecurityLevel = 256
+		classicalSecurityLevel = ptr(256)
 
 	case x509.SHA256WithRSAPSS:
 		algorithmFamily = "RSASSA-PSS"
 		paramSetID = "256" // SHA-256 digest size
 		hash = "SHA-256"
-		classicalSecurityLevel = 112
+		classicalSecurityLevel = ptr(112)
 
 	case x509.SHA384WithRSAPSS:
 		algorithmFamily = "RSASSA-PSS"
 		paramSetID = "384" // SHA-384 digest size
 		hash = "SHA-384"
-		classicalSecurityLevel = 128
+		classicalSecurityLevel = ptr(128)
 
 	case x509.SHA512WithRSAPSS:
 		algorithmFamily = "RSASSA-PSS"
 		paramSetID = "512" // SHA-512 digest size
 		hash = "SHA-512"
-		classicalSecurityLevel = 256
+		classicalSecurityLevel = ptr(256)
 
 	case x509.ECDSAWithSHA1:
 		algorithmFamily = "ECDSA"
 		paramSetID = "160" // SHA-1 digest size
 		hash = "SHA-1"
+		classicalSecurityLevel = ptr(0) // Broken: SHA-1
 
 	case x509.ECDSAWithSHA256:
 		algorithmFamily = "ECDSA"
 		paramSetID = "256" // SHA-256 digest size
 		hash = "SHA-256"
-		classicalSecurityLevel = 128
+		classicalSecurityLevel = ptr(128)
 
 	case x509.ECDSAWithSHA384:
 		algorithmFamily = "ECDSA"
 		paramSetID = "384" // SHA-384 digest size
 		hash = "SHA-384"
-		classicalSecurityLevel = 192
+		classicalSecurityLevel = ptr(192)
 
 	case x509.ECDSAWithSHA512:
 		algorithmFamily = "ECDSA"
 		paramSetID = "512" // SHA-512 digest size
 		hash = "SHA-512"
-		classicalSecurityLevel = 256
+		classicalSecurityLevel = ptr(256)
 
 	case x509.DSAWithSHA1:
 		algorithmFamily = "DSA"
 		paramSetID = "160" // SHA-1 digest size
 		hash = "SHA-1"
+		classicalSecurityLevel = ptr(0) // Broken: SHA-1
 
 	case x509.DSAWithSHA256:
 		algorithmFamily = "DSA"
 		paramSetID = "256" // SHA-256 digest size
 		hash = "SHA-256"
-		classicalSecurityLevel = 112
+		classicalSecurityLevel = ptr(112)
 
 	case x509.PureEd25519:
 		algorithmFamily = "EdDSA"
 		paramSetID = "256" // Ed25519 key size
 		// not a parameter https://www.rfc-editor.org/rfc/rfc8032
 		hash = "SHA-512"
-		classicalSecurityLevel = 128
+		classicalSecurityLevel = ptr(128)
 
 	default:
 		algorithmFamily = "Unknown"
 		paramSetID = "0"
-		classicalSecurityLevel = 0
 	}
 
 	// [sign] is the default for the classical enum path above, which has no
@@ -197,7 +204,10 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 			primitive = registryPrimitive(info)
 			algorithmFamily = info.name
 			paramSetID = info.paramSetID
-			classicalSecurityLevel = info.classicalSecurityLevel
+			if info.classicalSecurityLevel != nil {
+				// Copy; do not alias the shared registry entry.
+				classicalSecurityLevel = ptr(*info.classicalSecurityLevel)
+			}
 			// Defer to the registry rather than overriding it with [sign].
 			// Reporting fewer functions than the algorithm component built
 			// from the same entry made the two disagree inside one document.
@@ -236,7 +246,7 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 		ImplementationPlatform:   c.ImplementationPlatform(),
 		Padding:                  padding,
 		Curve:                    curveInformation(sigAlg),
-		ClassicalSecurityLevel:   &classicalSecurityLevel,
+		ClassicalSecurityLevel:   classicalSecurityLevel,
 		NistQuantumSecurityLevel: nqsl,
 	}
 

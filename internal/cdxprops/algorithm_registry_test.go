@@ -321,7 +321,11 @@ func TestRegistryMatchesStandards(t *testing.T) {
 			require.Equal(t, want.paramSetID, got.paramSetID, "parameterSetIdentifier")
 			require.Equal(t, want.oid, got.oid, "oid")
 			require.ElementsMatch(t, want.functions, got.cryptoFunctions, "cryptoFunctions")
-			require.Equal(t, want.classical, got.classicalSecurityLevel,
+			// Every registry entry has a sourced classical level, so a nil
+			// here is a defect rather than a legitimate "not established".
+			require.NotNil(t, got.classicalSecurityLevel,
+				"classicalSecurityLevel must be set for a registry entry")
+			require.Equal(t, want.classical, *got.classicalSecurityLevel,
 				"classicalSecurityLevel")
 
 			if want.nqsl == nil {
@@ -405,7 +409,7 @@ func TestComponentEmissionOmitsEmptyOID(t *testing.T) {
 		oid:                      "",
 		paramSetID:               "128",
 		algorithmName:            "crypto/algorithm/hqc-128",
-		classicalSecurityLevel:   128,
+		classicalSecurityLevel:   ptr(128),
 		nistQuantumSecurityLevel: ptr(1),
 	}
 

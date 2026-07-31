@@ -117,7 +117,7 @@ func (kex KeyExchangeAlgorithm) info(kexInfo string) (algorithmInfo, bool) {
 			algorithmName:          "crypto/algorithm/dhe-" + strconv.Itoa(size),
 			paramSetID:             kexInfo,
 			cryptoFunctions:        cryptoFunctions,
-			classicalSecurityLevel: level,
+			classicalSecurityLevel: ptr(level),
 		}, true
 	case KexECDHE:
 		return algorithmInfo{
@@ -126,7 +126,7 @@ func (kex KeyExchangeAlgorithm) info(kexInfo string) (algorithmInfo, bool) {
 			algorithmName:          "crypto/algorithm/ecdhe-" + kexInfo,
 			paramSetID:             kexInfo,
 			cryptoFunctions:        cryptoFunctions,
-			classicalSecurityLevel: inferECDSASecurityLevel(kexInfo),
+			classicalSecurityLevel: ptr(inferECDSASecurityLevel(kexInfo)),
 		}, true
 	case KexRSA:
 		if kexInfo == "" {
@@ -138,7 +138,7 @@ func (kex KeyExchangeAlgorithm) info(kexInfo string) (algorithmInfo, bool) {
 			algorithmName:          "crypto/algorithm/rsa-" + kexInfo,
 			paramSetID:             kexInfo,
 			cryptoFunctions:        cryptoFunctions,
-			classicalSecurityLevel: inferRSASecurityLevel(kexInfo),
+			classicalSecurityLevel: ptr(inferRSASecurityLevel(kexInfo)),
 		}, true
 	default:
 		return algorithmInfo{}, false
@@ -154,7 +154,7 @@ func (auth KeyAuthenticationAlgorithm) info(keyLen string) (algorithmInfo, bool)
 			algorithmName:          "crypto/algorithm/ecdsa",
 			paramSetID:             keyLen,
 			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionSign, cdx.CryptoFunctionVerify},
-			classicalSecurityLevel: inferECDSASecurityLevel(keyLen),
+			classicalSecurityLevel: ptr(inferECDSASecurityLevel(keyLen)),
 		}, true
 	case KauthRSA:
 		return algorithmInfo{
@@ -163,7 +163,7 @@ func (auth KeyAuthenticationAlgorithm) info(keyLen string) (algorithmInfo, bool)
 			algorithmName:          "crypto/algorithm/rsa",
 			paramSetID:             keyLen,
 			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionSign, cdx.CryptoFunctionVerify},
-			classicalSecurityLevel: inferRSASecurityLevel(keyLen),
+			classicalSecurityLevel: ptr(inferRSASecurityLevel(keyLen)),
 		}, true
 	default:
 		return algorithmInfo{}, false
@@ -210,7 +210,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 			keySize:                int(KeyLen128),
 			paramSetID:             string(CipherModeEmpty),
 			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
-			classicalSecurityLevel: 128,
+			classicalSecurityLevel: ptr(128),
 		}
 	case cipher == Cipher3DES && mode == CipherModeEDE_CBC:
 		info = algorithmInfo{
@@ -220,7 +220,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 			keySize:                int(KeyLen168),
 			paramSetID:             string(CipherModeEDE_CBC),
 			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
-			classicalSecurityLevel: 112,
+			classicalSecurityLevel: ptr(112),
 		}
 	case cipher == CipherAES:
 		switch {
@@ -232,7 +232,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 				keySize:                int(KeyLen128),
 				paramSetID:             string(CipherModeCBC),
 				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
-				classicalSecurityLevel: 128,
+				classicalSecurityLevel: ptr(128),
 			}
 		case keyLen == KeyLen256 && mode == CipherModeCBC:
 			info = algorithmInfo{
@@ -242,7 +242,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 				keySize:                int(KeyLen256),
 				paramSetID:             string(CipherModeCBC),
 				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
-				classicalSecurityLevel: 256,
+				classicalSecurityLevel: ptr(256),
 			}
 		case keyLen == KeyLen128 && mode == CipherModeGCM:
 			info = algorithmInfo{
@@ -252,7 +252,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 				keySize:                int(KeyLen128),
 				paramSetID:             string(CipherModeGCM),
 				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
-				classicalSecurityLevel: 128,
+				classicalSecurityLevel: ptr(128),
 			}
 		case keyLen == KeyLen256 && mode == CipherModeGCM:
 			info = algorithmInfo{
@@ -262,7 +262,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 				keySize:                int(KeyLen256),
 				paramSetID:             string(CipherModeGCM),
 				cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
-				classicalSecurityLevel: 256,
+				classicalSecurityLevel: ptr(256),
 			}
 		}
 	case cipher == CipherCHACHA20 && mode == CipherModePOLY1305:
@@ -273,7 +273,7 @@ func (cipher CipherAlgorithm) info(keyLen KeyLen, mode CipherMode) (algorithmInf
 			keySize:                int(KeyLen256),
 			paramSetID:             string(CipherModePOLY1305),
 			cryptoFunctions:        []cdx.CryptoFunction{cdx.CryptoFunctionEncrypt, cdx.CryptoFunctionDecrypt},
-			classicalSecurityLevel: 128,
+			classicalSecurityLevel: ptr(128),
 		}
 	default:
 		return algorithmInfo{}, false

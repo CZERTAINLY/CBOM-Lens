@@ -4,15 +4,16 @@
 // file: tls-parameters-4.csv, date: 2025-09-29T08:18:46Z
 
 package cdxprops
+
 import (
 	"testing"
 )
 
 func TestCipherSuiteCode(t *testing.T) {
-	var tests = []struct{
+	var tests = []struct {
 		desc string
 		code CipherSuiteCode
-	} {
+	}{
 		{"TLS_AEGIS_128L_SHA256", 0x1307},
 		{"TLS_AEGIS_256_SHA512", 0x1306},
 		{"TLS_AES_128_CCM_8_SHA256", 0x1305},
@@ -365,7 +366,6 @@ func TestCipherSuiteCode(t *testing.T) {
 		{"TLS_SRP_SHA_WITH_3DES_EDE_CBC_SHA", 0xC01A},
 		{"TLS_SRP_SHA_WITH_AES_128_CBC_SHA", 0xC01D},
 		{"TLS_SRP_SHA_WITH_AES_256_CBC_SHA", 0xC020},
-
 	}
 	for _, tc := range tests {
 		got, ok := Code(tc.desc)
