@@ -590,3 +590,28 @@ func TestNistQuantumSecurityLevelOmittedInJSON(t *testing.T) {
 			"an explicit claim of 0 must be emitted, which is why the field is a pointer")
 	})
 }
+
+// TestRegistry_NoRetiredValues is the anchored half of
+// TestPQCPipeline_NoStaleHQCOrSHAKEOIDs. The document-level scan there can only
+// see what its two fixtures produce; this checks the tables emission actually
+// reads from, for every algorithm, so a retired value cannot creep back in via
+// an entry no fixture happens to exercise.
+func TestRegistry_NoRetiredValues(t *testing.T) {
+	retired := map[string]string{
+		"1.3.9999":              "the SPHINCS+-Haraka arc once mislabelled HQC",
+		"2.16.840.1.101.3.6.5.": "a SHAKE arc that does not exist",
+		"1.2.840.10045.3.1.1":   "secp192r1, once wrongly recorded on P-224",
+		"HQC":                   "HQC, which has no assigned OID",
+	}
+
+	require.NotEmpty(t, unsupportedAlgorithms, "registry must not be empty")
+
+	for value, why := range retired {
+		for oid, info := range unsupportedAlgorithms {
+			require.NotContains(t, oid, value, "registry key %q carries %s", oid, why)
+			require.NotContains(t, info.oid, value, "entry %q has oid %q carrying %s", info.name, info.oid, why)
+			require.NotContains(t, info.name, value, "entry name %q carries %s", info.name, why)
+			require.NotContains(t, info.algorithmName, value, "entry algorithmName %q carries %s", info.algorithmName, why)
+		}
+	}
+}

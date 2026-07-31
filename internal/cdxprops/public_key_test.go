@@ -109,6 +109,9 @@ func TestCertHitToComponents_BOMRefsMatchContents(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, compos)
 
+			// Counted so a ref-naming change cannot make this test vacuously
+			// green: every component would be skipped and nothing asserted.
+			var checked int
 			for _, compo := range compos {
 				// Only crypto/algorithm refs are hashes of the component JSON.
 				// crypto/key and crypto/certificate refs hash the key or the
@@ -122,6 +125,7 @@ func TestCertHitToComponents_BOMRefsMatchContents(t *testing.T) {
 
 				rehashed := compo
 				c.BOMRefHash(&rehashed, refName)
+				checked++
 				require.Equal(t, want, rehashed.BOMRef,
 					"%s: BOMRef does not match a re-hash of its own contents, "+
 						"so the component was mutated after being hashed", compo.Name)

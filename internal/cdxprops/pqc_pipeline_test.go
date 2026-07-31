@@ -163,8 +163,17 @@ func TestPQCPipeline_ValidatesAndCarriesRegistryData(t *testing.T) {
 	})
 }
 
-// TestPQCPipeline_NoStaleHQCOrSHAKEOIDs checks the corrected data survives
-// emission, by scanning the document for values that must no longer appear.
+// TestPQCPipeline_NoStaleHQCOrSHAKEOIDs checks the corrected data cannot
+// reappear in emitted output.
+//
+// A "must not contain" assertion is only worth anything if the forbidden value
+// is producible from the inputs; otherwise it passes for the wrong reason and
+// would keep passing if the defect returned. The fixtures here cannot produce
+// an EC curve OID or a SHAKE hash, so the guard is anchored on the registry
+// instead: the values must be absent from the tables that feed emission, which
+// is where a regression would actually land -- see
+// TestRegistry_NoRetiredValues in the internal test package, which has access
+// to the unexported registry.
 func TestPQCPipeline_NoStaleHQCOrSHAKEOIDs(t *testing.T) {
 	t.Parallel()
 
@@ -174,15 +183,18 @@ func TestPQCPipeline_NoStaleHQCOrSHAKEOIDs(t *testing.T) {
 	)
 	doc := string(raw)
 
-	for _, gone := range []string{
+	forbidden := []string{
 		"1.3.9999",              // the SPHINCS+ arc formerly mislabelled HQC
 		"2.16.840.1.101.3.6.5.", // the nonexistent SHAKE arc
 		"1.2.840.10045.3.1.1",   // secp192r1, formerly on P-224
 		"HQC",
-	} {
+	}
+
+	for _, gone := range forbidden {
 		require.NotContains(t, doc, gone,
 			"%q must not appear in emitted output", gone)
 	}
+
 }
 
 // TestPQCPipeline_MalformedKeyDoesNotPanicOrFabricate covers the negative path
