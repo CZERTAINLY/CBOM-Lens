@@ -129,3 +129,50 @@ func TestCertHitToComponents_BOMRefsMatchContents(t *testing.T) {
 		})
 	}
 }
+
+// TestPublicKeyComponents_PQCKeysAreDistinct pins the fix for the collapse of
+// every post-quantum key into one component.
+//
+// Go does not parse ML-DSA/ML-KEM/SLH-DSA public keys, so x509 leaves
+// cert.PublicKey nil and MarshalPKIXPublicKey fails. hashPublicKey used to
+// discard that error and return two empty strings, producing the bom-ref
+// "crypto/key/<alg>@" with no digest for every PQC certificate. Builder keys
+// components by bom-ref, so N distinct PQC keys merged into a single
+// component and the key material was omitted entirely.
+func TestPublicKeyComponents_PQCKeysAreDistinct(t *testing.T) {
+	fixtures := []string{
+		cdxtest.MLDSA65Certificate,
+		cdxtest.SLHDSASHA2128sCertificate,
+		cdxtest.MLKEM768Certificate,
+	}
+
+	conv := NewConverter()
+	refs := make(map[string]string, len(fixtures))
+
+	for _, f := range fixtures {
+		raw, err := cdxtest.TestData(f)
+		require.NoError(t, err)
+		block, _ := pem.Decode(raw)
+		require.NotNil(t, block, f)
+		cert, err := x509.ParseCertificate(block.Bytes)
+		require.NoError(t, err, f)
+
+		// Precondition: this is the situation being guarded against.
+		require.Nil(t, cert.PublicKey, "%s: expected an unparseable PQC key", f)
+		require.NotEmpty(t, cert.RawSubjectPublicKeyInfo, "%s: no SPKI to fall back to", f)
+
+		_, key := conv.publicKeyComponents(t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+
+		require.False(t, strings.HasSuffix(key.BOMRef, "@"),
+			"%s: bom-ref %q has an empty digest", f, key.BOMRef)
+		require.NotEmpty(t, key.CryptoProperties.RelatedCryptoMaterialProperties.Value,
+			"%s: key material was dropped", f)
+
+		if prev, dup := refs[key.BOMRef]; dup {
+			t.Fatalf("%s and %s collapsed into the same bom-ref %q", prev, f, key.BOMRef)
+		}
+		refs[key.BOMRef] = f
+	}
+
+	require.Len(t, refs, len(fixtures), "each PQC key must get its own component")
+}

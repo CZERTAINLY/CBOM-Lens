@@ -22,9 +22,13 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 
 	if info.oid == "0.0.0.0" && cert != nil {
 		oidFallback := spkiOID(cert)
-		var ok bool
-		info, ok = unsupportedAlgorithms[oidFallback]
-		if oidFallback != "" && !ok {
+		// Only overwrite info on a hit. The previous two-value assignment
+		// replaced it with the zero algorithmInfo on a miss, so both returned
+		// components got an empty Name and Builder.appendDetection dropped
+		// them, leaving the certificate's subjectPublicKeyRef dangling.
+		if fallback, ok := unsupportedAlgorithms[oidFallback]; ok {
+			info = fallback
+		} else if oidFallback != "" {
 			slog.WarnContext(ctx, "can't find public key components", "oid", oidFallback)
 		}
 	}
@@ -61,7 +65,22 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 	}
 	c.BOMRefHash(&algo, info.algorithmName)
 
-	pubKeyValue, pubKeyHash := c.hashPublicKey(pubKey)
+	pubKeyValue, pubKeyHash, err := c.hashPublicKey(pubKey)
+	if err != nil && cert != nil {
+		// Go does not parse post-quantum keys, so cert.PublicKey is nil for
+		// ML-DSA/ML-KEM/SLH-DSA and marshalling fails. The DER is still on the
+		// certificate, and hashing that is what keeps each key distinct — the
+		// same fallback unsupportedPKIX already uses.
+		slog.DebugContext(ctx, "public key is not marshallable; hashing the certificate's SPKI instead",
+			"algorithm", info.name, "error", err.Error())
+		pubKeyValue, pubKeyHash = c.hashRawPublicKey(cert.RawSubjectPublicKeyInfo)
+	} else if err != nil {
+		// No certificate to fall back on: a digest-less bom-ref would merge
+		// this key with every other key of the same algorithm.
+		slog.WarnContext(ctx, "cannot identify public key: omitting key component",
+			"algorithm", info.name, "error", err.Error())
+		return algo, cdx.Component{}
+	}
 	// public key properties
 	var bomRef = fmt.Sprintf(
 		"crypto/key/%s@%s",
@@ -92,16 +111,21 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 	return
 }
 
-func (c Converter) hashPublicKey(pubKey crypto.PublicKey) (value, hash string) {
+// hashPublicKey encodes and hashes a parsed public key. It reports an error
+// when the key cannot be marshalled, which callers must handle: returning empty
+// strings silently produced the bom-ref "crypto/key/<alg>@" with no digest, and
+// because Builder keys components by bom-ref every such key collapsed into one
+// component. See hashRawPublicKey for the fallback.
+func (c Converter) hashPublicKey(pubKey crypto.PublicKey) (value, hash string, err error) {
 	// Marshal to PKIX/SPKI format (standard DER encoding)
 	pubKeyBytes, err := x509.MarshalPKIXPublicKey(pubKey)
 	if err != nil {
-		return
+		return "", "", err
 	}
 
 	value = base64.StdEncoding.EncodeToString(pubKeyBytes)
 	hash = c.bomRefHasher(pubKeyBytes)
-	return
+	return value, hash, nil
 }
 
 func publicKeyAlgorithmInfo(pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey) algorithmInfo {

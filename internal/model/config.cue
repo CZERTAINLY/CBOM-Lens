@@ -28,7 +28,7 @@ cbom?: #CBOM
 
 // CBOM defines cbom properties
 #CBOM: {
-  version?: string | *"1.6"
+  version?: ("1.6" | "1.7") | *"1.6"
   extensions?: [...string]
 }
 

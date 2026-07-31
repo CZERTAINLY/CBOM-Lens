@@ -16,13 +16,33 @@ import (
 
 const uploadPath = "api/v1/bom"
 
-// contentTypeForVersion labels uploads with the configured CycloneDX spec
-// version. Empty (unset) keeps the historical 1.6 label byte-identical.
+// contentTypeForVersion labels uploads with a CycloneDX spec version. Empty
+// (unset) keeps the historical 1.6 label byte-identical.
 func contentTypeForVersion(version string) string {
 	if version == "" {
 		version = "1.6"
 	}
 	return "application/vnd.cyclonedx+json; version = " + version
+}
+
+// specVersionFromPayload reads specVersion out of an encoded BOM, returning ""
+// when the document does not declare one or cannot be parsed.
+//
+// The document has to be the authority for the declared version. The uploader
+// is constructed once from cfg.CBOM.Version, but the emitted specVersion is
+// per-job: ConfigureJob replaces the whole model.Scan and that carries its own
+// CBOM section, so a Core-supplied cbom.version in discovery mode need not
+// match the startup configuration. cbom-repository rejects any mismatch between
+// the declared version and the document's specVersion with 400, so labelling
+// from stale configuration would fail every upload.
+func specVersionFromPayload(raw []byte) string {
+	var doc struct {
+		SpecVersion string `json:"specVersion"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	return doc.SpecVersion
 }
 
 type UploadCallbackFunc func(error, string, string)
@@ -63,7 +83,13 @@ func (c *BOMRepoUploader) Upload(ctx context.Context, jobName string, raw []byte
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
-	req.Header.Set("Content-Type", c.contentType)
+	// The document being uploaded wins; c.contentType is only the fallback for
+	// a payload that declares no specVersion.
+	contentType := c.contentType
+	if v := specVersionFromPayload(raw); v != "" {
+		contentType = contentTypeForVersion(v)
+	}
+	req.Header.Set("Content-Type", contentType)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

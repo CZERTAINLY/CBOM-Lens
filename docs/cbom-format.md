@@ -12,7 +12,7 @@ For scanning strategies, see [Scanning use cases & best practices](scanning-use-
 
 Cryptographic assets (certificates, keys, algorithms, and so on) are represented as CycloneDX components with additional properties. The exact JSON structure is defined by the CycloneDX schema, with CBOM-Lens-specific conventions described below.
 
-CBOM-Lens emits **1.6 by default**. Set `cbom.version: "1.7"` in the configuration file to emit 1.7 instead. Output is validated against a schema embedded in the binary, so validation never requires network access.
+CBOM-Lens emits **1.6 by default**. Set `cbom.version: "1.7"` in the configuration file to emit 1.7 instead. The schema set for both versions is vendored into the binary and the emitted output is checked against it by the test suite, so that verification never requires network access. Note that the scan path itself does not validate before writing or uploading.
 
 ### What 1.7 adds
 
@@ -116,6 +116,8 @@ Example (truncated) CBOM entry:
 ```
 
 This representation captures algorithm characteristics and their occurrences while still using stable `bom-ref` identifiers.
+
+The property set depends on what the algorithm is. A signature scheme carries `private_key_size`, `public_key_size` and `signature_size`, as above. A KEM has no signature, so ML-KEM carries `czertainly:component:algorithm:pqc:ciphertext_size` in place of `signature_size`, with the encapsulation and decapsulation key sizes reported as the public and private key sizes. See [PQC support](pqc-support.md) for the per-algorithm detail.
 
 ---
 

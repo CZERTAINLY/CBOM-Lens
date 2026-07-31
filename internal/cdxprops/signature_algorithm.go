@@ -182,10 +182,19 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 	// registry entry to consult. A registry hit below replaces it.
 	cryptoFunctions := []cdx.CryptoFunction{cdx.CryptoFunctionSign}
 
+	// The outer signatureAlgorithm OID normally names a signature scheme, so
+	// [sign]/signature is the default. A registry hit below can contradict that
+	// -- the three ML-KEM OIDs are KEMs -- and the primitive must follow the
+	// same entry the cryptoFunctions come from, or one component reports
+	// `primitive: signature` beside `cryptoFunctions: [decapsulate,
+	// encapsulate]`.
+	primitive := cdx.CryptoPrimitiveSignature
+
 	var props []cdx.Property
 	if oidFallback != "" && algorithmFamily == "Unknown" {
 		info, ok := unsupportedAlgorithms[oidFallback]
 		if ok {
+			primitive = registryPrimitive(info)
 			algorithmFamily = info.name
 			paramSetID = info.paramSetID
 			classicalSecurityLevel = info.classicalSecurityLevel
@@ -220,7 +229,7 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 	execEnv := cdx.CryptoExecutionEnvironmentSoftwarePlainRAM
 
 	cryptoProps := cdx.CryptoAlgorithmProperties{
-		Primitive:                cdx.CryptoPrimitiveSignature,
+		Primitive:                primitive,
 		ParameterSetIdentifier:   paramSetID,
 		ExecutionEnvironment:     execEnv,
 		CryptoFunctions:          &cryptoFunctions,

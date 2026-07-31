@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -584,4 +585,69 @@ func TestContentTypeForVersion(t *testing.T) {
 	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.6", contentTypeForVersion("1.6"))
 	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.6", contentTypeForVersion(""))
 	require.Equal(t, "application/vnd.cyclonedx+json; version = 1.7", contentTypeForVersion("1.7"))
+}
+
+// TestUpload_ContentTypeFollowsDocument pins that the uploaded document decides
+// the media-type version parameter, not the startup configuration.
+//
+// The uploader is built once from cfg.CBOM.Version at supervisor start, but the
+// emitted specVersion is per-job: ConfigureJob replaces the whole model.Scan,
+// which carries its own CBOM section, so a Core-supplied cbom.version can
+// differ from the one the uploader was constructed with. cbom-repository
+// rejects any mismatch between the declared version and the document's own
+// specVersion with 400, so a stale label breaks every upload.
+func TestUpload_ContentTypeFollowsDocument(t *testing.T) {
+	tests := []struct {
+		name        string
+		configured  string
+		payload     string
+		wantVersion string
+	}{
+		{
+			name:        "job overrides the configured version",
+			configured:  "1.6",
+			payload:     `{"bomFormat":"CycloneDX","specVersion":"1.7","version":1}`,
+			wantVersion: "1.7",
+		},
+		{
+			name:        "job downgrades the configured version",
+			configured:  "1.7",
+			payload:     `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`,
+			wantVersion: "1.6",
+		},
+		{
+			name:        "no specVersion in the payload falls back to the configuration",
+			configured:  "1.7",
+			payload:     `{"bomFormat":"CycloneDX","version":1}`,
+			wantVersion: "1.7",
+		},
+		{
+			name:        "unparseable payload falls back to the configuration",
+			configured:  "1.6",
+			payload:     `not json`,
+			wantVersion: "1.6",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Get("Content-Type")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer ts.Close()
+
+			u, err := NewBOMRepoUploader(parseURL(t, ts.URL), tt.configured)
+			require.NoError(t, err)
+			require.NoError(t, u.Upload(t.Context(), "job", []byte(tt.payload)))
+
+			_, params, err := mime.ParseMediaType(got)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantVersion, params["version"],
+				"declared version must match the document, header was %q", got)
+		})
+	}
 }
