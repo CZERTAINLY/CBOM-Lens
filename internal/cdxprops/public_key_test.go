@@ -130,6 +130,9 @@ func TestCertHitToComponents_BOMRefsMatchContents(t *testing.T) {
 					"%s: BOMRef does not match a re-hash of its own contents, "+
 						"so the component was mutated after being hashed", compo.Name)
 			}
+			require.NotZero(t, checked,
+				"no crypto/algorithm component was examined, so this test proved "+
+					"nothing -- has the ref naming changed?")
 		})
 	}
 }
