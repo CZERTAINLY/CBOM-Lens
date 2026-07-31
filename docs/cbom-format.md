@@ -12,7 +12,7 @@ For scanning strategies, see [Scanning use cases & best practices](scanning-use-
 
 Cryptographic assets (certificates, keys, algorithms, and so on) are represented as CycloneDX components with additional properties. The exact JSON structure is defined by the CycloneDX schema, with CBOM-Lens-specific conventions described below.
 
-CBOM-Lens emits **1.6 by default**. Set `cbom.version: "1.7"` in the configuration file to emit 1.7 instead. The schema set for both versions is vendored into the binary and the emitted output is checked against it by the test suite, so that verification never requires network access. Note that the scan path itself does not validate before writing or uploading.
+CBOM-Lens emits **1.6 by default**. Set `cbom.version: "1.7"` in the configuration file to emit 1.7 instead. The schema set for both versions is vendored into the binary, and every emitted document is validated against it before being written or uploaded — a document that fails validation is refused rather than produced. Validation never requires network access.
 
 ### What 1.7 adds
 
@@ -87,7 +87,7 @@ Example of an algorithm component in a CBOM:
 
 Go's standard library does not (yet) implement PQC algorithms, but CBOM-Lens can still **detect** and model them where present.
 
-Support currently includes members of the **ML-DS** family (e.g., `ML-DSA-65`).
+Recognised families are **ML-DSA** (FIPS 204), **SLH-DSA** (FIPS 205, all 12 parameter sets), **ML-KEM** (FIPS 203), **XMSS**, **XMSS-MT** and **HSS-LMS**. See [PQC support](pqc-support.md) for the per-algorithm detail and for what is deliberately not claimed.
 
 Example (truncated) CBOM entry:
 
