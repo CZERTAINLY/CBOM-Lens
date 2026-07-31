@@ -952,3 +952,34 @@ func TestAsJSON_EmitsValidDocument(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateAs_RejectsVersionMismatch pins the declared-version check.
+//
+// The check is defence in depth rather than a reachable path: AsJSON derives
+// both the emitter and the expected version from b.version, so the two cannot
+// currently disagree. It exists because they are independent concepts -- the
+// emitter decides what specVersion to write, the Builder decides what to
+// validate against -- and cbom-repository rejects any upload where the declared
+// version and the document's specVersion differ. Exercised directly, since the
+// Builder offers no way to construct the mismatch.
+func TestValidateAs_RejectsVersionMismatch(t *testing.T) {
+	b, err := NewBuilder(model.CBOM{Version: "1.7"})
+	require.NoError(t, err)
+
+	doc := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`)
+	err = b.validateAs(cdx.SpecVersion1_7, doc)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "builder is 1.7 but the document declares 1.6")
+}
+
+// TestValidateAs_RejectsUnreadableSpecVersion covers the payload that is not
+// JSON at all, so the failure names the cause instead of surfacing as a schema
+// error.
+func TestValidateAs_RejectsUnreadableSpecVersion(t *testing.T) {
+	b, err := NewBuilder(model.CBOM{Version: "1.7"})
+	require.NoError(t, err)
+
+	err = b.validateAs(cdx.SpecVersion1_7, []byte("not json"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reading specVersion")
+}

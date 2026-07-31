@@ -1025,3 +1025,47 @@ func mustParseURL(t *testing.T, rawURL string) model.URL {
 	require.NoError(t, err)
 	return model.URL{URL: u}
 }
+
+// TestDecodeRegisterResponse_ContentTypeParameters pins that media-type
+// parameters do not defeat the body inspection. Core answering
+// "application/json; charset=UTF-8" is ordinary, and a verbatim comparison
+// against "application/json" skipped decoding entirely -- so an
+// already-registered connector reported a plain error instead of success.
+func TestDecodeRegisterResponse_ContentTypeParameters(t *testing.T) {
+	tests := []struct {
+		name        string
+		statusCode  int
+		contentType string
+		body        any
+		wantErr     bool
+	}{
+		{"400 already exists with charset", http.StatusBadRequest,
+			"application/json; charset=UTF-8", map[string]string{"message": "already exists"}, false},
+		{"400 already exists with uppercase type", http.StatusBadRequest,
+			"Application/JSON", map[string]string{"message": "already exists"}, false},
+		{"422 already exists with charset", http.StatusUnprocessableEntity,
+			"application/json;charset=utf-8", []string{"Connector already exists: test"}, false},
+		{"400 real error with charset is still an error", http.StatusBadRequest,
+			"application/json; charset=UTF-8", map[string]string{"message": "nope"}, true},
+		{"unparseable content type is not treated as json", http.StatusBadRequest,
+			"application/json; charset=", map[string]string{"message": "already exists"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			rec.WriteHeader(tt.statusCode)
+			require.NoError(t, json.NewEncoder(rec).Encode(tt.body))
+			resp := rec.Result()
+			defer func() { _ = resp.Body.Close() }()
+			resp.Header["Content-Type"] = []string{tt.contentType}
+
+			err := decodeRegisterResponse(t.Context(), resp)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

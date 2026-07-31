@@ -3,6 +3,7 @@ package bom
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -281,25 +282,58 @@ func cryptoRels(ctx context.Context, r refs, wire map[string]struct{}, compo *cd
 // Validation is on the emit path rather than only in tests because 1.7's
 // registry fields are closed enumerations: a single out-of-vocabulary value
 // invalidates the whole document. CBOM-Lens is currently the only producer
-// emitting those fields, so no downstream tool would catch such a document —
+// emitting those fields, so no downstream tool would catch such a document --
 // refusing to write it is the only place the mistake can still be caught. The
 // schema set is embedded, so this costs no network access.
 func (b *Builder) AsJSON(ctx context.Context, w io.Writer) error {
 	bom := b.BOM(ctx)
 
-	// Encode once: validate the exact bytes that will be written, rather than
-	// re-encoding and validating a second rendering of the same document.
-	var buf bytes.Buffer
-	if err := cdx.NewBOMEncoder(&buf, cdx.BOMFileFormatJSON).SetPretty(true).Encode(&bom); err != nil {
+	// Validate the compact encoding: JSON Schema is whitespace-insensitive, so
+	// the pretty form would only inflate peak memory without validating
+	// anything more.
+	var compact bytes.Buffer
+	if err := cdx.NewBOMEncoder(&compact, cdx.BOMFileFormatJSON).Encode(&bom); err != nil {
 		return err
 	}
 
-	if err := b.validator.ValidateBytes(buf.Bytes()); err != nil {
-		return fmt.Errorf("refusing to emit a CBOM that fails %s schema validation: %w", b.version, err)
+	// Validate against the version this Builder was constructed for, not
+	// against whatever specVersion happens to be encoded. Rediscovering the
+	// version from the payload would make validation follow the document,
+	// so an emitter writing the wrong specVersion would be checked against
+	// the wrong schema and pass.
+	if err := b.validateAs(b.version, compact.Bytes()); err != nil {
+		return err
 	}
 
-	_, err := w.Write(buf.Bytes())
-	return err
+	return cdx.NewBOMEncoder(w, cdx.BOMFileFormatJSON).SetPretty(true).Encode(&bom)
+}
+
+// validateAs checks raw against the schema for version, first confirming that
+// the document declares that version. The declared-version check is what makes
+// an emitter/configuration mismatch an error instead of a silent pass: the two
+// are independent inputs, and cbom-repository rejects any document whose
+// specVersion disagrees with what the uploader declared.
+func (b *Builder) validateAs(version cdx.SpecVersion, raw []byte) error {
+	var declared struct {
+		SpecVersion cdx.SpecVersion `json:"specVersion"`
+	}
+	if err := json.Unmarshal(raw, &declared); err != nil {
+		return fmt.Errorf("reading specVersion from the encoded BOM: %w", err)
+	}
+	if declared.SpecVersion != version {
+		return fmt.Errorf(
+			"refusing to emit a CBOM: builder is %s but the document declares %s",
+			version, declared.SpecVersion)
+	}
+
+	schema, err := b.validator.versionToSchema(version)
+	if err != nil {
+		return err
+	}
+	if err := b.validator.validateBytes(schema, raw); err != nil {
+		return fmt.Errorf("refusing to emit a CBOM that fails %s schema validation: %w", version, err)
+	}
+	return nil
 }
 
 // Add (append) an evidence.occurrence location if non-empty.

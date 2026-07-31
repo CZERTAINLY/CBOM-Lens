@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -245,6 +246,19 @@ func (s *Server) RegisterConnector(ctx context.Context) error {
 	return nil
 }
 
+// isJSONResponse reports whether the response body is JSON, ignoring media-type
+// parameters. A verbatim comparison against "application/json" fails on the
+// entirely ordinary "application/json; charset=UTF-8", which would skip the
+// body decoding below and turn an idempotent re-registration into an error --
+// the same failure mode the 409 branch exists to prevent, one status code over.
+func isJSONResponse(resp *http.Response) bool {
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		return false
+	}
+	return mediaType == "application/json"
+}
+
 func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
 	// Note: When registering an already previously registered connector, Core
 	// will return message with a text similar to:
@@ -257,7 +271,7 @@ func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
 	case http.StatusBadRequest:
 		fallthrough
 	case http.StatusNotFound:
-		if resp.Header.Get("Content-Type") == "application/json" {
+		if isJSONResponse(resp) {
 			type registerResp struct {
 				Message string `json:"message"`
 			}
@@ -276,7 +290,7 @@ func decodeRegisterResponse(ctx context.Context, resp *http.Response) error {
 		return fmt.Errorf("status code %d", resp.StatusCode)
 
 	case http.StatusUnprocessableEntity:
-		if resp.Header.Get("Content-Type") == "application/json" {
+		if isJSONResponse(resp) {
 			type registerResp []string
 			var rr registerResp
 			if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {

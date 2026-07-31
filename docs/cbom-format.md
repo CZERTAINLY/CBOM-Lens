@@ -28,7 +28,9 @@ For cryptographic assets, 1.7 adds three things worth knowing about:
 
 **Typed relationships between crypto assets.** The individual reference fields (`signatureAlgorithmRef`, `subjectPublicKeyRef`, `algorithmRef`, `cryptoRefArray`) are superseded by a single `relatedCryptographicAssets` array of typed edges. CBOM-Lens builds these from its internal relationship model rather than by copying the old fields, which means a 1.7 document cannot contain a reference that points at nothing. The 1.6 output keeps the original fields for compatibility.
 
-**Richer certificate metadata.** `certificateProperties` gains a serial number, fingerprint, file extension, certificate state, parsed extensions, and lifecycle dates. CBOM-Lens populates the subset it can establish from the scanned certificate.
+**Richer certificate metadata.** `certificateProperties` gains a serial number, fingerprint, file extension, certificate state, parsed extensions, and lifecycle dates (creation, activation, deactivation, revocation).
+
+Of those, CBOM-Lens currently populates **only `certificateFileExtension`**, migrated from 1.6's `certificateExtension`. The serial number, certificate state, parsed extensions and lifecycle dates are not emitted. The certificate fingerprints *are* emitted, but as component-level `hashes` rather than in `certificateProperties.fingerprint`. Populating the rest is future work.
 
 Two smaller additions: the `key-wrap` primitive, and `tlsGroups` / `tlsSignatureSchemes` on cipher suites.
 
