@@ -900,6 +900,33 @@ func TestDecodeRegisterResponse(t *testing.T) {
 			errContains: "status code 422",
 		},
 		{
+			// Core answers AlreadyExistException with 409 (see
+			// ExceptionHandlingAdvice), which is what every restart of an
+			// already-registered cbom-lens produces. The connector exists,
+			// which is the state we wanted, so this must not be an error.
+			name:        "conflict means already registered",
+			statusCode:  http.StatusConflict,
+			contentType: "application/json",
+			body:        map[string]string{"message": "Connector cbom-lens already exists"},
+			wantErr:     false,
+		},
+		{
+			// Success must not depend on parsing the body: a 409 from this
+			// endpoint can only mean a conflict with an existing connector.
+			name:        "conflict without a json body",
+			statusCode:  http.StatusConflict,
+			contentType: "text/plain",
+			body:        "Conflict",
+			wantErr:     false,
+		},
+		{
+			name:        "conflict with a charset on the content type",
+			statusCode:  http.StatusConflict,
+			contentType: "application/json;charset=UTF-8",
+			body:        map[string]string{"message": "Connector cbom-lens already exists"},
+			wantErr:     false,
+		},
+		{
 			name:        "unexpected status code",
 			statusCode:  http.StatusInternalServerError,
 			contentType: "application/json",
