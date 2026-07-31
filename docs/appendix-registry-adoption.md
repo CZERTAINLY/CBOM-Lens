@@ -71,3 +71,91 @@ wording "first **known** producer" rather than a flat "first".
 
 **If you find a producer that got there first, open an issue and we will correct
 the claim.**
+
+---
+
+# Appendix: CBOM tool comparison
+
+Surveyed **2026-07-31** against the default branch of each repository, by cloning
+and reading the source. Every row was gathered with a positive control (a term
+that must match in that repo) so that a zero is evidence of absence rather than
+a broken search — a distinction that matters, because a zero-hit grep against a
+path that does not exist looks identical to a genuine zero.
+
+## Producers
+
+"Emits" means code assigns the field while building a component. Mentions in a
+vendored schema, in a rule that *reads* the field, or in a test fixture do not
+count.
+
+| Tool | Emits crypto assets | Highest CycloneDX version | `algorithmFamily` / `ellipticCurve` | `relatedCryptographicAssets` | PQC awareness |
+|---|---|---|---|---|---|
+| **CBOM-Lens** | yes | **1.7**, selectable via `cbom.version` | **yes** | yes | 21 registry OIDs |
+| `CycloneDX/cdxgen` | yes — `lib/helpers/golem.js`, `lib/helpers/rusi.js`, `lib/managers/binary.js` | **1.7**, and it is the default (`bin/cdxgen.js:362`) | no — emits `algorithmProperties: { primitive }` only; the names appear only in vendored schemas, in `data/rules/cbom-security.yaml` which *reads* `algorithmFamily` to flag weak algorithms, and in a `.poku.js` test fixture | no | 9 files mention PQC names |
+| `PQCA/sonar-cryptography` | yes | no 1.7 reference in the repo | no — its 23 `ellipticCurve` matches are its own `com.ibm.mapper.model.EllipticCurve` domain class and Java locals in tests | no | 39 files — the strongest PQC detector surveyed |
+| `PQCA/cbomkit` | yes | no 1.7 reference | no | no | 3 files |
+| `IBM/cbomkit-theia` | yes | no 1.7 reference | no | no | none |
+| `Santandersecurityresearch/cryptobom-forge` | yes | emits `specVersion: "1.4-cbom-1.0"` — the pre-standard IBM CBOM extension to CycloneDX 1.4, predating standardised crypto assets in 1.6 | no | no | none |
+| `anthonyharrison/cbom4cert` | yes, but delegates serialisation to `lib4sbom` | not established here (depends on `lib4sbom`) | no | no | none |
+| `CycloneDX/cyclonedx-cli` | no — converter only, constructs no crypto assets | 1.7 aware | n/a | no | n/a |
+
+## Libraries
+
+A library modelling a field is a precondition for a producer emitting it, so
+this table explains much of the one above. Judged on source directories only,
+excluding vendored schemas, resources and tests.
+
+| Library | `algorithmFamily` / `ellipticCurve` | `relatedCryptographicAssets` |
+|---|---|---|
+| `cyclonedx-go` (used by CBOM-Lens) | yes | yes |
+| `cyclonedx-core-java` ≥ **13.0.0** | yes | yes |
+| `cyclonedx-dotnet-library` | **no** — `Models/Algorithms/AlgorithmProperties.cs` carries `Curve` but neither registry field | yes — full `RelatedCryptographicAsset` model |
+| `cyclonedx-python-lib` | no | no |
+| `cyclonedx-javascript-library` | no | no |
+
+Two observations worth recording:
+
+- **1.7 crypto support is arriving piecemeal, not as a unit.** The .NET library
+  models the new relationship array but not the registry fields, so "supports
+  1.7" is not a single question. Python and JavaScript ship their 1.7 schema as
+  `bom-1.7.SNAPSHOT` and model neither.
+- **`.NET` types `ClassicalSecurityLevel` and `NistQuantumSecurityLevel` as
+  non-nullable `int`**, so an unknown algorithm serialises as `0` — the same
+  "asserting zero bits of security about an algorithm we merely do not
+  recognise" ambiguity CBOM-Lens removed by making those fields pointers.
+
+## The relationship vocabulary is settled by the specification
+
+`relatedCryptographicAssets[].type` has no enum in the schema — only
+`examples: [publicKey, privateKey, algorithm]` and the description "Specifies the
+mechanism by which the cryptographic asset is secured by". Since no other
+producer emits the field, the specification's own conformance fixtures are the
+only authority. At `CycloneDX/specification@fac1ff6`:
+
+```jsonc
+// tools/src/test/resources/1.7/valid-cryptography-certificate-1.7.json
+[{ "type": "algorithm",  "ref": "6b00f384-…" },
+ { "type": "publicKey",  "ref": "ceb37320-…" }]
+
+// tools/src/test/resources/1.7/valid-cryptography-full-1.7.json
+[{ "type": "publicKey",  "ref": "public-key-ref" },
+ { "type": "privateKey", "ref": "private-key-ref" },
+ { "type": "algorithm",  "ref": "signing-algorithm-ref" }]
+```
+
+So `type` names **the kind of the referenced asset**, not the role of the edge.
+A certificate's signature algorithm and its subject key are distinguished
+because they are different kinds — `algorithm` and `publicKey` — and no
+role-named vocabulary such as `signatureAlgorithm` is used or needed. Inventing
+one would also be a poor bet in a release where CycloneDX closed
+`algorithmFamily` and `ellipticCurve` into enumerations.
+
+## Reproducing this
+
+```sh
+git clone --depth 1 https://github.com/<owner>/<repo>
+# positive control first: prove the search works in this tree
+grep -ril cyclonedx <repo> | grep -v '/\.git/' | wc -l
+grep -rn 'algorithmFamily\|ellipticCurve\|relatedCryptographicAsset' <repo> | grep -v '/\.git/'
+# then classify every hit as vendored-schema / reads-the-field / populates-the-field
+```

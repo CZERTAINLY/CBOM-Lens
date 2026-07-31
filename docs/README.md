@@ -29,7 +29,7 @@ CBOM-Lens is a CLI tool that scans filesystems, container images, and network po
 - [Scanning use cases & best practices](scanning-use-cases.md) – scanning strategies and best practices for security teams.
 - [CBOM output format](cbom-format.md) – CBOM structure, `bom-ref` semantics, and PQC representation.
 - [PQC support](pqc-support.md) - Notes about a PQC support.
-- [Appendix: registry adoption](appendix-registry-adoption.md) – dated survey of which tools emit the CycloneDX 1.7 cryptography registry fields, and how to re-check it.
+- [Appendix: registry adoption & tool comparison](appendix-registry-adoption.md) – dated survey of which tools emit the CycloneDX 1.7 cryptography registry fields, a feature comparison of CBOM producers and libraries, and how to re-check both.
 
 ---
 
