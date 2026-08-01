@@ -3,8 +3,8 @@ package cdxprops
 import (
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
@@ -39,8 +39,8 @@ func TestParseSSHHostKey(t *testing.T) {
 		Fingerprint: "aa:bb:cc:dd",
 	}
 
-	t.Run("without czertainly properties", func(t *testing.T) {
-		c := NewConverter().WithCzertainlyExtensions(false)
+	t.Run("without ilm properties", func(t *testing.T) {
+		c := NewConverter().WithIlmExtensions(false)
 
 		compo := c.ParseSSHHostKey(key)
 		require.Equal(t, "crypto/algorithm/ssh-ed25519@256", compo.BOMRef)
@@ -54,21 +54,21 @@ func TestParseSSHHostKey(t *testing.T) {
 		require.Nil(t, compo.Properties)
 	})
 
-	t.Run("with czertainly properties", func(t *testing.T) {
-		c := NewConverter().WithCzertainlyExtensions(true)
+	t.Run("with ilm properties", func(t *testing.T) {
+		c := NewConverter().WithIlmExtensions(true)
 
 		compo := c.ParseSSHHostKey(key)
 		require.NotNil(t, compo.Properties)
 		props := *compo.Properties
-		// Expect czertainly added content and fingerprint properties
+		// Expect ilm added content and fingerprint properties
 		foundContent := false
 		foundFingerprint := false
 		for _, p := range props {
-			if p.Name == czertainly.SSHHostKeyContent {
+			if p.Name == ilm.SSHHostKeyContent {
 				require.Equal(t, key.Key, p.Value)
 				foundContent = true
 			}
-			if p.Name == czertainly.SSHHostKeyFingerprintContent {
+			if p.Name == ilm.SSHHostKeyFingerprintContent {
 				require.Equal(t, key.Fingerprint, p.Value)
 				foundFingerprint = true
 			}

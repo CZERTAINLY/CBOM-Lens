@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"crypto/x509"
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,9 +76,9 @@ func TestGetAlgorithmProperties_Table(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var c Converter
-			// enable czertainly-specific properties
+			// enable ilm-specific properties
 			// set the unexported flag directly (test in same package)
-			c.czertainly = true
+			c.ilm = true
 
 			cryptoProps, props, hash := c.getAlgorithmProperties(tt.sigAlg, "")
 
@@ -93,28 +93,28 @@ func TestGetAlgorithmProperties_Table(t *testing.T) {
 			// hash
 			require.Equal(t, tt.wantHash, hash)
 
-			// czertainly property should be present and first property when czertainly==true
+			// ilm property should be present and first property when ilm==true
 			require.GreaterOrEqual(t, len(props), 1)
 			found := false
 			for _, p := range props {
-				if p.Name == czertainly.SignatureAlgorithmFamily {
+				if p.Name == ilm.SignatureAlgorithmFamily {
 					require.Equal(t, tt.wantFamily, p.Value)
 					found = true
 				}
 			}
-			require.True(t, found, "expected czertainly signature algorithm family property to be present")
+			require.True(t, found, "expected ilm signature algorithm family property to be present")
 		})
 	}
 }
 
-func TestGetAlgorithmProperties_NoCzertainly(t *testing.T) {
+func TestGetAlgorithmProperties_NoIlm(t *testing.T) {
 	var c Converter
-	c.czertainly = false
+	c.ilm = false
 
 	_, props, _ := c.getAlgorithmProperties(x509.SHA256WithRSA, "")
-	// when czertainly flag is false, no czertainly-specific properties should be returned
+	// when ilm flag is false, no ilm-specific properties should be returned
 	for _, p := range props {
-		require.NotEqual(t, czertainly.SignatureAlgorithmFamily, p.Name)
+		require.NotEqual(t, ilm.SignatureAlgorithmFamily, p.Name)
 	}
 }
 
@@ -189,7 +189,7 @@ func TestGetAlgorithmProperties_oidfallback_nope(t *testing.T) {
 func TestConverter_getAlgorithmProperties(t *testing.T) {
 	tests := []struct {
 		name           string
-		czertainly     bool
+		ilm            bool
 		sigAlg         x509.SignatureAlgorithm
 		wantFamily     string
 		wantParamSetID string
@@ -216,12 +216,12 @@ func TestConverter_getAlgorithmProperties(t *testing.T) {
 		{"DSAWithSHA256", false, x509.DSAWithSHA256, "DSA", "256", "SHA-256", "", ptr(112)},
 		{"PureEd25519", false, x509.PureEd25519, "EdDSA", "256", "SHA-512", "", ptr(128)},
 		{"Unknown", false, x509.SignatureAlgorithm(999), "Unknown", "0", "", "", nil},
-		{"SHA256WithRSA czertainly", true, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, ptr(112)},
+		{"SHA256WithRSA ilm", true, x509.SHA256WithRSA, "RSASSA-PKCS1", "256", "SHA-256", cdx.CryptoPaddingPKCS1v15, ptr(112)},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := Converter{czertainly: tt.czertainly}
+			c := Converter{ilm: tt.ilm}
 			got, props, hash := c.getAlgorithmProperties(tt.sigAlg, "")
 
 			if got.ParameterSetIdentifier != tt.wantParamSetID {
@@ -243,9 +243,9 @@ func TestConverter_getAlgorithmProperties(t *testing.T) {
 			case *got.ClassicalSecurityLevel != *tt.wantClassical:
 				t.Errorf("ClassicalSecurityLevel = %v, want %v", *got.ClassicalSecurityLevel, *tt.wantClassical)
 			}
-			if tt.czertainly {
+			if tt.ilm {
 				if len(props) == 0 || props[0].Value != tt.wantFamily {
-					t.Errorf("czertainly prop Value = %v, want %v", props, tt.wantFamily)
+					t.Errorf("ilm prop Value = %v, want %v", props, tt.wantFamily)
 				}
 			}
 		})

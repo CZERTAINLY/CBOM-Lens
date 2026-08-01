@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
 	"github.com/zricethezav/gitleaks/v8/detect"
 )

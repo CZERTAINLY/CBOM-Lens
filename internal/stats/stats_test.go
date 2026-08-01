@@ -4,7 +4,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
 
 	"github.com/stretchr/testify/require"
 )

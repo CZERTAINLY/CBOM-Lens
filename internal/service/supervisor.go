@@ -13,7 +13,7 @@ import (
 
 	gocron "github.com/go-co-op/gocron/v2"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 type Supervisor struct {

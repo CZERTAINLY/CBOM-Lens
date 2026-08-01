@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr"
-	"github.com/CZERTAINLY/CBOM-lens/internal/log"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/service"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/dscvr"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/service"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

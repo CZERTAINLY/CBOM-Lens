@@ -8,9 +8,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	czpem "github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	czpem "github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
 	"github.com/stretchr/testify/require"
 )

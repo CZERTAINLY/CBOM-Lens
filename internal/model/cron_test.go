@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 )

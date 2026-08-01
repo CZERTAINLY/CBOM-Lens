@@ -131,7 +131,7 @@ Windows Registry scanning. Enabling this on non-Windows platforms produces an er
 - Description: Service is created via discovery and must include runtime server configurations.
 - Required when `mode` is `discovery`:
   - `server` (#Server) — cbom-lens server configuration (required, not null).
-  - `core` (#Core) — CZERTAINLY core configuration (required, not null).
+  - `core` (#Core) — OmniTrust core configuration (required, not null).
   - `repository` (#Repository)
 - Optional fields that may still be present:
   - `dir` (string)

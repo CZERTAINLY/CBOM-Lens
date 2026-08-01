@@ -22,7 +22,7 @@ For detailed architecture information, see [Architecture](architecture.md). For 
 Clone the repository:
 
 ```sh
-git clone https://github.com/CZERTAINLY/CBOM-Lens.git
+git clone https://github.com/OmniTrust/CBOM-Lens.git
 cd CBOM-Lens
 ```
 

@@ -12,10 +12,10 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	scan "github.com/CZERTAINLY/CBOM-lens/internal/service"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	scan "github.com/OmniTrustILM/cbom-lens/internal/service"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/walk"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"

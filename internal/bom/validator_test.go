@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/bom"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
@@ -198,7 +198,7 @@ func TestValidator_RepresentativeEmittedBOM(t *testing.T) {
 					ExternalReferences: &[]cdx.ExternalReference{
 						{
 							Type: cdx.ERTypeWebsite,
-							URL:  "https://www.czertainly.com",
+							URL:  "https://www.omnitrust.com",
 						},
 					},
 				},

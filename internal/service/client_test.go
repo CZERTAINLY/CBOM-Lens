@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	pd "github.com/kodeart/go-problem/v2"
 	"github.com/stretchr/testify/require"

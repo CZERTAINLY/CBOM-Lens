@@ -6,8 +6,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk/registry"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/walk/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/nmap"
-	pemscan "github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/nmap"
+	pemscan "github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	nmapv4 "github.com/Ullaakut/nmap/v4"

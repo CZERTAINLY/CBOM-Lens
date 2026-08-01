@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +32,7 @@ type expectedAlgorithm struct {
 	// categories", which is a different and much stronger claim).
 	nqsl *int
 	// pqc holds the size metadata. nil means the sizes are parameter-set
-	// dependent or unpublished, so no czertainly size properties may appear.
+	// dependent or unpublished, so no ilm size properties may appear.
 	pqc isPqcInfo
 	// primitive is the CycloneDX cryptographic primitive the entry must carry.
 	primitive cdx.CryptoPrimitive
@@ -388,7 +388,7 @@ func TestComponentEmissionShape(t *testing.T) {
 			require.True(t, sortedFunctions(*algoProps.CryptoFunctions),
 				"cryptoFunctions must be emitted in sorted order")
 
-			// czertainly size properties appear if and only if the registry
+			// ilm size properties appear if and only if the registry
 			// has sourced sizes to report.
 			assertSizeProps(t, compo, want.pqc)
 		})
@@ -507,7 +507,7 @@ func sliceContains(fns []cdx.CryptoFunction, want cdx.CryptoFunction) bool {
 	return false
 }
 
-// assertSizeProps checks the czertainly size properties against the expected
+// assertSizeProps checks the ilm size properties against the expected
 // pqc metadata, including that they are entirely absent when it is nil.
 func assertSizeProps(t *testing.T, compo cdx.Component, want isPqcInfo) {
 	t.Helper()
@@ -515,7 +515,7 @@ func assertSizeProps(t *testing.T, compo cdx.Component, want isPqcInfo) {
 	sizeProps := map[string]string{}
 	if compo.Properties != nil {
 		for _, p := range *compo.Properties {
-			if strings.HasPrefix(p.Name, "czertainly:component:algorithm:pqc:") {
+			if strings.HasPrefix(p.Name, "ilm:component:algorithm:pqc:") {
 				sizeProps[p.Name] = p.Value
 			}
 		}
@@ -527,17 +527,17 @@ func assertSizeProps(t *testing.T, compo cdx.Component, want isPqcInfo) {
 			"no size properties may be emitted when the sizes are not derivable from the OID")
 	case pqcInfo:
 		require.Equal(t, map[string]string{
-			czertainly.AlgorithmPrivateKeySize: strconv.Itoa(w.privKeySize),
-			czertainly.AlgorithmPublicKeySize:  strconv.Itoa(w.pubKeySize),
-			czertainly.AlgorithmSignatureSize:  strconv.Itoa(w.signatureSize),
+			ilm.AlgorithmPrivateKeySize: strconv.Itoa(w.privKeySize),
+			ilm.AlgorithmPublicKeySize:  strconv.Itoa(w.pubKeySize),
+			ilm.AlgorithmSignatureSize:  strconv.Itoa(w.signatureSize),
 		}, sizeProps)
 	case kemInfo:
 		require.Equal(t, map[string]string{
-			czertainly.AlgorithmPrivateKeySize: strconv.Itoa(w.decapKeySize),
-			czertainly.AlgorithmPublicKeySize:  strconv.Itoa(w.encapKeySize),
-			czertainly.AlgorithmCiphertextSize: strconv.Itoa(w.ciphertextSize),
+			ilm.AlgorithmPrivateKeySize: strconv.Itoa(w.decapKeySize),
+			ilm.AlgorithmPublicKeySize:  strconv.Itoa(w.encapKeySize),
+			ilm.AlgorithmCiphertextSize: strconv.Itoa(w.ciphertextSize),
 		}, sizeProps)
-		require.NotContains(t, sizeProps, czertainly.AlgorithmSignatureSize,
+		require.NotContains(t, sizeProps, ilm.AlgorithmSignatureSize,
 			"a KEM cannot sign, so no signature size may be reported")
 	default:
 		t.Fatalf("unhandled pqc metadata type %T", want)
@@ -566,7 +566,7 @@ func TestNistQuantumSecurityLevelOmittedInJSON(t *testing.T) {
 
 			require.NotContains(t, string(raw), "nistQuantumSecurityLevel",
 				"%s: SP 800-208 assigns no category, so the key must be absent", info.name)
-			require.NotContains(t, string(raw), "czertainly:component:algorithm:pqc:",
+			require.NotContains(t, string(raw), "ilm:component:algorithm:pqc:",
 				"%s: sizes are not derivable from the OID, so no size properties",
 				info.name)
 		}

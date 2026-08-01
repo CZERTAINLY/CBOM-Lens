@@ -144,4 +144,4 @@ For more operational details, see [Operations](operations.md).
 - Learn how to adjust configuration for real deployments: see the [Configuration guide](configuration.md).
 - Understand all available fields: see the [Configuration reference](config.md).
 - Learn about modes and scheduling (timer, discovery): see [Scanning modes & scheduling](scanning-modes.md).
-- Integrate with CZERTAINLY and CBOM-Repository: see [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md).
+- Integrate with OmniTrust and CBOM-Repository: see [OmniTrust & CBOM-Repository integration](integration-ilm.md).

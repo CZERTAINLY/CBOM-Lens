@@ -7,8 +7,8 @@ import (
 	"errors"
 	"iter"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
 )
 
 // Walk yields a single error on non-Windows platforms when the registry

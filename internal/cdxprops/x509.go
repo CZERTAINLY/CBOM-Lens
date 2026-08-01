@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 // ---------- constants & shared lookups ----------
@@ -178,8 +178,8 @@ func (c Converter) certComponent(_ context.Context, hit model.CertHit) cdx.Compo
 		},
 	}
 
-	if c.czertainly {
-		props := czertainly.CertificateProperties(
+	if c.ilm {
+		props := ilm.CertificateProperties(
 			hit.Source,
 			cert,
 			"sha256:"+fingerprints[0].Value,

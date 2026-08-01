@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/mock"
-	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/dscvr/mock"
+	"github.com/OmniTrustILM/cbom-lens/internal/dscvr/store"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"

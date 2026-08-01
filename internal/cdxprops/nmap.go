@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
@@ -179,7 +179,7 @@ func (cv Converter) parseTLSCiphers(ctx context.Context, ciphers []model.SSLCiph
 		// kex info
 		info, ok := suite.KeyExchange.Exchange.info(suite.KexInfo)
 		if ok {
-			compo := info.componentWOBomRef(cv.czertainly)
+			compo := info.componentWOBomRef(cv.ilm)
 			setAlgorithmPrimitive(&compo, cdx.CryptoPrimitiveKeyAgree)
 			cv.BOMRefHash(&compo, info.algorithmName)
 			compos = append(compos, compo)
@@ -188,7 +188,7 @@ func (cv Converter) parseTLSCiphers(ctx context.Context, ciphers []model.SSLCiph
 		// kex-auth
 		info, ok = suite.KeyExchange.Auth.info(authKeyLen)
 		if ok {
-			compo := info.componentWOBomRef(cv.czertainly)
+			compo := info.componentWOBomRef(cv.ilm)
 			if suite.KeyExchange.Auth != "" {
 				setAlgorithmPrimitive(&compo, cdx.CryptoPrimitiveSignature)
 			}
@@ -199,7 +199,7 @@ func (cv Converter) parseTLSCiphers(ctx context.Context, ciphers []model.SSLCiph
 		// cipher algorithm
 		info, ok = suite.Cipher.info(suite.KeyLen, suite.Mode)
 		if ok {
-			compo := info.componentWOBomRef(cv.czertainly)
+			compo := info.componentWOBomRef(cv.ilm)
 			setAlgorithmPrimitive(&compo, cdx.CryptoPrimitiveBlockCipher)
 			cv.BOMRefHash(&compo, info.algorithmName)
 			compos = append(compos, compo)
@@ -307,8 +307,8 @@ func (c Converter) ParseSSHHostKey(key model.SSHHostKey) cdx.Component {
 		},
 	}
 
-	if c.czertainly {
-		props := czertainly.SSHHostKeyProperties(nil, key)
+	if c.ilm {
+		props := ilm.SSHHostKeyProperties(nil, key)
 		compo.Properties = &props
 	}
 

@@ -3,8 +3,8 @@ package cdxprops
 import (
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 	"github.com/stretchr/testify/require"
 )
 

@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/log"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
 	"github.com/Ullaakut/nmap/v4"
 )

@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
+	"github.com/OmniTrustILM/cbom-lens/internal/bom"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
@@ -44,7 +44,7 @@ func buildPQCDocumentVersion(t *testing.T, version string, fixtures ...string) [
 	t.Helper()
 
 	c := cdxprops.NewConverter().
-		WithCzertainlyExtensions(true).
+		WithIlmExtensions(true).
 		WithImplementationPlatform(cdx.ImplementationPlatformX86_64)
 
 	var detections []model.Detection
@@ -117,9 +117,9 @@ func TestPQCPipeline_ValidatesAndCarriesRegistryData(t *testing.T) {
 		}, *props.CryptoFunctions)
 
 		// FIPS 204 Table 2.
-		require.Equal(t, "4032", cdxtest.GetProp(compo, czertainly.AlgorithmPrivateKeySize))
-		require.Equal(t, "1952", cdxtest.GetProp(compo, czertainly.AlgorithmPublicKeySize))
-		require.Equal(t, "3309", cdxtest.GetProp(compo, czertainly.AlgorithmSignatureSize))
+		require.Equal(t, "4032", cdxtest.GetProp(compo, ilm.AlgorithmPrivateKeySize))
+		require.Equal(t, "1952", cdxtest.GetProp(compo, ilm.AlgorithmPublicKeySize))
+		require.Equal(t, "3309", cdxtest.GetProp(compo, ilm.AlgorithmSignatureSize))
 	})
 
 	t.Run("SLH-DSA-SHA2-128S", func(t *testing.T) {
@@ -137,9 +137,9 @@ func TestPQCPipeline_ValidatesAndCarriesRegistryData(t *testing.T) {
 		// FIPS 205 Table 2 / RFC 9909 App. B: pk 32, priv 64, sig 7856.
 		// These are the fixture's real sizes too: its SPKI BIT STRING is 33
 		// bytes (1 + 32) and its certificate signature is 7857 (1 + 7856).
-		require.Equal(t, "64", cdxtest.GetProp(compo, czertainly.AlgorithmPrivateKeySize))
-		require.Equal(t, "32", cdxtest.GetProp(compo, czertainly.AlgorithmPublicKeySize))
-		require.Equal(t, "7856", cdxtest.GetProp(compo, czertainly.AlgorithmSignatureSize))
+		require.Equal(t, "64", cdxtest.GetProp(compo, ilm.AlgorithmPrivateKeySize))
+		require.Equal(t, "32", cdxtest.GetProp(compo, ilm.AlgorithmPublicKeySize))
+		require.Equal(t, "7856", cdxtest.GetProp(compo, ilm.AlgorithmSignatureSize))
 	})
 
 	t.Run("ML-KEM-768", func(t *testing.T) {
@@ -161,12 +161,12 @@ func TestPQCPipeline_ValidatesAndCarriesRegistryData(t *testing.T) {
 
 		// FIPS 203 Table 3. The 1184 matches the fixture: its SPKI BIT STRING
 		// is 1185 bytes = 1 unused-bits octet + 1184.
-		require.Equal(t, "1184", cdxtest.GetProp(compo, czertainly.AlgorithmPublicKeySize),
+		require.Equal(t, "1184", cdxtest.GetProp(compo, ilm.AlgorithmPublicKeySize),
 			"encapsulation key")
-		require.Equal(t, "2400", cdxtest.GetProp(compo, czertainly.AlgorithmPrivateKeySize),
+		require.Equal(t, "2400", cdxtest.GetProp(compo, ilm.AlgorithmPrivateKeySize),
 			"decapsulation key")
-		require.Equal(t, "1088", cdxtest.GetProp(compo, czertainly.AlgorithmCiphertextSize))
-		require.Empty(t, cdxtest.GetProp(compo, czertainly.AlgorithmSignatureSize),
+		require.Equal(t, "1088", cdxtest.GetProp(compo, ilm.AlgorithmCiphertextSize))
+		require.Empty(t, cdxtest.GetProp(compo, ilm.AlgorithmSignatureSize),
 			"a KEM has no signature size")
 	})
 }

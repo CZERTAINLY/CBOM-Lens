@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/dscvr/store"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	uuidpkg "github.com/google/uuid"
 	"github.com/gorilla/mux"

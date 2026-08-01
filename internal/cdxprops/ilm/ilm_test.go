@@ -1,4 +1,4 @@
-package czertainly_test
+package ilm_test
 
 import (
 	"crypto/x509"
@@ -8,8 +8,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
@@ -71,7 +71,7 @@ func TestCertificateProperties(t *testing.T) {
 		},
 	}
 
-	props := czertainly.CertificateProperties("PEM", cert, "sha256:fingerprint")
+	props := ilm.CertificateProperties("PEM", cert, "sha256:fingerprint")
 
 	// build map of properties for assertions
 	values := make(map[string]string, len(props))
@@ -79,9 +79,9 @@ func TestCertificateProperties(t *testing.T) {
 		values[p.Name] = p.Value
 	}
 
-	require.Equal(t, "PEM", values[czertainly.CertificateSourceFormat])
-	require.Equal(t, base64.StdEncoding.EncodeToString(cert.Raw), values[czertainly.CertificateBase64Content])
-	require.Equal(t, "sha256:fingerprint", values[czertainly.CertificateFingerprint])
+	require.Equal(t, "PEM", values[ilm.CertificateSourceFormat])
+	require.Equal(t, base64.StdEncoding.EncodeToString(cert.Raw), values[ilm.CertificateBase64Content])
+	require.Equal(t, "sha256:fingerprint", values[ilm.CertificateFingerprint])
 }
 
 func TestSSHHostKeyProperties(t *testing.T) {
@@ -93,14 +93,14 @@ func TestSSHHostKeyProperties(t *testing.T) {
 		Fingerprint: "aa:bb:cc:dd",
 	}
 
-	props := czertainly.SSHHostKeyProperties(initial, key)
+	props := ilm.SSHHostKeyProperties(initial, key)
 	require.Len(t, props, 3)
 	// initial preserved
 	require.Equal(t, "initial", props[0].Name)
 	require.Equal(t, "v", props[0].Value)
 	// appended properties
-	require.Equal(t, czertainly.SSHHostKeyContent, props[1].Name)
+	require.Equal(t, ilm.SSHHostKeyContent, props[1].Name)
 	require.Equal(t, key.Key, props[1].Value)
-	require.Equal(t, czertainly.SSHHostKeyFingerprintContent, props[2].Name)
+	require.Equal(t, ilm.SSHHostKeyFingerprintContent, props[2].Name)
 	require.Equal(t, key.Fingerprint, props[2].Value)
 }

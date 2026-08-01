@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v4"
 )

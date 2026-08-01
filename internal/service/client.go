@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 const uploadPath = "api/v1/bom"

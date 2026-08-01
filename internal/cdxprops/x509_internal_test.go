@@ -4,9 +4,9 @@ import (
 	"encoding/pem"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 )
@@ -65,7 +65,7 @@ func Test_sigAlgOID(t *testing.T) {
 
 func TestConverter_certConverter(t *testing.T) {
 	t.Parallel()
-	c := NewConverter().WithCzertainlyExtensions(true)
+	c := NewConverter().WithIlmExtensions(true)
 
 	selfSigned, err := cdxtest.GenSelfSignedCert()
 	require.NoError(t, err)

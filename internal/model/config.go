@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/log"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -153,7 +153,7 @@ type LensServer struct {
 	StateFile string  `json:"state_file"`
 }
 
-// Core is configuration for CZERTAINLY Core API integration.
+// Core is configuration for OmniTrust Core API integration.
 type Core struct {
 	BaseURL URL `json:"base_url"`
 }
@@ -542,7 +542,7 @@ func DefaultConfig(ctx context.Context) Config {
 		slog.ErrorContext(ctx, "can't set default values in config: continuing with empty values", "error", err)
 	}
 
-	cfg.CBOM.Extensions = append(cfg.CBOM.Extensions, "czertainly")
+	cfg.CBOM.Extensions = append(cfg.CBOM.Extensions, "ilm")
 	return cfg
 }
 

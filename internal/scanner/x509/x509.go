@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 type certHit = model.CertHit

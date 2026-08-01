@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
@@ -136,7 +136,7 @@ func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (cdx.Component, error)
 		return cdx.Component{}, fmt.Errorf("unsupported fallback oid %q", pkcs8.Algo.Algorithm.String())
 	}
 
-	algo := info.componentWOBomRef(c.czertainly)
+	algo := info.componentWOBomRef(c.ilm)
 	// This path set no primitive at all, so every PQC private key produced an
 	// algorithm component with the field missing, while the public-key path
 	// produced one with it set. Both now take it from the registry.
@@ -167,7 +167,7 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 		return
 	}
 
-	algo = info.componentWOBomRef(c.czertainly)
+	algo = info.componentWOBomRef(c.ilm)
 	// Trust the registry's primitive. Hardcoding "signature" here reported an
 	// ML-KEM encapsulation key as a signature algorithm.
 	setAlgorithmPrimitive(&algo, registryPrimitive(info))

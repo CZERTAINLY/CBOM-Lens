@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 )
 
 // Emitter renders the version-neutral BOMModel into a cdx.BOM for one spec version.

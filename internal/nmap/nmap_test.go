@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 	nmapv4 "github.com/Ullaakut/nmap/v4"
 	"github.com/stretchr/testify/require"
 )

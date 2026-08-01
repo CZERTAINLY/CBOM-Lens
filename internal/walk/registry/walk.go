@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
 )
 
 // Windows REG_* type constants. These are fixed Windows API values.

@@ -8,8 +8,8 @@ import (
 	"iter"
 	"log/slog"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
 	"golang.org/x/sys/windows/registry"
 )
 

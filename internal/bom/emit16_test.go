@@ -3,8 +3,8 @@ package bom
 import (
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 	"github.com/stretchr/testify/require"
 )
 

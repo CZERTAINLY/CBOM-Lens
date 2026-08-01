@@ -140,7 +140,7 @@ See `extending-detectors.md` for how to add and register new detectors.
 5. **Repeat or exit**
    - In `manual` mode, the process exits after the scan.
    - In `timer` mode, the supervisor waits for the next scheduled scan.
-   - In `discovery` mode, the supervisor responds to external requests from CZERTAINLY Core.
+   - In `discovery` mode, the supervisor responds to external requests from OmniTrust Core.
 
 ---
 

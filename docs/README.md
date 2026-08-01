@@ -20,7 +20,7 @@ CBOM-Lens is a CLI tool that scans filesystems, container images, and network po
 - [Configuration guide](configuration.md) – narrative configuration guide with practical examples.
 - [Scanning modes & scheduling](scanning-modes.md) – manual, timer, and discovery modes; cron and ISO-8601 schedules.
 - [Operations](operations.md) – running CBOM-Lens in practice (logs, outputs, uploads).
-- [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md) – integrating with CZERTAINLY Core and CBOM-Repository.
+- [OmniTrust & CBOM-Repository integration](integration-ilm.md) – integrating with OmniTrust Core and CBOM-Repository.
 
 ---
 

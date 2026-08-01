@@ -1,8 +1,8 @@
-# CZERTAINLY & CBOM-Repository Integration
+# OmniTrust & CBOM-Repository Integration
 
-CBOM-Lens integrates with the CZERTAINLY platform and CBOM-Repository to provide centralized management of cryptographic assets.
+CBOM-Lens integrates with the OmniTrust platform and CBOM-Repository to provide centralized management of cryptographic assets.
 
-This document explains how to configure uploads to a CBOM-Repository and how to run CBOM-Lens in discovery mode with CZERTAINLY Core.
+This document explains how to configure uploads to a CBOM-Repository and how to run CBOM-Lens in discovery mode with OmniTrust Core.
 
 For general configuration guidance, see the [Configuration guide](configuration.md) and [Configuration reference](config.md). For scheduling and modes, see [Scanning modes & scheduling](scanning-modes.md).
 
@@ -39,9 +39,9 @@ service:
 
 ---
 
-## 2. Discovery mode with CZERTAINLY Core
+## 2. Discovery mode with OmniTrust Core
 
-In discovery mode, CBOM-Lens runs as a long-lived service, exposing an HTTP API that CZERTAINLY Core uses to orchestrate scans.
+In discovery mode, CBOM-Lens runs as a long-lived service, exposing an HTTP API that OmniTrust Core uses to orchestrate scans.
 
 ### 2.1 Example configuration
 
@@ -54,10 +54,10 @@ service:
   server:
     # where CBOM-Lens binds to; ip:port or :port
     addr: :8080
-    # public address from which CBOM-Lens is accessible to CZERTAINLY
+    # public address from which CBOM-Lens is accessible to OmniTrust
     base_url: https://cbom-lens.example.net/api
   core:
-    # base address of CZERTAINLY Core API
+    # base address of OmniTrust Core API
     base_url: https://core-demo.example.net/api
 ```
 
@@ -65,41 +65,41 @@ service:
 
 - **CBOM-Lens server** (`service.server`):
   - `addr` – listen address for the embedded HTTP server (e.g., `:8080`).
-  - `base_url` – externally visible base URL used by CZERTAINLY Core.
+  - `base_url` – externally visible base URL used by OmniTrust Core.
 
 - **CBOM-Repository** (`service.repository`):
-  - Stores generated CBOMs for consumption by CZERTAINLY Core.
+  - Stores generated CBOMs for consumption by OmniTrust Core.
   - Strongly recommended in discovery mode, as Core typically pulls BOMs from the repository.
 
-- **CZERTAINLY Core** (`service.core`):
-  - `base_url` – endpoint of the CZERTAINLY Core API.
+- **OmniTrust Core** (`service.core`):
+  - `base_url` – endpoint of the OmniTrust Core API.
   - Core interacts with CBOM-Lens via discovery protocol to schedule and retrieve scans.
 
 ### 2.3 Recommended deployment pattern
 
 - Deploy CBOM-Lens alongside a CBOM-Repository instance.
 - Secure the communication paths (TLS, authentication) according to your environment’s security policies.
-- Register the CBOM-Lens discovery endpoint in CZERTAINLY Core.
+- Register the CBOM-Lens discovery endpoint in OmniTrust Core.
 
 ---
 
 ## 3. Security and networking considerations
 
-- Ensure that `service.server.addr` and `service.server.base_url` are reachable from CZERTAINLY Core.
-- Use TLS for communication between CBOM-Lens, CBOM-Repository, and CZERTAINLY Core where possible.
+- Ensure that `service.server.addr` and `service.server.base_url` are reachable from OmniTrust Core.
+- Use TLS for communication between CBOM-Lens, CBOM-Repository, and OmniTrust Core where possible.
 - Restrict access to CBOM-Lens and CBOM-Repository endpoints to trusted clients through firewall rules or access controls.
 
 ---
 
-## 4. CZERTAINLY-Specific Extensions
+## 4. OmniTrust-Specific Extensions
 
-The CBOM generation process can be configured to include CZERTAINLY-specific properties, such as `czertainly:component:certificate:base64_content`. The complete list of supported properties can be found in [czertainly.go](../internal/cdxprops/czertainly/czertainly.go).
+The CBOM generation process can be configured to include OmniTrust-specific properties, such as `ilm:component:certificate:base64_content`. The complete list of supported properties can be found in [ilm.go](../internal/cdxprops/ilm/ilm.go).
 
 ```yaml
 cbom:
   version: "1.6"
   extensions:
-    - czertainly
+    - ilm
 ```
 
 ---
@@ -108,7 +108,7 @@ cbom:
 
 Common issues:
 
-- **Connectivity errors** – verify URLs, DNS, and firewall rules between CBOM-Lens, CBOM-Repository, and CZERTAINLY Core.
+- **Connectivity errors** – verify URLs, DNS, and firewall rules between CBOM-Lens, CBOM-Repository, and OmniTrust Core.
 - **Authentication failures** – if CBOM-Repository or Core require authentication, ensure credentials are configured correctly (e.g., via environment variables referenced in the config).
 - **Missing BOMs in Core** – confirm that CBOM-Lens is uploading BOMs successfully and that CBOM-Repository is reachable; inspect logs on all components.
 

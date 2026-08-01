@@ -4,7 +4,7 @@ import (
 	"crypto/x509"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
@@ -216,13 +216,13 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 			case strings.Contains(info.algorithmName, "slh-dsa-shake"):
 				hash = "SHAKE-256"
 			}
-			if c.czertainly {
-				// Plain assignment: czertainlyPqcProps already appends to the
+			if c.ilm {
+				// Plain assignment: ilmPqcProps already appends to the
 				// slice it is given. The previous
-				// `props = append(props, czertainlyPqcProps(props, ...)...)`
+				// `props = append(props, ilmPqcProps(props, ...)...)`
 				// duplicated every property already in props, and was harmless
 				// only because props happened to be empty here.
-				props = czertainlyPqcProps(props, info.pqc)
+				props = ilmPqcProps(props, info.pqc)
 			}
 		}
 	}
@@ -241,9 +241,9 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 		NistQuantumSecurityLevel: nqsl,
 	}
 
-	if c.czertainly {
+	if c.ilm {
 		p := cdx.Property{
-			Name:  czertainly.SignatureAlgorithmFamily,
+			Name:  ilm.SignatureAlgorithmFamily,
 			Value: algorithmFamily,
 		}
 		props = append(props, p)
