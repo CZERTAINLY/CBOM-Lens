@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	czx509 "github.com/CZERTAINLY/CBOM-lens/internal/scanner/x509"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	czx509 "github.com/OmniTrustILM/cbom-lens/internal/scanner/x509"
 
 	"golang.org/x/crypto/ssh"
 )

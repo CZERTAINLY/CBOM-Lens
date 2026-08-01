@@ -54,7 +54,7 @@ package mydetector
 import (
     "context"
 
-    "github.com/CZERTAINLY/CBOM-Lens/internal/model"
+    "github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 type Detector struct {

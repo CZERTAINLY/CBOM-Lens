@@ -50,7 +50,7 @@ and [PQC support](docs/pqc-support.md).
 - **Flexible operation modes**
   - One-shot **manual** runs (good for CI and ad-hoc scans).
   - **Timer** mode with cron expressions or ISO-8601 durations.
-  - **Discovery** mode managed by CZERTAINLY Core.
+  - **Discovery** mode managed by ILM Core.
 - **Integration-ready**
   - Optional upload to a **CBOM-Repository**.
   - Designed to integrate into various applications.
@@ -121,7 +121,7 @@ Typical patterns:
 
 - **Manual one-shot scan** – `service.mode: manual` (good for CI pipelines and ad-hoc runs).
 - **Scheduled scans** – `service.mode: timer` with `service.schedule.cron` or `service.schedule.duration`.
-- **CZERTAINLY-managed discovery** – `service.mode: discovery` with additional `service.server` and `service.core` configuration.
+- **ILM-managed discovery** – `service.mode: discovery` with additional `service.server` and `service.core` configuration.
 
 Configuration docs:
 
@@ -138,7 +138,7 @@ CBOM-Lens supports three modes of operation, controlled by `service.mode`:
 
 - `manual` – single scan, then exit. Best for ad-hoc runs, CI, or cron jobs managed externally.
 - `timer` – CBOM-Lens stays running and executes scans on a schedule (cron or ISO-8601 duration).
-- `discovery` – CBOM-Lens runs as a service managed by CZERTAINLY via the discovery protocol.
+- `discovery` – CBOM-Lens runs as a service managed by ILM via the discovery protocol.
 
 For detailed scheduling semantics (cron fields, macros such as `@daily`, and ISO-8601 durations like `P1DT2H3M4S`), see [Scanning modes & scheduling](docs/scanning-modes.md).
 
@@ -171,7 +171,7 @@ You can also:
 For operational details and examples, see:
 
 - [Operations](docs/operations.md) – running, logging, output handling.
-- [CZERTAINLY & CBOM-Repository integration](docs/integration-czertainly.md).
+- [ILM & CBOM-Repository integration](docs/integration-ilm.md).
 
 CBOM format details (including `bom-ref` strategy and PQC modelling) are documented in [CBOM output format](docs/cbom-format.md).
 

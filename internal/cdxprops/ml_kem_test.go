@@ -5,8 +5,8 @@ import (
 	"encoding/asn1"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +54,7 @@ func synthPKIX(t *testing.T, oid asn1.ObjectIdentifier) []byte {
 func TestMLKEM768PKCS8PrivateKey(t *testing.T) {
 	t.Parallel()
 
-	c := NewConverter().WithCzertainlyExtensions(true)
+	c := NewConverter().WithIlmExtensions(true)
 	algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, mlKEM768OID))
 	require.NoError(t, err, "an ML-KEM PKCS#8 key must be recognised, not rejected")
 
@@ -76,13 +76,13 @@ func TestMLKEM768PKCS8PrivateKey(t *testing.T) {
 	// FIPS 203 Table 2, required RBG strength.
 	require.Equal(t, 192, *props.ClassicalSecurityLevel)
 
-	// FIPS 203 Table 3 sizes, reported through the czertainly extension.
-	require.Equal(t, "1184", cdxtestGetProp(algo, czertainly.AlgorithmPublicKeySize),
+	// FIPS 203 Table 3 sizes, reported through the ilm extension.
+	require.Equal(t, "1184", cdxtestGetProp(algo, ilm.AlgorithmPublicKeySize),
 		"encapsulation key")
-	require.Equal(t, "2400", cdxtestGetProp(algo, czertainly.AlgorithmPrivateKeySize),
+	require.Equal(t, "2400", cdxtestGetProp(algo, ilm.AlgorithmPrivateKeySize),
 		"decapsulation key")
-	require.Equal(t, "1088", cdxtestGetProp(algo, czertainly.AlgorithmCiphertextSize))
-	require.Empty(t, cdxtestGetProp(algo, czertainly.AlgorithmSignatureSize),
+	require.Equal(t, "1088", cdxtestGetProp(algo, ilm.AlgorithmCiphertextSize))
+	require.Empty(t, cdxtestGetProp(algo, ilm.AlgorithmSignatureSize),
 		"a KEM has no signature size")
 }
 

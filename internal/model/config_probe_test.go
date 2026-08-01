@@ -3,8 +3,8 @@ package model_test
 import (
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/dockertest"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/dockertest"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 )

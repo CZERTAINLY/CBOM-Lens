@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
 	"github.com/stretchr/testify/require"
 )
 

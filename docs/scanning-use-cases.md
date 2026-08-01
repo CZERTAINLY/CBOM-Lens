@@ -112,5 +112,5 @@ For guidance on how CBOMs represent cryptographic assets, algorithms, and refere
 ## 7. Next steps
 
 - Configure scans for your environment: see the [Configuration guide](configuration.md).
-- Automate scans with timers or discovery mode: see [Scanning modes & scheduling](scanning-modes.md) and [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md).
+- Automate scans with timers or discovery mode: see [Scanning modes & scheduling](scanning-modes.md) and [ILM & CBOM-Repository integration](integration-ilm.md).
 - Understand CBOM data in depth: see [CBOM output format](cbom-format.md).

@@ -8,7 +8,7 @@ CBOM-Lens can run in three modes, controlled by `service.mode`:
 
 This document explains each mode and how to configure schedules using cron expressions and ISO-8601 durations.
 
-For configuration basics, see the [Configuration guide](configuration.md). For integration details, see [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md).
+For configuration basics, see the [Configuration guide](configuration.md). For integration details, see [ILM & CBOM-Repository integration](integration-ilm.md).
 
 ---
 
@@ -120,7 +120,7 @@ The interval does **not** account for job runtime. For example, if a job is sche
 
 ## 3. Discovery mode
 
-In **discovery** mode, CBOM-Lens runs as a service that is fully managed by CZERTAINLY via a discovery protocol.
+In **discovery** mode, CBOM-Lens runs as a service that is fully managed by ILM via a discovery protocol.
 
 Example configuration:
 
@@ -133,20 +133,20 @@ service:
   server:
     # where CBOM-Lens should bind to; can be ip:port
     addr: :8080
-    # public address where CBOM-Lens is accessible to CZERTAINLY
+    # public address where CBOM-Lens is accessible to ILM
     base_url: https://cbom-lens.example.net/api
   core:
-    # base address of CZERTAINLY Core API
+    # base address of ILM Core API
     base_url: https://core-demo.example.net/api
 ```
 
 Key points:
 
 - CBOM-Lens exposes an HTTP API (`service.server.addr`, `service.server.base_url`).
-- CZERTAINLY Core connects to CBOM-Lens using this API to orchestrate scans.
-- A CBOM-Repository (`service.repository.base_url`) is strongly recommended, as CZERTAINLY Core typically pulls BOMs from there.
+- ILM Core connects to CBOM-Lens using this API to orchestrate scans.
+- A CBOM-Repository (`service.repository.base_url`) is strongly recommended, as ILM Core typically pulls BOMs from there.
 
-For a deeper integration overview, see [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md).
+For a deeper integration overview, see [ILM & CBOM-Repository integration](integration-ilm.md).
 
 ---
 
@@ -156,7 +156,7 @@ For a deeper integration overview, see [CZERTAINLY & CBOM-Repository integration
 |-------------|----------------------------------|------------------|-----------------------------------------|
 | `manual`    | external (none inside CBOM-Lens) | one-shot process | ad-hoc scans, CI jobs                   |
 | `timer`     | internal (cron or duration)      | long-lived       | periodic scans on a host                |
-| `discovery` | external (CZERTAINLY Core)       | long-lived       | fully managed discovery with CZERTAINLY |
+| `discovery` | external (ILM Core)       | long-lived       | fully managed discovery with ILM |
 
 Choose the mode that best matches how you want CBOM-Lens to be orchestrated.
 
@@ -165,5 +165,5 @@ Choose the mode that best matches how you want CBOM-Lens to be orchestrated.
 ## 5. Next steps
 
 - For configuration examples: see the [Configuration guide](configuration.md).
-- For CZERTAINLY and repository integration: see [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md).
+- For ILM and repository integration: see [ILM & CBOM-Repository integration](integration-ilm.md).
 - For operational aspects and troubleshooting: see [Operations](operations.md).

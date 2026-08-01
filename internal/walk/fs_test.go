@@ -9,8 +9,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/walk"
 	"github.com/stretchr/testify/require"
 )
 

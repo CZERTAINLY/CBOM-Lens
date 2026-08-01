@@ -6,9 +6,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	registry "github.com/CZERTAINLY/CBOM-lens/internal/walk/registry"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk/registry/mock"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	registry "github.com/OmniTrustILM/cbom-lens/internal/walk/registry"
+	"github.com/OmniTrustILM/cbom-lens/internal/walk/registry/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"

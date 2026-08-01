@@ -1,4 +1,4 @@
-module github.com/CZERTAINLY/CBOM-lens
+module github.com/OmniTrustILM/cbom-lens
 
 go 1.26.4
 

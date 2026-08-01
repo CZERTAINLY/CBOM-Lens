@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/dockertest"
-	"github.com/CZERTAINLY/CBOM-lens/internal/log"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
+	"github.com/OmniTrustILM/cbom-lens/internal/dockertest"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/walk"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 

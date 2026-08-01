@@ -1,35 +1,35 @@
-// czertainly package contains constants and helpers for extended properties provided by CZERTAINLY project
-package czertainly
+// ilm package contains constants and helpers for extended properties provided by ILM project
+package ilm
 
 import (
 	"crypto/x509"
 	"encoding/base64"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 const (
-	CertificateSourceFormat  = "czertainly:component:certificate:source_format"
-	CertificateBase64Content = "czertainly:component:certificate:base64_content"
-	CertificateFingerprint   = "czertainly:component:certificate:fingerprint"
+	CertificateSourceFormat  = "ilm:component:certificate:source_format"
+	CertificateBase64Content = "ilm:component:certificate:base64_content"
+	CertificateFingerprint   = "ilm:component:certificate:fingerprint"
 
-	SSHHostKeyFingerprintContent = "czertainly:component:ssh_hostkey:fingerprint_content"
-	SSHHostKeyContent            = "czertainly:component:ssh_hostkey:content"
-	PrivateKeyType               = "czertainly:component:private_key:type"
-	PrivateKeyBase64Content      = "czertainly:component:private_key:base64_content"
-	SignatureAlgorithmFamily     = "czertainly:component:algorithm:family"
+	SSHHostKeyFingerprintContent = "ilm:component:ssh_hostkey:fingerprint_content"
+	SSHHostKeyContent            = "ilm:component:ssh_hostkey:content"
+	PrivateKeyType               = "ilm:component:private_key:type"
+	PrivateKeyBase64Content      = "ilm:component:private_key:base64_content"
+	SignatureAlgorithmFamily     = "ilm:component:algorithm:family"
 
 	// additional PQC data
-	AlgorithmPrivateKeySize = "czertainly:component:algorithm:pqc:private_key_size"
-	AlgorithmPublicKeySize  = "czertainly:component:algorithm:pqc:public_key_size"
-	AlgorithmSignatureSize  = "czertainly:component:algorithm:pqc:signature_size"
+	AlgorithmPrivateKeySize = "ilm:component:algorithm:pqc:private_key_size"
+	AlgorithmPublicKeySize  = "ilm:component:algorithm:pqc:public_key_size"
+	AlgorithmSignatureSize  = "ilm:component:algorithm:pqc:signature_size"
 
 	// AlgorithmCiphertextSize is the KEM ciphertext size in bytes. KEMs reuse
 	// AlgorithmPublicKeySize for the encapsulation key and
 	// AlgorithmPrivateKeySize for the decapsulation key, and never emit
 	// AlgorithmSignatureSize, because a KEM cannot sign.
-	AlgorithmCiphertextSize = "czertainly:component:algorithm:pqc:ciphertext_size"
+	AlgorithmCiphertextSize = "ilm:component:algorithm:pqc:ciphertext_size"
 )
 
 func CertificateProperties(

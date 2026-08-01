@@ -10,14 +10,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 func (c Converter) PrivateKey(ctx context.Context, id string, key crypto.PrivateKey) (algoCompo, keyCompo cdx.Component) {
 	info := privateKeyInfo(key)
 
-	algoCompo = info.componentWOBomRef(c.czertainly)
+	algoCompo = info.componentWOBomRef(c.ilm)
 	c.BOMRefHash(&algoCompo, info.algorithmName)
 
 	bomRef := "crypto/private_key/" + strings.ToLower(algoCompo.Name) + "@" + id

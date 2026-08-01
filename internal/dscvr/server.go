@@ -1,4 +1,4 @@
-//go:generate go tool go.uber.org/mock/mockgen -destination=./mock/supervisor.go -package=mock github.com/CZERTAINLY/CBOM-lens/internal/dscvr SupervisorContract
+//go:generate go tool go.uber.org/mock/mockgen -destination=./mock/supervisor.go -package=mock github.com/OmniTrustILM/cbom-lens/internal/dscvr SupervisorContract
 package dscvr
 
 import (
@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
-	"github.com/CZERTAINLY/CBOM-lens/internal/log"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/dscvr/store"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/gorilla/mux"
 )
@@ -49,7 +49,7 @@ func New(ctx context.Context, cfg model.Service, sv SupervisorContract, jobName 
 	switch {
 	case cfg.Mode != model.ServiceModeDiscovery:
 		return nil, fmt.Errorf(
-			"mode %q not compatible with CZERTAINLY Core integration, please provide correct configuration using %q mode",
+			"mode %q not compatible with ILM Core integration, please provide correct configuration using %q mode",
 			cfg.Mode, model.ServiceModeDiscovery)
 
 	case cfg.Repository == nil:
@@ -212,7 +212,7 @@ func (s *Server) RegisterConnector(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	slog.DebugContext(ctx, "Registering czertainly core connector.",
+	slog.DebugContext(ctx, "Registering ilm core connector.",
 		slog.String("request-url", reqUrl), slog.String("request-body", string(b)))
 
 	req, err := http.NewRequestWithContext(ctx, endpoint.Method, reqUrl, bytes.NewReader(b))
@@ -232,15 +232,15 @@ func (s *Server) RegisterConnector(ctx context.Context) error {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "Http request failed while registering czertainly core connector.", slog.String("error", err.Error()))
-		return errors.New("registering czertainly core connector failed")
+		slog.ErrorContext(ctx, "Http request failed while registering ilm core connector.", slog.String("error", err.Error()))
+		return errors.New("registering ilm core connector failed")
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if err := decodeRegisterResponse(ctx, resp); err != nil {
-		return fmt.Errorf("registering czertainly core connector failed: %w", err)
+		return fmt.Errorf("registering ilm core connector failed: %w", err)
 	}
 
 	return nil

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -279,7 +279,7 @@ service:
   log: stderr
 cbom:
   extensions:
-    - czertainly
+    - ilm
 `,
 			expectedJSON: `{
 "containers": {
@@ -316,7 +316,7 @@ cbom:
   "version": 0,
   "cbom": {
     "version": "1.6",
-    "extensions": ["czertainly"]
+    "extensions": ["ilm"]
   }
 }`,
 		},

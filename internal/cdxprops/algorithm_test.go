@@ -122,15 +122,15 @@ func TestExtractAlgorithmInfo_RSA_Functions(t *testing.T) {
 	require.NotContains(t, got.cryptoFunctions, cdx.CryptoFunctionDecapsulate)
 }
 
-// TestCzertainlyPqcProps_PreservesExistingProps pins the append contract.
+// TestIlmPqcProps_PreservesExistingProps pins the append contract.
 //
-// czertainlyPqcProps appends to the slice it is handed, so its result must be
+// ilmPqcProps appends to the slice it is handed, so its result must be
 // assigned, never appended again. getAlgorithmProperties used to do
-// `props = append(props, czertainlyPqcProps(props, ...)...)`, which duplicates
+// `props = append(props, ilmPqcProps(props, ...)...)`, which duplicates
 // every property already present. That was invisible only because props was
 // always empty at the call site. This test pre-seeds two properties so the
 // duplication would be caught.
-func TestCzertainlyPqcProps_PreservesExistingProps(t *testing.T) {
+func TestIlmPqcProps_PreservesExistingProps(t *testing.T) {
 	t.Parallel()
 
 	seed := []cdx.Property{
@@ -141,7 +141,7 @@ func TestCzertainlyPqcProps_PreservesExistingProps(t *testing.T) {
 	t.Run("with sizes appends exactly three", func(t *testing.T) {
 		t.Parallel()
 
-		got := czertainlyPqcProps(slices.Clone(seed), pqcInfo{
+		got := ilmPqcProps(slices.Clone(seed), pqcInfo{
 			privKeySize: 2560, pubKeySize: 1312, signatureSize: 2420,
 		})
 
@@ -154,7 +154,7 @@ func TestCzertainlyPqcProps_PreservesExistingProps(t *testing.T) {
 
 		// nil pqc metadata (XMSS, XMSS-MT, HSS-LMS) must not wipe the caller's
 		// properties. The old implementation returned nil here.
-		got := czertainlyPqcProps(slices.Clone(seed), nil)
+		got := ilmPqcProps(slices.Clone(seed), nil)
 		require.Equal(t, seed, got)
 	})
 }

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/OmniTrustILM/cbom-lens/internal/service"
 	"github.com/stretchr/testify/require"
 )
 

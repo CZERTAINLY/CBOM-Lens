@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/czertainly"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 )
 
 // ptr returns a pointer to v. It exists so registry literals can distinguish
@@ -713,7 +713,7 @@ func sortedCryptoFunctions(fns []cdx.CryptoFunction) []cdx.CryptoFunction {
 	return out
 }
 
-func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
+func (i algorithmInfo) componentWOBomRef(withIlm bool) cdx.Component {
 	var nqsl *int
 	if i.nistQuantumSecurityLevel != nil {
 		// Copy the value rather than aliasing the registry's pointer: the
@@ -753,8 +753,8 @@ func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 	}
 
 	var props []cdx.Property
-	if withCzertainly {
-		props = czertainlyPqcProps(props, i.pqc)
+	if withIlm {
+		props = ilmPqcProps(props, i.pqc)
 	}
 
 	if len(props) > 0 {
@@ -763,14 +763,14 @@ func (i algorithmInfo) componentWOBomRef(withCzertainly bool) cdx.Component {
 	return compo
 }
 
-// czertainlyPqcProps appends the czertainly size properties for x to props and
+// ilmPqcProps appends the ilm size properties for x to props and
 // returns the result. When x carries no size metadata it returns props
 // unchanged, so callers can always assign the result back.
 //
 // It used to return nil in that case, which made the natural call
-// `props = czertainlyPqcProps(props, ...)` silently discard everything the
+// `props = ilmPqcProps(props, ...)` silently discard everything the
 // caller had already collected.
-func czertainlyPqcProps(props []cdx.Property, x isPqcInfo) []cdx.Property {
+func ilmPqcProps(props []cdx.Property, x isPqcInfo) []cdx.Property {
 	switch i := x.(type) {
 	case pqcInfo:
 		return pqcProps(props, i)
@@ -786,15 +786,15 @@ func kemProps(props []cdx.Property, i kemInfo) []cdx.Property {
 		// encapsulation key its public half, so they reuse the existing
 		// property names rather than inventing parallel ones.
 		{
-			Name:  czertainly.AlgorithmPrivateKeySize,
+			Name:  ilm.AlgorithmPrivateKeySize,
 			Value: strconv.Itoa(i.decapKeySize),
 		},
 		{
-			Name:  czertainly.AlgorithmPublicKeySize,
+			Name:  ilm.AlgorithmPublicKeySize,
 			Value: strconv.Itoa(i.encapKeySize),
 		},
 		{
-			Name:  czertainly.AlgorithmCiphertextSize,
+			Name:  ilm.AlgorithmCiphertextSize,
 			Value: strconv.Itoa(i.ciphertextSize),
 		},
 	}...)
@@ -803,15 +803,15 @@ func kemProps(props []cdx.Property, i kemInfo) []cdx.Property {
 func pqcProps(props []cdx.Property, i pqcInfo) []cdx.Property {
 	props2 := []cdx.Property{
 		{
-			Name:  czertainly.AlgorithmPrivateKeySize,
+			Name:  ilm.AlgorithmPrivateKeySize,
 			Value: strconv.Itoa(i.privKeySize),
 		},
 		{
-			Name:  czertainly.AlgorithmPublicKeySize,
+			Name:  ilm.AlgorithmPublicKeySize,
 			Value: strconv.Itoa(i.pubKeySize),
 		},
 		{
-			Name:  czertainly.AlgorithmSignatureSize,
+			Name:  ilm.AlgorithmSignatureSize,
 			Value: strconv.Itoa(i.signatureSize),
 		},
 	}

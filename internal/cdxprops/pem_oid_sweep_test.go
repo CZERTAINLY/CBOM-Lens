@@ -100,7 +100,7 @@ func TestOIDSweep_PKCS8PrivateKey(t *testing.T) {
 		t.Run(want.name, func(t *testing.T) {
 			t.Parallel()
 
-			c := NewConverter().WithCzertainlyExtensions(true)
+			c := NewConverter().WithIlmExtensions(true)
 			algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, oidOf(t, dotted)))
 			require.NoError(t, err, "OID %s must be recognised", dotted)
 

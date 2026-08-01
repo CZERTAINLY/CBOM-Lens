@@ -8,9 +8,9 @@ import (
 	"encoding/pem"
 	"testing"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"

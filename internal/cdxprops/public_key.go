@@ -58,7 +58,7 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		}
 	}
 
-	algo = info.componentWOBomRef(c.czertainly)
+	algo = info.componentWOBomRef(c.ilm)
 	setAlgorithmPrimitive(&algo, primitive)
 	if primitive == cdx.CryptoPrimitivePKE {
 		addAlgorithmCrpyoFunctions(&algo, cdx.CryptoFunctionSign)

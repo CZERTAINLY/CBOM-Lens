@@ -5,27 +5,27 @@ import (
 )
 
 const (
-	// constants related to czertainly core attribute for passing cbom-lens configuration
+	// constants related to ilm core attribute for passing cbom-lens configuration
 	lensConfigurationAttrUUID        = "eb87e85b-297c-44f9-8f69-eebc86bf7c65"
 	lensConfigurationAttrName        = "cbom_lens_scan_configuration"
 	lensConfigurationAttrType        = "data"
 	lensConfigurationAttrContentType = "codeblock"
 
-	// constants related to czertainly core attribute for passing cbom-lens configuration
+	// constants related to ilm core attribute for passing cbom-lens configuration
 	lensConfigurationInfoAttrUUID        = "12045366-d686-4d46-a563-e02deb23ca7f"
 	lensConfigurationInfoAttrName        = "cbom_lens_scan_configuration_info"
 	lensConfigurationInfoAttrType        = "info"
 	lensConfigurationInfoAttrContentType = "string"
 
-	// constants related to czertainly core meta attribute for passing upload result json
+	// constants related to ilm core meta attribute for passing upload result json
 	lensResultMetadataUploadKeyAttrUUID = "8895b0c5-d16b-4c85-991c-be9156c59e8d"
 	lensResultMetadataUploadKeyAttrName = "cbom_lens_result_upload_json"
 
-	// constants related to czertainly core meta attribute for passing repository get uri
+	// constants related to ilm core meta attribute for passing repository get uri
 	lensResultMetadataURIAttrUUID = "a29d6d07-17ab-4211-bc66-6c95f9e38842"
 	lensResultMetadataURIAttrName = "cbom_lens_result_repository_uri"
 
-	// constants related to czertainly core meta attribute for passing result in case of failure
+	// constants related to ilm core meta attribute for passing result in case of failure
 	lensResultMetadataFailureReasonAttrUUID = "429d078c-73d1-445a-bf48-606509a3619e"
 	lensResultMetadataFailureReasonAttrName = "cbom_lens_result_string"
 
@@ -52,7 +52,7 @@ The CBOM-Lens configuration supports multiple discovery sources to scan and anal
 - Verbose logging toggle
 - Log destination (stderr, stdout, discard, or file path)
 
-**CBOM Generation** - Configures CycloneDX BOM output version (1.6 or 1.7; default 1.6) and optional extensions. For example czertainly extension injects CZERTAINLY specific properties to the CBOM.
+**CBOM Generation** - Configures CycloneDX BOM output version (1.6 or 1.7; default 1.6) and optional extensions. For example ilm extension injects ILM specific properties to the CBOM.
 
 All scanning modules (filesystem, containers, ports) are disabled by default and must be explicitly enabled in the configuration.
 `

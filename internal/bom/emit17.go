@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 )
 
 // emit17 renders the BOMModel as CycloneDX 1.7 using crypto-registry
@@ -104,9 +104,9 @@ func (emit17) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {
 				Name:    "CBOM-Lens",
 				Version: programVersion,
 				Manufacturer: &cdx.OrganizationalEntity{
-					Name:    "CZERTAINLY",
+					Name:    "OmniTrust",
 					Address: &cdx.PostalAddress{},
-					URL:     &[]string{"https://www.czertainly.com"},
+					URL:     &[]string{"https://www.omnitrust.com"},
 				},
 			},
 			Properties: mp,

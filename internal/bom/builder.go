@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
 	"github.com/google/uuid"
 )
 

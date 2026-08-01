@@ -17,8 +17,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/bom"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"

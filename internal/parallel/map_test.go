@@ -8,7 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/parallel"
+	"github.com/OmniTrustILM/cbom-lens/internal/parallel"
 	"github.com/stretchr/testify/require"
 )
 

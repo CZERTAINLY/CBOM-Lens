@@ -3,8 +3,8 @@ package bom
 import (
 	"context"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model/cbom"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 )
 
 // emit16 renders the BOMModel as CycloneDX 1.6.
@@ -57,10 +57,10 @@ func (emit16) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {
 				Name:    "CBOM-Lens",
 				Version: programVersion,
 				Manufacturer: &cdx.OrganizationalEntity{
-					Name:    "CZERTAINLY",
+					Name:    "OmniTrust",
 					Address: &cdx.PostalAddress{},
 					URL: &[]string{
-						"https://www.czertainly.com",
+						"https://www.omnitrust.com",
 					},
 				},
 			},

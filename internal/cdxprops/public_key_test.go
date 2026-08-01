@@ -13,8 +13,8 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops/cdxtest"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 )

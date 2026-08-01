@@ -12,9 +12,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/dscvr/store"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/service"
+	"github.com/OmniTrustILM/cbom-lens/internal/dscvr/store"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/service"
 
 	_ "modernc.org/sqlite"
 )
@@ -56,7 +56,7 @@ func TestNew(t *testing.T) {
 			setupSv:     true,
 			jobName:     "test-job",
 			wantErr:     true,
-			errContains: "not compatible with CZERTAINLY Core integration",
+			errContains: "not compatible with ILM Core integration",
 		},
 		{
 			name: "missing repository",

@@ -13,13 +13,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 )
 
 type Converter struct {
-	// czertainly control if extra czertainly properties will be included or not
-	czertainly bool
+	// ilm control if extra ilm properties will be included or not
+	ilm bool
 	// bomRefHasher controls which algorithm will be used
 	// to generate non-algorithm BOMRef. Defaults to sha256
 	bomRefHasher func([]byte) string
@@ -31,7 +31,7 @@ type Converter struct {
 
 func NewConverter() Converter {
 	return Converter{
-		czertainly: false,
+		ilm: false,
 		bomRefHasher: func(b []byte) string {
 			hash := sha256.Sum256(b)
 			return "sha256:" + hex.EncodeToString(hash[:])
@@ -39,10 +39,10 @@ func NewConverter() Converter {
 	}
 }
 
-// WithCzertainlyExtensions configures the mode in which CZERTAINLY specific properties will be included in Components or not
-// Default is yes
-func (c Converter) WithCzertainlyExtensions(czertainly bool) Converter {
-	c.czertainly = czertainly
+// WithIlmExtensions configures the mode in which ILM specific properties will be included in Components or not
+// Default is no
+func (c Converter) WithIlmExtensions(ilm bool) Converter {
+	c.ilm = ilm
 	return c
 }
 

@@ -9,9 +9,9 @@ import (
 	"iter"
 	"log/slog"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/log"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
 
 	"github.com/anchore/stereoscope"
 	"github.com/anchore/stereoscope/pkg/file"

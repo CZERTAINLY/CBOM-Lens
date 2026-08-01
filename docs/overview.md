@@ -2,7 +2,7 @@
 
 CBOM-Lens is a command-line tool that discovers cryptographic assets across filesystems, container images, and network ports and produces a Cryptographic Bill of Materials (CBOM) in CycloneDX 1.6 format.
 
-It is designed to be used both as a standalone scanner and as part of the CZERTAINLY platform.
+It is designed to be used both as a standalone scanner and as part of the ILM platform.
 
 ## What CBOM-Lens does
 
@@ -15,7 +15,7 @@ It is designed to be used both as a standalone scanner and as part of the CZERTA
 
 - Building an inventory of cryptographic material across hosts, containers, and services.
 - Feeding CBOMs into a **CBOM-Repository** for centralized storage and analysis.
-- Integrating with **CZERTAINLY Core** to support automated cryptographic asset management.
+- Integrating with **ILM Core** to support automated cryptographic asset management.
 - Supporting compliance and security programs that require visibility into certificates, keys, and cryptographic algorithms.
 
 ## Operation modes
@@ -24,7 +24,7 @@ CBOM-Lens supports three modes of operation via the `service.mode` setting:
 
 - **Manual** – run a single scan and exit (ideal for ad-hoc scans and CI pipelines).
 - **Timer** – run scans on a schedule, using cron expressions or ISO-8601 durations.
-- **Discovery** – run as a service managed by CZERTAINLY via a discovery protocol.
+- **Discovery** – run as a service managed by ILM via a discovery protocol.
 
 The supervisor process and the internal `_scan` command cooperate to support these modes; see the [Architecture](architecture.md) document for details.
 
@@ -44,13 +44,13 @@ CBOM-Lens can:
 
 - Save CBOM files locally (e.g., in the current directory) using the `service.dir` setting.
 - Upload CBOMs to a **CBOM-Repository** using `service.repository.base_url`.
-- Expose an HTTP server and integrate with **CZERTAINLY Core** in discovery mode.
+- Expose an HTTP server and integrate with **ILM Core** in discovery mode.
 
 For configuration details and examples, see:
 
 - The [Configuration guide](configuration.md) – narrative configuration overview.
 - The [Configuration reference](config.md) – field-by-field reference.
-- [CZERTAINLY & CBOM-Repository integration](integration-czertainly.md).
+- [ILM & CBOM-Repository integration](integration-ilm.md).
 
 ## Next steps
 

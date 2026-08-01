@@ -9,8 +9,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/log"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"gopkg.in/yaml.v3"
 )

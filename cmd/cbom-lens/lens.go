@@ -10,17 +10,17 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CZERTAINLY/CBOM-lens/internal/bom"
-	"github.com/CZERTAINLY/CBOM-lens/internal/cdxprops"
-	"github.com/CZERTAINLY/CBOM-lens/internal/model"
-	"github.com/CZERTAINLY/CBOM-lens/internal/nmap"
-	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/gitleaks"
-	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/pem"
-	"github.com/CZERTAINLY/CBOM-lens/internal/scanner/x509"
-	"github.com/CZERTAINLY/CBOM-lens/internal/service"
-	"github.com/CZERTAINLY/CBOM-lens/internal/stats"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk"
-	"github.com/CZERTAINLY/CBOM-lens/internal/walk/registry"
+	"github.com/OmniTrustILM/cbom-lens/internal/bom"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/nmap"
+	"github.com/OmniTrustILM/cbom-lens/internal/scanner/gitleaks"
+	"github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
+	"github.com/OmniTrustILM/cbom-lens/internal/scanner/x509"
+	"github.com/OmniTrustILM/cbom-lens/internal/service"
+	"github.com/OmniTrustILM/cbom-lens/internal/stats"
+	"github.com/OmniTrustILM/cbom-lens/internal/walk"
+	"github.com/OmniTrustILM/cbom-lens/internal/walk/registry"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -64,10 +64,10 @@ func NewLens(ctx context.Context, counter *stats.Stats, config model.Scan) (Lens
 
 	// scan result to cyclonedx-go converter
 	converter := cdxprops.NewConverter()
-	// enable CZERTAINLY extensions
+	// enable ILM extensions
 	for _, ext := range config.CBOM.Extensions {
-		if strings.EqualFold(ext, "czertainly") {
-			converter = converter.WithCzertainlyExtensions(true)
+		if strings.EqualFold(ext, "ilm") {
+			converter = converter.WithIlmExtensions(true)
 		}
 	}
 

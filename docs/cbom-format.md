@@ -99,9 +99,9 @@ Example (truncated) CBOM entry:
   "type": "cryptographic-asset",
   "name": "ML-DSA-65",
   "properties": [
-    { "name": "czertainly:component:algorithm:pqc:private_key_size", "value": "4032" },
-    { "name": "czertainly:component:algorithm:pqc:public_key_size", "value": "1952" },
-    { "name": "czertainly:component:algorithm:pqc:signature_size", "value": "3309" }
+    { "name": "ilm:component:algorithm:pqc:private_key_size", "value": "4032" },
+    { "name": "ilm:component:algorithm:pqc:public_key_size", "value": "1952" },
+    { "name": "ilm:component:algorithm:pqc:signature_size", "value": "3309" }
   ],
   "evidence": {
     "occurrences": [
@@ -126,7 +126,7 @@ Example (truncated) CBOM entry:
 
 This representation captures algorithm characteristics and their occurrences while still using stable `bom-ref` identifiers.
 
-The property set depends on what the algorithm is. A signature scheme carries `private_key_size`, `public_key_size` and `signature_size`, as above. A KEM has no signature, so ML-KEM carries `czertainly:component:algorithm:pqc:ciphertext_size` in place of `signature_size`, with the encapsulation and decapsulation key sizes reported as the public and private key sizes. See [PQC support](pqc-support.md) for the per-algorithm detail.
+The property set depends on what the algorithm is. A signature scheme carries `private_key_size`, `public_key_size` and `signature_size`, as above. A KEM has no signature, so ML-KEM carries `ilm:component:algorithm:pqc:ciphertext_size` in place of `signature_size`, with the encapsulation and decapsulation key sizes reported as the public and private key sizes. See [PQC support](pqc-support.md) for the per-algorithm detail.
 
 ---
 
