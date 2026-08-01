@@ -127,7 +127,7 @@ Common deployment patterns:
 - **Local manual runs** – run CBOM-Lens locally against a directory or a small set of images; collect CBOMs manually or via scripts.
 - **CI integration** – run in `manual` mode, scanning source trees or build artifacts and publishing CBOMs as build artifacts or to a repository.
 - **Scheduled host scans** – run in `timer` mode on servers or scanners to periodically scan files, containers, or ports.
-- **Managed discovery** – run in `discovery` mode as part of a ILM deployment; see [ILM & CBOM-Repository integration](integration-ilm.md).
+- **Managed discovery** – run in `discovery` mode as part of an ILM deployment; see [ILM & CBOM-Repository integration](integration-ilm.md).
 
 ---
 

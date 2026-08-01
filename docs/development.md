@@ -23,7 +23,7 @@ Clone the repository:
 
 ```sh
 git clone https://github.com/OmniTrustILM/cbom-lens.git
-cd CBOM-Lens
+cd cbom-lens
 ```
 
 ---
