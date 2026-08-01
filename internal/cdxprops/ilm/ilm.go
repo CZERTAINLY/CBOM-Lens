@@ -1,4 +1,4 @@
-// ilm package contains constants and helpers for extended properties provided by OmniTrust project
+// ilm package contains constants and helpers for extended properties provided by ILM project
 package ilm
 
 import (

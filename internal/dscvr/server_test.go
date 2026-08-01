@@ -56,7 +56,7 @@ func TestNew(t *testing.T) {
 			setupSv:     true,
 			jobName:     "test-job",
 			wantErr:     true,
-			errContains: "not compatible with OmniTrust Core integration",
+			errContains: "not compatible with ILM Core integration",
 		},
 		{
 			name: "missing repository",

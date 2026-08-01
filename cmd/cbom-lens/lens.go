@@ -64,7 +64,7 @@ func NewLens(ctx context.Context, counter *stats.Stats, config model.Scan) (Lens
 
 	// scan result to cyclonedx-go converter
 	converter := cdxprops.NewConverter()
-	// enable OmniTrust extensions
+	// enable ILM extensions
 	for _, ext := range config.CBOM.Extensions {
 		if strings.EqualFold(ext, "ilm") {
 			converter = converter.WithIlmExtensions(true)

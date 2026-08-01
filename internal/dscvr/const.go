@@ -52,7 +52,7 @@ The CBOM-Lens configuration supports multiple discovery sources to scan and anal
 - Verbose logging toggle
 - Log destination (stderr, stdout, discard, or file path)
 
-**CBOM Generation** - Configures CycloneDX BOM output version (1.6 or 1.7; default 1.6) and optional extensions. For example ilm extension injects OmniTrust specific properties to the CBOM.
+**CBOM Generation** - Configures CycloneDX BOM output version (1.6 or 1.7; default 1.6) and optional extensions. For example ilm extension injects ILM specific properties to the CBOM.
 
 All scanning modules (filesystem, containers, ports) are disabled by default and must be explicitly enabled in the configuration.
 `

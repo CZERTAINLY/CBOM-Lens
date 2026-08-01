@@ -57,7 +57,7 @@ service:
 
 - `manual` – run one scan and exit. Used for ad-hoc scans or CI.
 - `timer` – run scans repeatedly, based on `service.schedule`.
-- `discovery` – run as a long-lived service managed via OmniTrust.
+- `discovery` – run as a long-lived service managed via ILM.
 
 Examples:
 
@@ -212,7 +212,7 @@ service:
 
 CBOM-Lens will attempt to both save and upload. Errors in one path are logged but do not stop the other.
 
-See [Operations](operations.md) and [OmniTrust & CBOM-Repository integration](integration-ilm.md) for operational and integration details.
+See [Operations](operations.md) and [ILM & CBOM-Repository integration](integration-ilm.md) for operational and integration details.
 
 ---
 
@@ -249,4 +249,4 @@ Use it as a starting point and adjust to your environment.
 
 - For exact field definitions, defaults, and constraints: see the [Configuration reference](config.md).
 - For schema and validation details (CUE): see the schema file [config.cue](config.cue).
-- For modes, scheduling, and discovery integration: see [Scanning modes & scheduling](scanning-modes.md) and [OmniTrust & CBOM-Repository integration](integration-ilm.md).
+- For modes, scheduling, and discovery integration: see [Scanning modes & scheduling](scanning-modes.md) and [ILM & CBOM-Repository integration](integration-ilm.md).

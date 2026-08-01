@@ -39,7 +39,7 @@ func NewConverter() Converter {
 	}
 }
 
-// WithIlmExtensions configures the mode in which OmniTrust specific properties will be included in Components or not
+// WithIlmExtensions configures the mode in which ILM specific properties will be included in Components or not
 // Default is yes
 func (c Converter) WithIlmExtensions(ilm bool) Converter {
 	c.ilm = ilm

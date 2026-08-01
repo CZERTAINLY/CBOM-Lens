@@ -153,7 +153,7 @@ type LensServer struct {
 	StateFile string  `json:"state_file"`
 }
 
-// Core is configuration for OmniTrust Core API integration.
+// Core is configuration for ILM Core API integration.
 type Core struct {
 	BaseURL URL `json:"base_url"`
 }

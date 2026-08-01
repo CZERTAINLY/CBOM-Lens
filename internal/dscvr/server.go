@@ -49,7 +49,7 @@ func New(ctx context.Context, cfg model.Service, sv SupervisorContract, jobName 
 	switch {
 	case cfg.Mode != model.ServiceModeDiscovery:
 		return nil, fmt.Errorf(
-			"mode %q not compatible with OmniTrust Core integration, please provide correct configuration using %q mode",
+			"mode %q not compatible with ILM Core integration, please provide correct configuration using %q mode",
 			cfg.Mode, model.ServiceModeDiscovery)
 
 	case cfg.Repository == nil:
