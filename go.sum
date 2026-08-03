@@ -234,8 +234,12 @@ github.com/jonboulle/clockwork v0.5.0 h1:Hyh9A8u51kptdkR+cqRpT1EebBwTn1oK9YfGYbd
 github.com/jonboulle/clockwork v0.5.0/go.mod h1:3mZlmanh0g2NDKO5TWZVJAfofYk64M7XN3SzBPjZF60=
 github.com/kaptinlin/jsonpointer v0.4.27 h1:5FOnhlkqQ4/lvHudaAWS8HJCXjN4yAHSIGl7aPKHI0Q=
 github.com/kaptinlin/jsonpointer v0.4.27/go.mod h1:dfub/n58cWS32Dyf3AZsnKblSAgrz9PyOU76GDPpx8Q=
+github.com/kaptinlin/jsonpointer v0.4.28 h1:PyxOfdml9PGpxQz+JnNLGsyzQ+Rnm+OVNTGcgbVLqgg=
+github.com/kaptinlin/jsonpointer v0.4.28/go.mod h1:JzeIDw1+60bryzOFea9P3zjKg8pfJHd+UIA/zfZ70x8=
 github.com/kaptinlin/jsonschema v0.9.3 h1:uDVd3w4aXwO0tbycblKYvFofhl3hVuE31vOl5JkDXI0=
 github.com/kaptinlin/jsonschema v0.9.3/go.mod h1:LvtQ/mO0E1e/3c3DiOWTj05LTeot8cTv7DyQq7eJMQg=
+github.com/kaptinlin/jsonschema v0.9.8 h1:srpfx2MAm4ecYz0zJLbz6fiW+UXiuv+vGhUqZUIWmrg=
+github.com/kaptinlin/jsonschema v0.9.8/go.mod h1:TP7RFmFBNExjBE0b3fsM6RpA/9PeOzfg2g4weXqOrDg=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/klauspost/compress v1.4.1/go.mod h1:RyIbtBH6LamlWaDj8nUwkbUhJ87Yi3uG0guNDohfE1A=

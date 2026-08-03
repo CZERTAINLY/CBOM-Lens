@@ -1,6 +1,6 @@
 module github.com/OmniTrustILM/cbom-lens
 
-go 1.26.4
+go 1.26.5
 
 require (
 	cuelang.org/go v0.17.1
@@ -12,7 +12,7 @@ require (
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/kaptinlin/jsonschema v0.9.3
+	github.com/kaptinlin/jsonschema v0.9.8
 	github.com/kodeart/go-problem/v2 v2.0.3
 	github.com/moby/moby/client v0.5.1
 	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0
@@ -108,7 +108,7 @@ require (
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
-	github.com/kaptinlin/jsonpointer v0.4.27 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.28 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
