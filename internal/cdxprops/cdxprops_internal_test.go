@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
 )
@@ -120,6 +121,61 @@ func TestSetPEMFormat(t *testing.T) {
 
 			require.NotPanics(t, func() { setPEMFormat(tt.given) })
 			tt.then(t, tt.given)
+		})
+	}
+}
+
+// TestLeakDetectionType_MatchesDeclaredConstants is what pins the leak
+// detection vocabulary now that leakDetectionType derives the value instead of
+// looking it up.
+//
+// The derivation is self-maintaining; the declared model constants are what
+// fix the wire strings. Asserting the derived value against the constant, for
+// every material type the rule switch can produce, is therefore the whole
+// contract: neither side can move without this failing.
+//
+// The last row is the point of the change. A hand-written table covers the
+// entries someone remembered, and a material type it does not list becomes
+// UNKNOWN with no log and no failing test; a table's miss branch is also dead
+// code, since cryptoType is only ever assigned by that switch. Deriving the
+// value means a case added to the switch tomorrow is already correct.
+func TestLeakDetectionType_MatchesDeclaredConstants(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		cryptoType cdx.RelatedCryptoMaterialType
+		want       model.DetectionType
+	}{
+		// Every material type leakToComponents' switch can assign, each
+		// checked against the constant model declares for it.
+		{cdx.RelatedCryptoMaterialTypePrivateKey, model.DetectionTypeLeakPrivateKey},
+		{cdx.RelatedCryptoMaterialTypeToken, model.DetectionTypeLeakTOKEN},
+		{cdx.RelatedCryptoMaterialTypeKey, model.DetectionTypeLeakKEY},
+		{cdx.RelatedCryptoMaterialTypePassword, model.DetectionTypeLeakPASSWORD},
+		{cdx.RelatedCryptoMaterialTypeUnknown, model.DetectionTypeUNKNOWN},
+
+		// Not reachable from the switch today. These stand in for the material
+		// type someone adds a rule for tomorrow -- gitleaks has rules for both
+		// -- and each must derive its own name rather than collapse to
+		// UNKNOWN. secret-key also covers the hyphenated shape, so the
+		// derivation cannot quietly become a single-word transform.
+		{cdx.RelatedCryptoMaterialTypeCredential, model.DetectionType("CREDENTIAL")},
+		{cdx.RelatedCryptoMaterialTypeSecretKey, model.DetectionType("SECRET-KEY")},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.cryptoType), func(t *testing.T) {
+			t.Parallel()
+
+			got := leakDetectionType(tt.cryptoType)
+			require.Equal(t, tt.want, got)
+
+			// The failure mode a lookup table has is silently answering
+			// UNKNOWN for anything it does not list, so state it separately:
+			// only the material type that IS unknown may report UNKNOWN.
+			if tt.cryptoType != cdx.RelatedCryptoMaterialTypeUnknown {
+				require.NotEqual(t, model.DetectionTypeUNKNOWN, got)
+			}
 		})
 	}
 }

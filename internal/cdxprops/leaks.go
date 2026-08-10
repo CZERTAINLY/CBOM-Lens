@@ -11,26 +11,33 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 
-// leakDetectionTypes maps the material type a gitleaks rule resolves to onto
-// the Detection.Type the finding reports. Deriving the detection type from the
-// RULE rather than from the produced components is what makes the two
-// private-key branches agree: a private-key finding that carries a PEM bundle
-// delegates to PEMBundle and produces certificates and algorithms, none of
-// which describe the finding, so reading the type back off the first component
-// labelled the same gitleaks hit "PRIVATE-KEY" without a bundle and "" with
-// one.
+// leakDetectionType derives the Detection.Type a leak finding reports from the
+// material type its gitleaks rule resolved to.
 //
-// jwt is absent on purpose. The switch below resolves it to
+// Deriving the detection type from the RULE rather than from the produced
+// components is what makes the two private-key branches agree: a private-key
+// finding that carries a PEM bundle delegates to PEMBundle and produces
+// certificates and algorithms, none of which describe the finding, so reading
+// the type back off the first component labelled the same gitleaks hit
+// "PRIVATE-KEY" without a bundle and "" with one.
+//
+// Deriving it by uppercasing, rather than looking it up in a table, is what
+// makes it stay correct. A table covers the material types whoever wrote it
+// remembered; add a case to the switch in leakToComponents -- say a
+// certificate rule resolving to RelatedCryptoMaterialTypeCertificate -- and
+// the table's miss branch turns it into UNKNOWN with no log and no failing
+// test. Uppercasing is right for every material type CycloneDX has or will
+// have, and it reproduces all five values the table held exactly;
+// TestLeakDetectionType_MatchesDeclaredConstants pins that against the
+// declared model constants, which are what fix the vocabulary.
+//
+// jwt is absent on purpose. The switch resolves it to
 // RelatedCryptoMaterialTypeToken, so a jwt finding has always reported "TOKEN"
 // and model.DetectionTypeLeakJWT has never been reachable. Splitting it out
-// here would make TOKEN and JWT ambiguous for a "token"-ruled finding with no
+// would make TOKEN and JWT ambiguous for a "token"-ruled finding with no
 // consumer asking for the distinction.
-var leakDetectionTypes = map[cdx.RelatedCryptoMaterialType]model.DetectionType{
-	cdx.RelatedCryptoMaterialTypePrivateKey: model.DetectionTypeLeakPrivateKey,
-	cdx.RelatedCryptoMaterialTypeToken:      model.DetectionTypeLeakTOKEN,
-	cdx.RelatedCryptoMaterialTypeKey:        model.DetectionTypeLeakKEY,
-	cdx.RelatedCryptoMaterialTypePassword:   model.DetectionTypeLeakPASSWORD,
-	cdx.RelatedCryptoMaterialTypeUnknown:    model.DetectionTypeUNKNOWN,
+func leakDetectionType(cryptoType cdx.RelatedCryptoMaterialType) model.DetectionType {
+	return model.DetectionType(strings.ToUpper(string(cryptoType)))
 }
 
 func (c Converter) leakToComponents(ctx context.Context, location string, finding model.Finding) (model.DetectionType, []cdx.Component, []cdx.Dependency) {
@@ -50,10 +57,7 @@ func (c Converter) leakToComponents(ctx context.Context, location string, findin
 		cryptoType = cdx.RelatedCryptoMaterialTypeUnknown
 	}
 
-	detectionType, ok := leakDetectionTypes[cryptoType]
-	if !ok {
-		detectionType = model.DetectionTypeUNKNOWN
-	}
+	detectionType := leakDetectionType(cryptoType)
 
 	// Only the private-key branch sets this cryptoType, so delegating here is
 	// equivalent to the `case` this used to sit in — except that the detection
