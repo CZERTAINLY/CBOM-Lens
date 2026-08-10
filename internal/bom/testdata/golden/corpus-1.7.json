@@ -603,6 +603,72 @@
       }
     },
     {
+      "bom-ref": "crypto/crl/crl-issuer.fixture.test@0e6e3e75-64ca-5a92-a925-e7334b75a09c",
+      "type": "cryptographic-asset",
+      "name": "CRL: crl-issuer.fixture.test",
+      "properties": [
+        {
+          "name": "issuer",
+          "value": "CN=crl-issuer.fixture.test"
+        },
+        {
+          "name": "this_update",
+          "value": "2026-07-27T13:35:00Z"
+        },
+        {
+          "name": "next_update",
+          "value": "2027-07-27T13:35:00Z"
+        },
+        {
+          "name": "revoked_count",
+          "value": "1"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "/fixtures/pki.pem"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "other",
+          "format": "PEM"
+        }
+      }
+    },
+    {
+      "bom-ref": "crypto/csr/csr.fixture.test@213145e5-a9d4-5a7c-9b90-c41d60455fc2",
+      "type": "cryptographic-asset",
+      "name": "CSR: csr.fixture.test",
+      "properties": [
+        {
+          "name": "pem_type",
+          "value": "CSR"
+        },
+        {
+          "name": "subject",
+          "value": "CN=csr.fixture.test,O=CBOM Lens Fixtures"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "/fixtures/pki.pem"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "other",
+          "format": "PEM"
+        }
+      }
+    },
+    {
       "bom-ref": "crypto/key/ecdsa-p-256@823fb799-8521-59bf-8e82-a78baf0e1daa",
       "type": "cryptographic-asset",
       "name": "ECDSA-P-256",

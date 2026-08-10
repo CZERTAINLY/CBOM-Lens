@@ -278,7 +278,15 @@ func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]strin
 
 // tlsProtoPath locates the TLS protocol component holding all dangling sites
 // pinned by testdata/golden/corpus-1.6.json.
-const tlsProtoPath = "components[24].cryptoProperties.protocolProperties"
+//
+// The index is positional: assets sort by ref, so anything added to the corpus
+// that sorts before crypto/protocol/tls shifts it. It was 24 until the CSR and
+// CRL entries landed -- crypto/crl/... and crypto/csr/... sort between
+// crypto/certificate/... and crypto/key/... -- and it will move again the next
+// time. If TestBOMReferentialIntegrity_1_6 fails, check this index before
+// reading the failure's advice about the allowlist: the message is written for
+// a genuine rewriter bug and misdirects when the corpus has merely grown.
+const tlsProtoPath = "components[26].cryptoProperties.protocolProperties"
 
 // knownDanglingRefs16 pins every dangling occurrence (ref -> exact sites) in
 // testdata/golden/corpus-1.6.json. Root cause: replaceBOMReferences in

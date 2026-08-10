@@ -29,6 +29,7 @@ var update = flag.Bool("update", false, "update golden files")
 // values via the real cdxprops.Converter, covering:
 //   - one certificate detection (sig-alg + public-key + hash-alg dependency edge)
 //   - one leak detection
+//   - one CSR and one CRL
 //   - one nmap/TLS port detection
 //
 // All inputs come from committed testdata so the output is reproducible on
@@ -138,7 +139,27 @@ func buildRepresentativeCorpus(t *testing.T) []model.Detection {
 	require.NotNil(t, passwordDetection)
 	detections = append(detections, *passwordDetection)
 
-	// 7. Nmap/TLS port detection: same committed raw nmap scan fixture.
+	// 7. CSR and CRL through the real scanner. Both used to be built without a
+	// bom-ref, so Builder.appendDetection dropped them and a scanned .csr or
+	// .crl produced nothing at all. Nothing pinned that end to end, which is
+	// why they are in the corpus now.
+	//
+	// The fixtures are committed static bytes rather than cdxtest.GenCSR /
+	// GenCRL output: those generate a fresh key and use time.Now(), so the
+	// golden would churn on every run.
+	pkiPEM, err := os.ReadFile(filepath.Join("testdata", "fixtures", "csr.pem"))
+	require.NoError(t, err)
+	crlPEM, err := os.ReadFile(filepath.Join("testdata", "fixtures", "crl.pem"))
+	require.NoError(t, err)
+	pkiBundle, err := pemscan.Scanner{}.Scan(ctx, append(pkiPEM, crlPEM...), "/fixtures/pki.pem")
+	require.NoError(t, err)
+	require.Len(t, pkiBundle.CertificateRequests, 1)
+	require.Len(t, pkiBundle.CRLs, 1)
+	pkiDetection := conv.PEMBundle(ctx, pkiBundle)
+	require.NotNil(t, pkiDetection)
+	detections = append(detections, *pkiDetection)
+
+	// 8. Nmap/TLS port detection: same committed raw nmap scan fixture.
 	nmapModel := nmap.HostToModel(ctx, raw.Info)
 	nmapDetections := conv.Nmap(ctx, nmapModel)
 	require.NotEmpty(t, nmapDetections)
