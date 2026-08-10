@@ -993,8 +993,12 @@ func TestValidateAs_RejectsUnreadableSpecVersion(t *testing.T) {
 // That is correct; doing it without a word in the log is not. csrToCDX and
 // crlToCDX produced refless components, so scanning a .csr or a .crl reported
 // nothing and exited 0, and nothing in the run said an asset had been thrown
-// away. The warning names which half of the identity is missing, so it points
-// at the producer rather than at the Builder.
+// away. The warning names which half of the identity is missing, so it says
+// what is wrong with the component rather than reading as a Builder failure.
+//
+// The "neither" case is why the line carries more than name and ref: with both
+// empty those two fields are empty strings and the warning identified nothing
+// at all. Type, asset type and description are what remain.
 func TestAppendDetection_DropsAndLogsUnidentifiableComponent(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1002,18 +1006,38 @@ func TestAppendDetection_DropsAndLogsUnidentifiableComponent(t *testing.T) {
 		wantReason string
 	}{
 		{
-			name:       "no bom-ref",
-			component:  cdx.Component{Name: "CSR: Test CSR", Type: cdx.ComponentTypeCryptographicAsset},
+			name: "no bom-ref",
+			component: cdx.Component{
+				Name:        "CSR: Test CSR",
+				Type:        cdx.ComponentTypeCryptographicAsset,
+				Description: "Certificate Signing Request",
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				},
+			},
 			wantReason: "no bom-ref",
 		},
 		{
-			name:       "no name",
-			component:  cdx.Component{BOMRef: "crypto/csr/x@sha256:abc", Type: cdx.ComponentTypeCryptographicAsset},
+			name: "no name",
+			component: cdx.Component{
+				BOMRef:      "crypto/csr/x@sha256:abc",
+				Type:        cdx.ComponentTypeCryptographicAsset,
+				Description: "Certificate Signing Request",
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				},
+			},
 			wantReason: "no name",
 		},
 		{
-			name:       "neither",
-			component:  cdx.Component{Type: cdx.ComponentTypeCryptographicAsset},
+			name: "neither",
+			component: cdx.Component{
+				Type:        cdx.ComponentTypeCryptographicAsset,
+				Description: "Certificate Signing Request",
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				},
+			},
 			wantReason: "no bom-ref and no name",
 		},
 	}
@@ -1042,8 +1066,45 @@ func TestAppendDetection_DropsAndLogsUnidentifiableComponent(t *testing.T) {
 				"the drop must be visible at Warn: an operator has to be able to "+
 					"explain a missing asset in a delivered BOM")
 			require.Contains(t, logged, `reason="`+tt.wantReason+`"`)
-			require.Contains(t, logged, "source=PEM")
-			require.Contains(t, logged, "location=/test/bundle.pem")
+			require.Contains(t, logged, "detection.source=PEM")
+			require.Contains(t, logged, "detection.location=/test/bundle.pem")
+
+			// What the component IS, which is all a reader has for the case
+			// where name and ref are both empty.
+			require.Contains(t, logged, "component.type=cryptographic-asset")
+			require.Contains(t, logged, "component.asset_type=related-crypto-material")
+			require.Contains(t, logged, `component.description="Certificate Signing Request"`)
 		})
 	}
+}
+
+// TestAppendDetection_DropWarningSurvivesNilCryptoProperties guards the nil
+// dereference the added asset-type field would otherwise be.
+//
+// CryptoProperties is a pointer and plenty of components have none -- a plain
+// library component, or any component built by a producer that failed early.
+// Reading AssetType off it unguarded would turn a warning about a dropped
+// component into a panic that takes the whole scan down, which is the same
+// class of defect as the zero public-key component that once crashed
+// restOfPEMBundleToCDX.
+func TestAppendDetection_DropWarningSurvivesNilCryptoProperties(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() {
+		b.AppendDetections(context.Background(), model.Detection{
+			Source:     "LEAKS",
+			Type:       model.DetectionTypeLeakPrivateKey,
+			Location:   "/test/secrets.env",
+			Components: []cdx.Component{{Type: cdx.ComponentTypeLibrary}},
+		})
+	})
+
+	require.Contains(t, logBuf.String(), "dropping component: cannot be identified")
+	require.Empty(t, b.components)
 }

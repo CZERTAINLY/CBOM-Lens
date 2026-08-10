@@ -127,12 +127,33 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 			// refless components and nothing said so. Warn, not Debug: the
 			// audience is whoever has to explain a missing asset in a delivered
 			// BOM, and after the CSR/CRL fix no production path reaches here.
+			//
+			// For reason="no bom-ref and no name" the line carried name="",
+			// ref="" and nothing else, so it said an asset was thrown away
+			// without saying which. Type, asset type and description are what
+			// is in hand to tell one dropped component from another.
+			//
+			// detection.source is the SCANNER's label and is not the producer.
+			// Converter.Leak stamps "LEAKS" onto components PEMBundle's
+			// producers built, so a defect in internal/cdxprops/pem.go reads
+			// here as one in the gitleaks path. Naming the producer would mean
+			// threading producer identity through model.Detection, which is
+			// out of scope; the field names say "detection", so the line
+			// reports where the detection came from and does not claim to
+			// identify what built the component.
+			var assetType cdx.CryptoAssetType
+			if compo.CryptoProperties != nil {
+				assetType = compo.CryptoProperties.AssetType
+			}
 			slog.WarnContext(ctx, "dropping component: cannot be identified",
 				"reason", missingIdentity(compo),
 				"name", compo.Name,
 				"ref", compo.BOMRef,
-				"source", detection.Source,
-				"location", detection.Location)
+				"component.type", compo.Type,
+				"component.asset_type", assetType,
+				"component.description", compo.Description,
+				"detection.source", detection.Source,
+				"detection.location", detection.Location)
 			continue
 		}
 		stored, ok := b.components[compo.BOMRef]
@@ -146,7 +167,16 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 }
 
 // missingIdentity names which half of a component's identity is absent, so the
-// drop warning points at the producer's defect rather than at the Builder.
+// drop warning says what is wrong with the component rather than reading as a
+// Builder failure.
+//
+// It must only be called for a component that IS unidentifiable, i.e. under
+// its one caller's `c.BOMRef == "" || c.Name == ""` guard. Outside that guard
+// it is not merely useless but wrong: the default arm returns "no name" for a
+// fully-populated component. The alternative -- returning "" when nothing is
+// missing -- was rejected because it would put reason="" in a warning whose
+// entire job is to state the reason, turning a caller's mistake into a log
+// line that looks fine.
 func missingIdentity(c cdx.Component) string {
 	switch {
 	case c.BOMRef == "" && c.Name == "":
