@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"regexp"
 	"sort"
@@ -982,4 +983,67 @@ func TestValidateAs_RejectsUnreadableSpecVersion(t *testing.T) {
 	err = b.validateAs(cdx.SpecVersion1_7, []byte("not json"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reading specVersion")
+}
+
+// TestAppendDetection_DropsAndLogsUnidentifiableComponent pins the drop that
+// used to be silent.
+//
+// A component with no bom-ref cannot be stored (the map is keyed by ref) and
+// one with no name is unreadable in the emitted document, so both are dropped.
+// That is correct; doing it without a word in the log is not. csrToCDX and
+// crlToCDX produced refless components, so scanning a .csr or a .crl reported
+// nothing and exited 0, and nothing in the run said an asset had been thrown
+// away. The warning names which half of the identity is missing, so it points
+// at the producer rather than at the Builder.
+func TestAppendDetection_DropsAndLogsUnidentifiableComponent(t *testing.T) {
+	tests := []struct {
+		name       string
+		component  cdx.Component
+		wantReason string
+	}{
+		{
+			name:       "no bom-ref",
+			component:  cdx.Component{Name: "CSR: Test CSR", Type: cdx.ComponentTypeCryptographicAsset},
+			wantReason: "no bom-ref",
+		},
+		{
+			name:       "no name",
+			component:  cdx.Component{BOMRef: "crypto/csr/x@sha256:abc", Type: cdx.ComponentTypeCryptographicAsset},
+			wantReason: "no name",
+		},
+		{
+			name:       "neither",
+			component:  cdx.Component{Type: cdx.ComponentTypeCryptographicAsset},
+			wantReason: "no bom-ref and no name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			restore := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			t.Cleanup(func() { slog.SetDefault(restore) })
+
+			b, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			b.AppendDetections(context.Background(), model.Detection{
+				Source:     "PEM",
+				Type:       model.DetectionTypePEM,
+				Location:   "/test/bundle.pem",
+				Components: []cdx.Component{tt.component},
+			})
+
+			require.Empty(t, b.components, "an unidentifiable component must not be stored")
+
+			logged := logBuf.String()
+			require.Contains(t, logged, "dropping component: cannot be identified",
+				"the drop must be visible at Warn: an operator has to be able to "+
+					"explain a missing asset in a delivered BOM")
+			require.Contains(t, logged, `reason="`+tt.wantReason+`"`)
+			require.Contains(t, logged, "source=PEM")
+			require.Contains(t, logged, "location=/test/bundle.pem")
+		})
+	}
 }

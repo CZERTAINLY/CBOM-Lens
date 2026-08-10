@@ -199,7 +199,7 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		compos = append(compos, pubKeyAlgo, pubKeyCompo, privKeyAlgo, privKeyCompo)
 	}
 
-	bundleCompos, err := c.restOfPEMBundleToCDX(ctx, bundle, bundle.Location)
+	bundleCompos, err := c.restOfPEMBundleToCDX(ctx, bundle)
 	if err != nil {
 		slog.WarnContext(ctx, "analyzing bundle returned an error", "error", err)
 	}

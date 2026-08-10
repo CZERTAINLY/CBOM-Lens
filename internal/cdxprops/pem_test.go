@@ -1,15 +1,20 @@
 package cdxprops_test
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/elliptic"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/OmniTrustILM/cbom-lens/internal/bom"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
@@ -290,4 +295,204 @@ func TestPEMBundle_StandaloneDSAPublicKeyDoesNotPanic(t *testing.T) {
 		require.NotEmpty(t, compo.BOMRef, "component with no bom-ref")
 		require.NotNil(t, compo.CryptoProperties, "%s has nil CryptoProperties", compo.Name)
 	}
+}
+
+// csrCRLBundle builds the smallest bundle that carries one CSR and one CRL,
+// signed by the same CA so the CRL parses. location is what the detection will
+// report, so callers can build the same bytes at two paths.
+func csrCRLBundle(t *testing.T, location string) model.PEMBundle {
+	t.Helper()
+
+	csrKey, err := cdxtest.GenECPrivateKey(elliptic.P256())
+	require.NoError(t, err)
+	csr, _, err := cdxtest.GenCSR(csrKey)
+	require.NoError(t, err)
+
+	ca, err := cdxtest.CertBuilder{}.
+		WithIsCA(true).
+		WithKeyUsage(x509.KeyUsageCRLSign | x509.KeyUsageCertSign).
+		Generate()
+	require.NoError(t, err)
+	signer, ok := ca.Key.(crypto.Signer)
+	require.True(t, ok)
+	crl, _, err := cdxtest.GenCRL(ca.Cert, signer)
+	require.NoError(t, err)
+
+	return model.PEMBundle{
+		Location:            location,
+		CertificateRequests: []*x509.CertificateRequest{csr},
+		CRLs:                []*x509.RevocationList{crl},
+	}
+}
+
+// emitDocument runs a detection through the real Builder for the given spec
+// version and returns the emitted document, unmarshalled.
+func emitDocument(t *testing.T, version string, detections ...model.Detection) cdx.BOM {
+	t.Helper()
+
+	b, err := bom.NewBuilder(model.CBOM{Version: version})
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, b.AppendDetections(t.Context(), detections...).AsJSON(t.Context(), &buf))
+
+	var doc cdx.BOM
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &doc))
+	return doc
+}
+
+// componentsByName indexes an emitted document by component name.
+func componentsByName(doc cdx.BOM) map[string]cdx.Component {
+	byName := map[string]cdx.Component{}
+	if doc.Components == nil {
+		return byName
+	}
+	for _, compo := range *doc.Components {
+		byName[compo.Name] = compo
+	}
+	return byName
+}
+
+// TestPEMBundle_CSRAndCRLReachTheBOM is the end of the path a scanned .csr or
+// .crl actually takes. csrToCDX and crlToCDX built components with no bom-ref,
+// and Builder.appendDetection drops those, so the file was parsed, converted,
+// and then thrown away: an empty BOM and exit 0.
+//
+// It asserts on the EMITTED DOCUMENT rather than on detection.Components. The
+// components were always present in the detection -- asserting that would have
+// been green on the broken tree. The Builder is where the loss happened, so the
+// Builder has to be in the picture. Both spec versions are covered because the
+// 1.7 emitter maps components independently of 1.6.
+func TestPEMBundle_CSRAndCRLReachTheBOM(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			bundle := csrCRLBundle(t, "/test/pki.pem")
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+			require.NotNil(t, d)
+
+			byName := componentsByName(emitDocument(t, version, *d))
+
+			csrCompo, ok := byName["CSR: Test CSR"]
+			require.True(t, ok, "the CSR never reached the document, got %v", slices.Sorted(maps.Keys(byName)))
+			require.NotEmpty(t, csrCompo.BOMRef)
+			require.Equal(t, "CSR", cdxtest.GetProp(csrCompo, "pem_type"))
+
+			var crlCompo cdx.Component
+			for name, compo := range byName {
+				if strings.HasPrefix(name, "CRL: ") {
+					crlCompo = compo
+				}
+			}
+			require.NotEmpty(t, crlCompo.Name, "the CRL never reached the document, got %v", slices.Sorted(maps.Keys(byName)))
+			require.NotEmpty(t, crlCompo.BOMRef)
+			require.Equal(t, "1", cdxtest.GetProp(crlCompo, "revoked_count"))
+
+			// The location moved to evidence.occurrences, where the Builder can
+			// record every path the same content was found at.
+			require.Empty(t, cdxtest.GetProp(crlCompo, "location"),
+				"location is the Builder's to record, not a property on a content-addressed component")
+			require.NoError(t, cdxtest.HasEvidencePath(crlCompo, "/test/pki.pem"))
+		})
+	}
+}
+
+// TestPEMBundle_TwoCSRsSameSubjectStayDistinct is what fails if someone
+// replaces the DER digest with Converter.BOMRefHash.
+//
+// BOMRefHash hashes the component's own JSON, and a CSR component carries the
+// subject but nothing of the key. Two requests for the same subject with
+// different keys would therefore hash to one ref, and the Builder's first-wins
+// dedup would silently discard the second -- one real asset short, with no
+// warning. Hashing the request's DER keeps them apart because the DER covers
+// the key.
+func TestPEMBundle_TwoCSRsSameSubjectStayDistinct(t *testing.T) {
+	t.Parallel()
+
+	// cdxtest.GenCSR always uses CN "Test CSR", so two calls differ only in the
+	// key -- exactly the collision under test.
+	newCSR := func(t *testing.T) *x509.CertificateRequest {
+		t.Helper()
+		key, err := cdxtest.GenECPrivateKey(elliptic.P256())
+		require.NoError(t, err)
+		csr, _, err := cdxtest.GenCSR(key)
+		require.NoError(t, err)
+		return csr
+	}
+
+	first, second := newCSR(t), newCSR(t)
+	require.Equal(t, first.Subject.String(), second.Subject.String(),
+		"the fixtures must share a subject, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/requests.pem",
+		CertificateRequests: []*x509.CertificateRequest{first, second},
+	})
+	require.NotNil(t, d)
+
+	doc := emitDocument(t, "1.6", *d)
+	require.NotNil(t, doc.Components)
+
+	var refs []string
+	for _, compo := range *doc.Components {
+		if strings.HasPrefix(compo.Name, "CSR: ") {
+			refs = append(refs, compo.BOMRef)
+		}
+	}
+	require.Len(t, refs, 2,
+		"two requests for the same subject with different keys collapsed into one component")
+	require.NotEqual(t, refs[0], refs[1])
+}
+
+// TestPEMBundle_SameCRLTwoLocationsDedupes is the other half of dropping the
+// "location" property. The ref is a digest of the list's DER, so the same CRL
+// found at two paths is one component -- and a stored "location" property would
+// have frozen whichever path was seen first, quietly claiming the asset lives
+// only there. evidence.occurrences carries both.
+func TestPEMBundle_SameCRLTwoLocationsDedupes(t *testing.T) {
+	t.Parallel()
+
+	ca, err := cdxtest.CertBuilder{}.
+		WithIsCA(true).
+		WithKeyUsage(x509.KeyUsageCRLSign | x509.KeyUsageCertSign).
+		Generate()
+	require.NoError(t, err)
+	signer, ok := ca.Key.(crypto.Signer)
+	require.True(t, ok)
+	crl, _, err := cdxtest.GenCRL(ca.Cert, signer)
+	require.NoError(t, err)
+
+	c := cdxprops.NewConverter()
+	var detections []model.Detection
+	for _, location := range []string{"/etc/pki/ca.crl", "/var/backup/ca.crl"} {
+		d := c.PEMBundle(t.Context(), model.PEMBundle{
+			Location: location,
+			CRLs:     []*x509.RevocationList{crl},
+		})
+		require.NotNil(t, d)
+		detections = append(detections, *d)
+	}
+
+	doc := emitDocument(t, "1.6", detections...)
+	require.NotNil(t, doc.Components)
+
+	var crls []cdx.Component
+	for _, compo := range *doc.Components {
+		if strings.HasPrefix(compo.Name, "CRL: ") {
+			crls = append(crls, compo)
+		}
+	}
+	require.Len(t, crls, 1, "the same CRL at two paths must be one component")
+
+	require.NotNil(t, crls[0].Evidence)
+	require.NotNil(t, crls[0].Evidence.Occurrences)
+	var locations []string
+	for _, occ := range *crls[0].Evidence.Occurrences {
+		locations = append(locations, occ.Location)
+	}
+	require.ElementsMatch(t, []string{"/etc/pki/ca.crl", "/var/backup/ca.crl"}, locations,
+		"both paths the CRL was found at must survive as occurrences")
 }

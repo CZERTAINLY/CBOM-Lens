@@ -18,13 +18,13 @@ import (
 )
 
 // PEMBundleToCDX converts a PEM bundle to CycloneDX components
-func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle, location string) ([]cdx.Component, error) {
+func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle) ([]cdx.Component, error) {
 	components := make([]cdx.Component, 0)
 	var errs []error
 
 	// Convert certificate requests
 	for _, csr := range bundle.CertificateRequests {
-		components = append(components, csrToCDX(csr, location))
+		components = append(components, c.csrToCDX(csr))
 	}
 
 	// Convert public keys
@@ -48,7 +48,7 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 
 	// Convert CRLs
 	for _, crl := range bundle.CRLs {
-		components = append(components, crlToCDX(crl, location))
+		components = append(components, c.crlToCDX(crl))
 	}
 
 	// try to parse unrecognized parts of a PEM
@@ -66,10 +66,25 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 	return components, errors.Join(errs...)
 }
 
-func csrToCDX(csr *x509.CertificateRequest, _ string) cdx.Component {
+// csrToCDX converts a certificate signing request into a component.
+//
+// The bom-ref is content-addressed over the request's own DER, mirroring
+// crypto/certificate/<name>@<hash(cert.Raw)>. Without a bom-ref at all
+// Builder.appendDetection dropped the component, so scanning a .csr reported
+// nothing and exited 0; an empty Name would have done the same, hence the
+// csrSubjectName fallback.
+//
+// It deliberately does NOT use Converter.BOMRefHash. That hashes the
+// component's JSON, and this component carries the subject but nothing of the
+// key, so two requests for the same subject with different keys would hash to
+// one ref and the Builder's first-wins dedup would silently discard the
+// second. The DER covers the key.
+func (c Converter) csrToCDX(csr *x509.CertificateRequest) cdx.Component {
+	name := csrSubjectName(csr)
 	compo := cdx.Component{
-		Type: cdx.ComponentTypeCryptographicAsset,
-		Name: fmt.Sprintf("CSR: %s", csr.Subject.CommonName),
+		Type:   cdx.ComponentTypeCryptographicAsset,
+		Name:   "CSR: " + name,
+		BOMRef: "crypto/csr/" + name + "@" + c.bomRefHasher(csr.Raw),
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
 			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
@@ -84,25 +99,76 @@ func csrToCDX(csr *x509.CertificateRequest, _ string) cdx.Component {
 	return compo
 }
 
-func crlToCDX(crl *x509.RevocationList, location string) cdx.Component {
+// crlToCDX converts a certificate revocation list into a component.
+//
+// The bom-ref is content-addressed over the list's own DER, mirroring
+// crypto/certificate/<name>@<hash(cert.Raw)>. Without a bom-ref at all
+// Builder.appendDetection dropped the component, so scanning a .crl reported
+// nothing and exited 0.
+//
+// It deliberately does NOT use Converter.BOMRefHash, for the reason given on
+// csrToCDX: hashing the component's JSON would let two distinct lists with the
+// same issuer and timestamps collapse onto one ref.
+//
+// There is no "location" property. Now that the ref is content-addressed, the
+// same CRL found at two paths dedups to one component and the stored copy
+// would have kept only the first location -- a property that quietly lies
+// about where the asset was seen. evidence.occurrences already carries every
+// location, and populating it is the Builder's job.
+func (c Converter) crlToCDX(crl *x509.RevocationList) cdx.Component {
+	name := crlIssuerName(crl)
+	props := []cdx.Property{
+		{Name: "issuer", Value: crl.Issuer.String()},
+		{Name: "this_update", Value: crl.ThisUpdate.Format(time.RFC3339)},
+	}
+	// RFC 5280 makes nextUpdate OPTIONAL. Formatting it unconditionally
+	// published the zero time, "0001-01-01T00:00:00Z", as a real expiry.
+	if !crl.NextUpdate.IsZero() {
+		props = append(props, cdx.Property{Name: "next_update", Value: crl.NextUpdate.Format(time.RFC3339)})
+	}
+	props = append(props, cdx.Property{Name: "revoked_count", Value: fmt.Sprintf("%d", len(crl.RevokedCertificateEntries))})
+
 	compo := cdx.Component{
-		Type: cdx.ComponentTypeCryptographicAsset,
-		Name: "Certificate Revocation List",
+		Type:   cdx.ComponentTypeCryptographicAsset,
+		Name:   "CRL: " + name,
+		BOMRef: "crypto/crl/" + name + "@" + c.bomRefHasher(crl.Raw),
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
 			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
 				Type: cdx.RelatedCryptoMaterialTypeOther,
 			},
 		},
-		Properties: &[]cdx.Property{
-			{Name: "location", Value: location},
-			{Name: "issuer", Value: crl.Issuer.String()},
-			{Name: "this_update", Value: crl.ThisUpdate.Format(time.RFC3339)},
-			{Name: "next_update", Value: crl.NextUpdate.Format(time.RFC3339)},
-			{Name: "revoked_count", Value: fmt.Sprintf("%d", len(crl.RevokedCertificateEntries))},
-		},
+		Properties: &props,
 	}
 	return compo
+}
+
+// csrSubjectName names a certificate request for its bom-ref and Name, the way
+// formatCertificateName names a certificate: CN if there is one, else the full
+// subject DN. A request has no serial number to fall back on, so an entirely
+// empty subject yields "unknown" -- an empty Name is the other half of what
+// Builder.appendDetection drops.
+func csrSubjectName(csr *x509.CertificateRequest) string {
+	if csr.Subject.CommonName != "" {
+		return csr.Subject.CommonName
+	}
+	if subject := csr.Subject.String(); subject != "" {
+		return subject
+	}
+	return "unknown"
+}
+
+// crlIssuerName names a revocation list for its bom-ref and Name. A CRL has no
+// subject, so it is named after its issuer, otherwise following
+// csrSubjectName.
+func crlIssuerName(crl *x509.RevocationList) string {
+	if crl.Issuer.CommonName != "" {
+		return crl.Issuer.CommonName
+	}
+	if issuer := crl.Issuer.String(); issuer != "" {
+		return issuer
+	}
+	return "unknown"
 }
 
 // Helper functions

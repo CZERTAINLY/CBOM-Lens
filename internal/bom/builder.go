@@ -120,6 +120,19 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 
 	for _, compo := range detection.Components {
 		if compo.BOMRef == "" || compo.Name == "" {
+			// A component without a ref or a name cannot be stored: the map is
+			// keyed by ref, and a nameless component is unreadable in the
+			// emitted document. Dropping it silently is how a scanned .csr and
+			// .crl produced an empty BOM and exit 0 -- the producers built
+			// refless components and nothing said so. Warn, not Debug: the
+			// audience is whoever has to explain a missing asset in a delivered
+			// BOM, and after the CSR/CRL fix no production path reaches here.
+			slog.WarnContext(ctx, "dropping component: cannot be identified",
+				"reason", missingIdentity(compo),
+				"name", compo.Name,
+				"ref", compo.BOMRef,
+				"source", detection.Source,
+				"location", detection.Location)
 			continue
 		}
 		stored, ok := b.components[compo.BOMRef]
@@ -129,6 +142,19 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 		}
 		addEvidenceLocation(&compo, detection.Location)
 		b.components[compo.BOMRef] = &compo
+	}
+}
+
+// missingIdentity names which half of a component's identity is absent, so the
+// drop warning points at the producer's defect rather than at the Builder.
+func missingIdentity(c cdx.Component) string {
+	switch {
+	case c.BOMRef == "" && c.Name == "":
+		return "no bom-ref and no name"
+	case c.BOMRef == "":
+		return "no bom-ref"
+	default:
+		return "no name"
 	}
 }
 
