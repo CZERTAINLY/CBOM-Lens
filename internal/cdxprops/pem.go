@@ -154,8 +154,14 @@ func (c Converter) crlToCDX(crl *x509.RevocationList) cdx.Component {
 // csrSubjectName names a certificate request for its bom-ref and Name, the way
 // formatCertificateName names a certificate: CN if there is one, else the full
 // subject DN. A request has no serial number to fall back on, so an entirely
-// empty subject yields "unknown" -- an empty Name is the other half of what
-// Builder.appendDetection drops.
+// empty subject yields "unknown".
+//
+// That fallback is about the REF, not about the drop. It does not exist to
+// keep Builder.appendDetection from discarding an empty Name -- the "CSR: "
+// prefix already guarantees the Name is non-empty whatever this returns. It
+// exists because the ref is crypto/csr/<name>@<digest>, and without it an
+// empty subject produces "crypto/csr/@sha256:..." -- a ref a reader cannot
+// tell from a truncation or a formatting bug.
 func csrSubjectName(csr *x509.CertificateRequest) string {
 	if csr.Subject.CommonName != "" {
 		return csr.Subject.CommonName
@@ -168,7 +174,7 @@ func csrSubjectName(csr *x509.CertificateRequest) string {
 
 // crlIssuerName names a revocation list for its bom-ref and Name. A CRL has no
 // subject, so it is named after its issuer, otherwise following
-// csrSubjectName.
+// csrSubjectName -- including why the "unknown" fallback is there.
 func crlIssuerName(crl *x509.RevocationList) string {
 	if crl.Issuer.CommonName != "" {
 		return crl.Issuer.CommonName

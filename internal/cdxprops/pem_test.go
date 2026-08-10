@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"math/big"
 	"slices"
 	"strings"
 	"testing"
@@ -548,6 +550,151 @@ func TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock(t *testing.T) {
 		"the join must keep the blocks apart, not merge them into one blob")
 	require.Contains(t, logged, "1.3.9999.6.1.1",
 		"the underlying cause must survive the wrapping")
+}
+
+// TestPEMBundle_TwoCRLsSameIssuerStayDistinct is the CRL twin of
+// TestPEMBundle_TwoCSRsSameSubjectStayDistinct, and the only thing that fails
+// if someone swaps crlToCDX's DER digest for Converter.BOMRefHash.
+//
+// Until now that swap was caught only by the byte goldens, which stop
+// defending it the moment someone runs -update.
+//
+// The two lists are built with identical issuer, thisUpdate, nextUpdate and
+// revoked COUNT, differing only in the CRL number and which serial is revoked
+// -- none of which the component records. So the two components are
+// byte-identical JSON, and BOMRefHash would give them one ref and the
+// Builder's first-wins dedup would silently discard the second. Hashing the
+// DER keeps them apart because the DER covers the revoked entries.
+func TestPEMBundle_TwoCRLsSameIssuerStayDistinct(t *testing.T) {
+	t.Parallel()
+
+	ca, err := cdxtest.CertBuilder{}.
+		WithIsCA(true).
+		WithKeyUsage(x509.KeyUsageCRLSign | x509.KeyUsageCertSign).
+		Generate()
+	require.NoError(t, err)
+	signer, ok := ca.Key.(crypto.Signer)
+	require.True(t, ok)
+
+	// Fixed timestamps. time.Now() would differ between the two calls only
+	// below RFC3339's one-second resolution, so the collision this test is
+	// about would be reintroduced or not depending on how fast the machine is.
+	thisUpdate := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	nextUpdate := thisUpdate.Add(24 * time.Hour)
+
+	newCRL := func(t *testing.T, number, serial int64) *x509.RevocationList {
+		t.Helper()
+
+		der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+			Number:     big.NewInt(number),
+			ThisUpdate: thisUpdate,
+			NextUpdate: nextUpdate,
+			RevokedCertificateEntries: []x509.RevocationListEntry{
+				{SerialNumber: big.NewInt(serial), RevocationTime: thisUpdate},
+			},
+		}, ca.Cert, signer)
+		require.NoError(t, err)
+
+		crl, err := x509.ParseRevocationList(der)
+		require.NoError(t, err)
+		return crl
+	}
+
+	first, second := newCRL(t, 1, 42), newCRL(t, 2, 43)
+	require.Equal(t, first.Issuer.String(), second.Issuer.String(),
+		"the fixtures must share an issuer, or this proves nothing")
+	require.Len(t, second.RevokedCertificateEntries, len(first.RevokedCertificateEntries),
+		"the revoked count is what the component records, so it must not differ")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location: "/test/revocations.pem",
+		CRLs:     []*x509.RevocationList{first, second},
+	})
+	require.NotNil(t, d)
+
+	doc := emitDocument(t, "1.6", *d)
+	require.NotNil(t, doc.Components)
+
+	var refs []string
+	for _, compo := range *doc.Components {
+		if strings.HasPrefix(compo.Name, "CRL: ") {
+			refs = append(refs, compo.BOMRef)
+		}
+	}
+	require.Len(t, refs, 2,
+		"two lists from the same issuer with different revocations collapsed into one component")
+	require.NotEqual(t, refs[0], refs[1])
+}
+
+// TestPEMBundle_EmptyDNFallsBackToUnknown pins the "unknown" fallbacks in
+// csrSubjectName and crlIssuerName, which nothing exercised -- deleting either
+// broke no test.
+//
+// They are not there to stop Builder.appendDetection dropping an empty Name,
+// which is what their comment used to claim: the "CSR: " and "CRL: " prefixes
+// make Name non-empty regardless. They are there for the ref, which is
+// crypto/csr/<name>@<digest>; without them an empty DN yields
+// "crypto/csr/@sha256:..." -- indistinguishable from a truncation.
+//
+// Both DNs here are genuinely empty in real DER, not hand-built structs: Go
+// will issue a certificate and a request with no subject at all.
+func TestPEMBundle_EmptyDNFallsBackToUnknown(t *testing.T) {
+	t.Parallel()
+
+	key, err := cdxtest.GenECPrivateKey(elliptic.P256())
+	require.NoError(t, err)
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
+	require.NoError(t, err)
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	require.NoError(t, err)
+	require.Empty(t, csr.Subject.String(), "the request's subject must really be empty")
+
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		NotBefore:             time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:              time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCRLSign | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, key.Public(), key)
+	require.NoError(t, err)
+	ca, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+	require.Empty(t, ca.Subject.String(), "the issuer's subject must really be empty")
+
+	crlDER, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		Number:     big.NewInt(1),
+		ThisUpdate: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NextUpdate: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+	}, ca, key)
+	require.NoError(t, err)
+	crl, err := x509.ParseRevocationList(crlDER)
+	require.NoError(t, err)
+	require.Empty(t, crl.Issuer.String(), "the list's issuer must really be empty")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/anonymous.pem",
+		CertificateRequests: []*x509.CertificateRequest{csr},
+		CRLs:                []*x509.RevocationList{crl},
+	})
+	require.NotNil(t, d)
+
+	byName := map[string]cdx.Component{}
+	for _, compo := range d.Components {
+		byName[compo.Name] = compo
+	}
+
+	for prefix, refPrefix := range map[string]string{
+		"CSR: ": "crypto/csr/unknown@",
+		"CRL: ": "crypto/crl/unknown@",
+	} {
+		compo, ok := byName[prefix+"unknown"]
+		require.True(t, ok, "no %qunknown component; got %v", prefix, slices.Sorted(maps.Keys(byName)))
+		require.True(t, strings.HasPrefix(compo.BOMRef, refPrefix),
+			"an empty DN must not produce a ref with a hole in it: %q", compo.BOMRef)
+	}
 }
 
 // TestPEMBundle_SameCRLTwoLocationsDedupes is the other half of dropping the

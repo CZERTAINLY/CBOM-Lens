@@ -102,6 +102,12 @@ func TestOIDSweep_PKIXPublicKey(t *testing.T) {
 func TestOIDSweep_PKCS8PrivateKey(t *testing.T) {
 	t.Parallel()
 
+	// Its sibling above has this guard and this one did not. A sweep over an
+	// empty table runs zero subtests and reports PASS, so without it the day
+	// wantRegistry loses its entries is the day this test stops testing and
+	// says nothing.
+	require.NotEmpty(t, wantRegistry)
+
 	for dotted, want := range wantRegistry {
 		t.Run(want.name, func(t *testing.T) {
 			t.Parallel()
