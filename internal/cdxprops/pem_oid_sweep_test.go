@@ -107,7 +107,7 @@ func TestOIDSweep_PKCS8PrivateKey(t *testing.T) {
 			t.Parallel()
 
 			c := NewConverter().WithIlmExtensions(true)
-			key, algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, oidOf(t, dotted)))
+			key, algo, err := c.unsupportedPKCS8PrivateKey(t.Context(), synthPKCS8(t, oidOf(t, dotted)))
 			require.NoError(t, err, "OID %s must be recognised", dotted)
 
 			require.Equal(t, want.name, algo.Name)
@@ -184,7 +184,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		require.ErrorContains(t, err, "unsupported fallback oid")
 		require.ErrorContains(t, err, "1.3.9999.6.1.1")
 
-		_, _, err = c.unsupportedPKCS8PrivateKey(synthPKCS8(t, unknown))
+		_, _, err = c.unsupportedPKCS8PrivateKey(t.Context(), synthPKCS8(t, unknown))
 		require.ErrorContains(t, err, "unsupported fallback oid")
 	})
 
@@ -214,7 +214,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		require.ErrorContains(t, err, "parsing PKIX via ASN.1")
 
 		fullPK := synthPKCS8(t, mlKEM768OID)
-		_, _, err = c.unsupportedPKCS8PrivateKey(fullPK[:len(fullPK)/2])
+		_, _, err = c.unsupportedPKCS8PrivateKey(t.Context(), fullPK[:len(fullPK)/2])
 		require.ErrorContains(t, err, "parsing PKCS#8 via ASN.1")
 	})
 
@@ -224,7 +224,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		_, _, err := c.unsupportedPKIX(nil)
 		require.Error(t, err)
 
-		_, _, err = c.unsupportedPKCS8PrivateKey(nil)
+		_, _, err = c.unsupportedPKCS8PrivateKey(t.Context(), nil)
 		require.Error(t, err)
 	})
 

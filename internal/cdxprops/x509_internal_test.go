@@ -1,6 +1,8 @@
 package cdxprops
 
 import (
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"testing"
 
@@ -126,6 +128,52 @@ func TestCertHitToComponents_NoMaterialPropsOnCertificate(t *testing.T) {
 		require.NotEmpty(t, certProps.SubjectPublicKeyRef)
 	}
 	require.True(t, found, "no certificate component emitted")
+}
+
+// TestPKCS8Struct_ParsesRFC5958TrailingFields pins the assumption that made it
+// safe to add PrivateKey to pkcs8Struct.
+//
+// RFC 5958's OneAsymmetricKey extends RFC 5208's PrivateKeyInfo with two
+// trailing optional elements, attributes [0] and publicKey [1]. pkcs8Struct
+// declares neither, so if Go's asn1 rejected undeclared trailing elements the
+// size check would reject every key encoded that way -- and the failure would
+// be the exact one the check exists to prevent, only inverted: a real key
+// reported as absent.
+//
+// It does not: encoding/asn1 tolerates extra elements at the end of a SEQUENCE
+// so sequences can be extended. The three corpus fixtures do not exercise this
+// (all three unmarshal with zero trailing bytes), so it is pinned explicitly
+// here rather than left to a fixture that might be regenerated.
+func TestPKCS8Struct_ParsesRFC5958TrailingFields(t *testing.T) {
+	t.Parallel()
+
+	body := make([]byte, 4032)
+	der, err := asn1.Marshal(struct {
+		Version    int
+		Algo       pkix.AlgorithmIdentifier
+		PrivateKey []byte
+		PublicKey  asn1.BitString `asn1:"tag:1,optional"`
+	}{
+		Version:    0,
+		Algo:       pkix.AlgorithmIdentifier{Algorithm: asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}},
+		PrivateKey: body,
+		PublicKey:  asn1.BitString{Bytes: make([]byte, 1952), BitLength: 1952 * 8},
+	})
+	require.NoError(t, err)
+
+	var pkcs8 pkcs8Struct
+	rest, err := asn1.Unmarshal(der, &pkcs8)
+	require.NoError(t, err, "a OneAsymmetricKey encoding must still parse")
+	require.Empty(t, rest)
+	require.Equal(t, "2.16.840.1.101.3.4.3.18", pkcs8.Algo.Algorithm.String())
+	require.Len(t, pkcs8.PrivateKey, len(body),
+		"the trailing publicKey must not bleed into the measured body")
+
+	// And it must survive the size check rather than be discarded as too small.
+	key, algo, err := NewConverter().unsupportedPKCS8PrivateKey(t.Context(), der)
+	require.NoError(t, err)
+	require.Equal(t, "ML-DSA-65", algo.Name)
+	require.NotEmpty(t, key.BOMRef, "a full-size body must yield a key component")
 }
 
 func Test_hashRawPublicKey(t *testing.T) {

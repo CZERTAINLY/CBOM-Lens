@@ -3,6 +3,8 @@ package cdxprops_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -209,9 +211,14 @@ func TestPQCPipeline_NoStaleHQCOrSHAKEOIDs(t *testing.T) {
 
 }
 
-// TestPQCPipeline_MalformedKeyDoesNotPanicOrFabricate covers the negative path
-// end to end: a valid PEM envelope around truncated DER must yield no
-// component rather than a made-up one.
+// TestPQCPipeline_MalformedKeyDoesNotPanicOrFabricate covers ONE negative path
+// end to end: DER that is not valid ASN.1 at all. The parse fails before any
+// component is built, so nothing downstream is exercised.
+//
+// The name overpromised for as long as that was the only case here. DER that
+// parses cleanly as a PKCS#8 wrapper but carries a body far too small to be
+// the key its OID names is the harder half, and it is covered by
+// TestPQCPipeline_UndersizedBodyYieldsAlgorithmNotKey below.
 func TestPQCPipeline_MalformedKeyDoesNotPanicOrFabricate(t *testing.T) {
 	t.Parallel()
 
@@ -225,6 +232,137 @@ func TestPQCPipeline_MalformedKeyDoesNotPanicOrFabricate(t *testing.T) {
 	require.NotNil(t, d)
 	require.Empty(t, d.Components,
 		"an unparseable key must produce no components, not a guessed algorithm")
+}
+
+// pkcs8PEM wraps a synthetic PKCS#8 PrivateKeyInfo carrying oid and a body of
+// bodyLen bytes in a `PRIVATE KEY` PEM block. Go's stdlib cannot parse a
+// post-quantum PKCS#8 key, so the scanner routes it to ParseErrors and the
+// block reaches analyzeParseError -- the real production path.
+func pkcs8PEM(t *testing.T, oid asn1.ObjectIdentifier, bodyLen int) []byte {
+	t.Helper()
+
+	der, err := asn1.Marshal(struct {
+		Version    int
+		Algo       pkix.AlgorithmIdentifier
+		PrivateKey []byte
+	}{
+		Version:    0,
+		Algo:       pkix.AlgorithmIdentifier{Algorithm: oid},
+		PrivateKey: make([]byte, bodyLen),
+	})
+	require.NoError(t, err)
+
+	return pemlib.EncodeToMemory(&pemlib.Block{Type: "PRIVATE KEY", Bytes: der})
+}
+
+// TestPQCPipeline_UndersizedBodyYieldsAlgorithmNotKey pins the distinction
+// between the two claims a PKCS#8 block can support.
+//
+// Validating only the wrapper and the OID meant the key body was never looked
+// at: pkcs8Struct decoded version and privateKeyAlgorithm and stopped. A
+// SEQUENCE carrying the ML-DSA-65 OID and four bytes where a 4032-byte key
+// belongs produced a full related-crypto-material component named ML-DSA-65,
+// with no log at any level -- so a consumer counting key material counted a
+// key that is not there, which inverts the reason that component was added.
+//
+// The OID still yields the algorithm. "This file references ML-DSA-65" is what
+// the bytes actually support, and it is what this path reported before it
+// learned to emit key material.
+func TestPQCPipeline_UndersizedBodyYieldsAlgorithmNotKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		oid     asn1.ObjectIdentifier
+		bodyLen int
+	}{
+		// The original reproduction: four bytes, 0xdeadbeef's length.
+		{"ML-DSA-65 four-byte body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 4},
+		{"ML-KEM-768 four-byte body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 4},
+		// One byte short of the registry size. The check is a lower bound, so
+		// this is the boundary it must still reject; 4032 and 2400 are the
+		// FIPS 204 / FIPS 203 byte counts the registry states.
+		{"ML-DSA-65 one byte short", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 4031},
+		{"ML-KEM-768 one byte short", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 2399},
+		{"SLH-DSA-SHA2-128S empty body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			bundle, err := pem.Scanner{}.Scan(t.Context(), pkcs8PEM(t, tt.oid, tt.bodyLen), "synthetic.pem")
+			require.NoError(t, err, "the PEM envelope itself is well formed")
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+			require.NotNil(t, d)
+
+			var algorithms, material []cdx.Component
+			for _, compo := range d.Components {
+				require.NotNil(t, compo.CryptoProperties,
+					"the zero Component must never be appended")
+				switch compo.CryptoProperties.AssetType {
+				case cdx.CryptoAssetTypeAlgorithm:
+					algorithms = append(algorithms, compo)
+				case cdx.CryptoAssetTypeRelatedCryptoMaterial:
+					material = append(material, compo)
+				}
+			}
+
+			require.Len(t, algorithms, 1,
+				"the OID establishes the algorithm is referenced, whatever the body holds")
+			require.Empty(t, material,
+				"a body too small to be the key must not be reported as a key")
+		})
+	}
+}
+
+// TestPQCPipeline_RealFixturesStillYieldTheirKey guards the other direction of
+// the same check: the size guard must not reject real keys.
+//
+// It is not redundant with TestPQCPipeline_PrivateKeyYieldsKeyMaterial, which
+// asserts the shape of the emitted key. This asserts only that the key is
+// there, and says why the bound has to be ">=" rather than "==": PKCS#8 wraps
+// the standardised key in an algorithm-specific encoding whose overhead varies
+// -- 42 bytes for ML-DSA-65, 74 for ML-KEM-768, 0 for SLH-DSA-SHA2-128S. An
+// equality check would reject two of these three real files.
+func TestPQCPipeline_RealFixturesStillYieldTheirKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		fixture string
+		name    string
+	}{
+		{cdxtest.MLDSA65PrivateKey, "ML-DSA-65"},
+		{cdxtest.MLKEM768PrivateKey, "ML-KEM-768"},
+		{cdxtest.SLHDSASHA2128sPrivateKey, "SLH-DSA-SHA2-128S"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := cdxtest.TestData(tt.fixture)
+			require.NoError(t, err)
+
+			bundle, err := pem.Scanner{}.Scan(t.Context(), data, tt.fixture)
+			require.NoError(t, err)
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+			require.NotNil(t, d)
+
+			var found bool
+			for _, compo := range d.Components {
+				if compo.CryptoProperties != nil &&
+					compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeRelatedCryptoMaterial {
+					require.Equal(t, tt.name, compo.Name)
+					found = true
+				}
+			}
+			require.True(t, found,
+				"the private-key size guard rejected a real %s key", tt.name)
+		})
+	}
 }
 
 // TestPQCPipeline_MLKEMCertificateReportsKEMPrimitive asserts that a

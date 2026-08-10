@@ -14,12 +14,25 @@ import (
 // registered in the NIST CSOR.
 var mlKEM768OID = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}
 
-// synthPKCS8 builds a minimal PKCS#8 PrivateKeyInfo carrying oid.
+// synthPKCS8 builds a minimal PKCS#8 PrivateKeyInfo carrying oid, with a
+// privateKey body exactly the size the registry states for that OID.
 //
-// unsupportedPKCS8PrivateKey only reads version and privateKeyAlgorithm, so a
-// placeholder privateKey octet string is enough to exercise the real parse
-// path without embedding key material.
+// unsupportedPKCS8PrivateKey reads the body only to measure it -- never to
+// interpret it -- so zero bytes of the right length exercise the real parse
+// path without embedding key material. The length matters: the function
+// refuses to report a key from a body too small to hold one, so the old
+// four-byte placeholder would now make every sized OID in the sweep return an
+// algorithm and no key, and the sweep's key assertions would be testing the
+// rejection path while claiming to test the happy one.
 func synthPKCS8(t *testing.T, oid asn1.ObjectIdentifier) []byte {
+	t.Helper()
+
+	return synthPKCS8Body(t, oid, registryPrivateKeySize(unsupportedAlgorithms[oid.String()]))
+}
+
+// synthPKCS8Body is synthPKCS8 with the privateKey body length chosen, so the
+// undersized-body rejection can be driven directly.
+func synthPKCS8Body(t *testing.T, oid asn1.ObjectIdentifier, bodyLen int) []byte {
 	t.Helper()
 
 	der, err := asn1.Marshal(struct {
@@ -29,7 +42,7 @@ func synthPKCS8(t *testing.T, oid asn1.ObjectIdentifier) []byte {
 	}{
 		Version:    0,
 		Algo:       pkix.AlgorithmIdentifier{Algorithm: oid},
-		PrivateKey: []byte{0x04, 0x02, 0xde, 0xad},
+		PrivateKey: make([]byte, bodyLen),
 	})
 	require.NoError(t, err)
 	return der
@@ -55,7 +68,7 @@ func TestMLKEM768PKCS8PrivateKey(t *testing.T) {
 	t.Parallel()
 
 	c := NewConverter().WithIlmExtensions(true)
-	_, algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, mlKEM768OID))
+	_, algo, err := c.unsupportedPKCS8PrivateKey(t.Context(), synthPKCS8(t, mlKEM768OID))
 	require.NoError(t, err, "an ML-KEM PKCS#8 key must be recognised, not rejected")
 
 	require.Equal(t, "ML-KEM-768", algo.Name)

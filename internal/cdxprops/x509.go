@@ -42,9 +42,21 @@ type pkixStruct struct {
 }
 
 // PKCS#8 structure for extracting raw key bytes
+//
+// PrivateKey is RFC 5208's mandatory privateKey OCTET STRING. It is decoded
+// because without it nothing ever looked at the key body: a PEM block wrapping
+// a well-formed wrapper, a registry OID and four bytes of garbage produced a
+// full "an ML-DSA-65 private key exists here" assertion. See
+// unsupportedPKCS8PrivateKey for the size check it feeds.
+//
+// The trailing attributes [0] and publicKey [1] that RFC 5958 adds to
+// OneAsymmetricKey are deliberately not declared. Go's asn1 allows extra
+// elements at the end of a SEQUENCE, so real keys carrying them still parse;
+// TestPKCS8Struct_ParsesRFC5958TrailingFields pins that.
 type pkcs8Struct struct {
-	Version int
-	Algo    pkix.AlgorithmIdentifier
+	Version    int
+	Algo       pkix.AlgorithmIdentifier
+	PrivateKey []byte
 }
 
 // sigAlgOID returns oid of a signature algorithm for x509 Certificate

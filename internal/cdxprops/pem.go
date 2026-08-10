@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -55,7 +56,7 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 	for _, i := range slices.Sorted(maps.Keys(bundle.ParseErrors)) {
 		parseErr := bundle.ParseErrors[i]
 		block := bundle.RawBlocks[i]
-		compos, err := c.analyzeParseError(block, parseErr)
+		compos, err := c.analyzeParseError(ctx, block, parseErr)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -172,12 +173,21 @@ func crlIssuerName(crl *x509.RevocationList) string {
 }
 
 // Helper functions
-func (c Converter) analyzeParseError(block model.PEMBlock, origErr error) ([]cdx.Component, error) {
+func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, origErr error) ([]cdx.Component, error) {
 	switch block.Type {
 	case "PRIVATE KEY":
-		key, algo, err := c.unsupportedPKCS8PrivateKey(block.Bytes)
+		key, algo, err := c.unsupportedPKCS8PrivateKey(ctx, block.Bytes)
 		if err != nil {
 			return nil, errors.Join(origErr, err)
+		}
+		// unsupportedPKCS8PrivateKey yields the algorithm alone when the
+		// PKCS#8 body is too small to be the key the registry describes. The
+		// zero Component must not be appended: it has neither ref nor crypto
+		// properties, so the Builder would drop it with a warning and
+		// setPEMFormat would walk it for nothing. Same guard, same reason, as
+		// the zero public-key component in restOfPEMBundleToCDX above.
+		if key.BOMRef == "" {
+			return []cdx.Component{algo}, nil
 		}
 		return []cdx.Component{key, algo}, nil
 	case "PUBLIC KEY":
@@ -201,7 +211,17 @@ func (c Converter) analyzeParseError(block model.PEMBlock, origErr error) ([]cdx
 // relatedCryptoMaterialProperties onto everything, an ML-DSA, SLH-DSA or ML-KEM
 // private key contributed no related-crypto-material asset at all: a CBOM that
 // named the algorithm but never said a key existed.
-func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (key, algo cdx.Component, err error) {
+//
+// The two claims it can make are not equally supported by the input, which is
+// why they are decided separately. The OID establishes that the algorithm is
+// REFERENCED here -- true whatever the bytes after it turn out to be. That a
+// KEY exists is a claim about the body, and validating the wrapper alone did
+// not check the body at all: a SEQUENCE carrying the ML-DSA-65 OID and four
+// bytes of garbage asserted a full private key, silently. So a body too small
+// to be the key the registry describes yields the algorithm and no key, which
+// is exactly what this function returned before it learned to emit key
+// material.
+func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (key, algo cdx.Component, err error) {
 	var pkcs8 pkcs8Struct
 	if _, err = asn1.Unmarshal(der, &pkcs8); err != nil {
 		err = fmt.Errorf("parsing PKCS#8 via ASN.1: %w", err)
@@ -219,6 +239,27 @@ func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (key, algo cdx.Compone
 	// produced one with it set. Both now take it from the registry.
 	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
+
+	// Lower bound, never equality. The private key the standard specifies is
+	// the innermost value; PKCS#8 wraps it in an algorithm-specific encoding
+	// whose overhead varies -- of the three fixtures in the corpus the
+	// privateKey OCTET STRING runs 4074 bytes for a 4032-byte ML-DSA-65 key,
+	// 2474 for a 2400-byte ML-KEM-768 decapsulation key and 64 for a 64-byte
+	// SLH-DSA-SHA2-128S key. Requiring equality would reject two of those
+	// three real keys.
+	//
+	// A registry entry that states no size (XMSS, XMSS-MT, HSS-LMS: RFC 9802
+	// puts the parameters in the key value, not in the OID) is not checked. We
+	// cannot validate what we do not know, and refusing those keys would be a
+	// worse error than the one this guards against.
+	if wantSize := registryPrivateKeySize(info); wantSize > 0 && len(pkcs8.PrivateKey) < wantSize {
+		slog.WarnContext(ctx, "not reporting a private key: PKCS#8 body is too small for the algorithm",
+			"algorithm", info.name,
+			"oid", info.oid,
+			"body_bytes", len(pkcs8.PrivateKey),
+			"minimum_bytes", wantSize)
+		return
+	}
 
 	relatedProps := &cdx.RelatedCryptoMaterialProperties{
 		Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
@@ -263,6 +304,27 @@ func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (key, algo cdx.Compone
 	}
 
 	return
+}
+
+// registryPrivateKeySize returns the size in BYTES of the private half of a
+// key pair as the registry states it, or 0 when the registry states none.
+//
+// A KEM's private half is its decapsulation key and a signature scheme's is
+// its private key, and the two are carried by different registry shapes
+// (kemInfo vs pqcInfo), so reading only privKeySize would silently return 0 --
+// no check at all -- for every ML-KEM parameter set.
+//
+// These are byte counts from FIPS 203/204/205 and RFC 9909. They are NOT the
+// schema's relatedCryptoMaterialProperties.size, which is in bits; see the
+// comment on that field's guard below.
+func registryPrivateKeySize(info algorithmInfo) int {
+	switch sizes := info.pqc.(type) {
+	case kemInfo:
+		return sizes.decapKeySize
+	case pqcInfo:
+		return sizes.privKeySize
+	}
+	return 0
 }
 
 // registryPrimitive returns the primitive a registry entry declares, falling
