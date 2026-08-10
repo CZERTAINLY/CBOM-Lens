@@ -93,6 +93,12 @@ func TestOIDSweep_PKIXPublicKey(t *testing.T) {
 }
 
 // TestOIDSweep_PKCS8PrivateKey does the same for the `PRIVATE KEY` path.
+//
+// The key-component assertions mirror the PKIX sweep above, so every registry
+// OID is covered and a newly added entry is covered automatically. They are
+// what stops the private-key path silently regressing to an algorithm-only
+// result, which is what it produced until a post-quantum private key was
+// contributing no related-crypto-material asset at all.
 func TestOIDSweep_PKCS8PrivateKey(t *testing.T) {
 	t.Parallel()
 
@@ -101,11 +107,38 @@ func TestOIDSweep_PKCS8PrivateKey(t *testing.T) {
 			t.Parallel()
 
 			c := NewConverter().WithIlmExtensions(true)
-			algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, oidOf(t, dotted)))
+			key, algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, oidOf(t, dotted)))
 			require.NoError(t, err, "OID %s must be recognised", dotted)
 
 			require.Equal(t, want.name, algo.Name)
 			require.Equal(t, want.oid, algo.CryptoProperties.OID)
+
+			require.Equal(t, want.name, key.Name)
+			require.Equal(t, want.oid, key.CryptoProperties.OID, "key oid")
+			require.Equal(t, cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				key.CryptoProperties.AssetType)
+
+			keyProps := key.CryptoProperties.RelatedCryptoMaterialProperties
+			require.NotNil(t, keyProps)
+			require.Equal(t, cdx.RelatedCryptoMaterialTypePrivateKey, keyProps.Type)
+			// The key must point at the algorithm emitted alongside it, not at
+			// a hardcoded ref. For a post-quantum private key this is the ONLY
+			// link to its public half -- the ref hashes the private DER, from
+			// which the public key cannot be recovered.
+			require.Equal(t, cdx.BOMReference(algo.BOMRef), keyProps.AlgorithmRef)
+			// value would publish the secret: the DER this component is built
+			// from is the private key itself, unlike the PKIX path where it is
+			// a public key.
+			require.Empty(t, keyProps.Value,
+				"a private key's DER must never be emitted as a value")
+			// size is in bits in the schema, and no registry entry sources one.
+			// The byte-valued privKeySize/decapKeySize must not leak in here.
+			require.Nil(t, keyProps.Size)
+
+			require.True(t,
+				strings.HasPrefix(key.BOMRef,
+					"crypto/private_key/"+strings.ToLower(want.name)+"@"),
+				"unexpected key bom-ref %q", key.BOMRef)
 
 			props := algo.CryptoProperties.AlgorithmProperties
 			require.Equal(t, want.paramSetID, props.ParameterSetIdentifier)
@@ -151,7 +184,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		require.ErrorContains(t, err, "unsupported fallback oid")
 		require.ErrorContains(t, err, "1.3.9999.6.1.1")
 
-		_, err = c.unsupportedPKCS8PrivateKey(synthPKCS8(t, unknown))
+		_, _, err = c.unsupportedPKCS8PrivateKey(synthPKCS8(t, unknown))
 		require.ErrorContains(t, err, "unsupported fallback oid")
 	})
 
@@ -181,7 +214,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		require.ErrorContains(t, err, "parsing PKIX via ASN.1")
 
 		fullPK := synthPKCS8(t, mlKEM768OID)
-		_, err = c.unsupportedPKCS8PrivateKey(fullPK[:len(fullPK)/2])
+		_, _, err = c.unsupportedPKCS8PrivateKey(fullPK[:len(fullPK)/2])
 		require.ErrorContains(t, err, "parsing PKCS#8 via ASN.1")
 	})
 
@@ -191,7 +224,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		_, _, err := c.unsupportedPKIX(nil)
 		require.Error(t, err)
 
-		_, err = c.unsupportedPKCS8PrivateKey(nil)
+		_, _, err = c.unsupportedPKCS8PrivateKey(nil)
 		require.Error(t, err)
 	})
 

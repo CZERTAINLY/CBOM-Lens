@@ -30,10 +30,14 @@ const pemBundleLocation = "/test/bundle.pem"
 // comprehensivePEMBundle builds a bundle exercising every branch of
 // Converter.PEMBundle: a certificate, two private keys, a CSR, a standalone
 // public key, a CRL, and raw blocks that only analyzeParseError can make sense
-// of (two ML-DSA-65 keys and two garbage blocks). It yields 20 components:
-// 10 algorithm, 9 related-crypto-material and 1 certificate. No protocol asset
+// of (two ML-DSA-65 keys and two garbage blocks). It yields 21 components:
+// 10 algorithm, 10 related-crypto-material and 1 certificate. No protocol asset
 // -- PEMBundle cannot produce one. More than one test wants this bundle, which
 // is why it is a helper.
+//
+// The count was 20 until the post-quantum PRIVATE KEY block started
+// contributing key material as well as an algorithm. The two garbage blocks
+// still error out and contribute nothing.
 func comprehensivePEMBundle(t *testing.T) model.PEMBundle {
 	t.Helper()
 
@@ -147,7 +151,7 @@ func TestConverter_PEM(t *testing.T) {
 
 	components := detection.Components
 	// Verify we got all expected components
-	require.Len(t, components, 20)
+	require.Len(t, components, 21)
 
 	for idx, c := range components {
 		t.Logf("%d: name=%s, description=%s", idx, c.Name, c.Description)

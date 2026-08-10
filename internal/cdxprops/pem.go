@@ -175,11 +175,11 @@ func crlIssuerName(crl *x509.RevocationList) string {
 func (c Converter) analyzeParseError(block model.PEMBlock, origErr error) ([]cdx.Component, error) {
 	switch block.Type {
 	case "PRIVATE KEY":
-		algo, err := c.unsupportedPKCS8PrivateKey(block.Bytes)
+		key, algo, err := c.unsupportedPKCS8PrivateKey(block.Bytes)
 		if err != nil {
 			return nil, errors.Join(origErr, err)
 		}
-		return []cdx.Component{algo}, nil
+		return []cdx.Component{key, algo}, nil
 	case "PUBLIC KEY":
 		key, algo, err := c.unsupportedPKIX(block.Bytes)
 		if err != nil {
@@ -192,24 +192,77 @@ func (c Converter) analyzeParseError(block model.PEMBlock, origErr error) ([]cdx
 
 // ********** PQC support **********
 
-func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (cdx.Component, error) {
+// unsupportedPKCS8PrivateKey handles a `PRIVATE KEY` PEM block Go's stdlib
+// cannot parse, returning the key material component and the algorithm
+// component that describes it.
+//
+// It used to return the algorithm alone, while its sibling unsupportedPKIX
+// returned a key and an algorithm. Since #213 stopped stamping
+// relatedCryptoMaterialProperties onto everything, an ML-DSA, SLH-DSA or ML-KEM
+// private key contributed no related-crypto-material asset at all: a CBOM that
+// named the algorithm but never said a key existed.
+func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (key, algo cdx.Component, err error) {
 	var pkcs8 pkcs8Struct
-	_, err := asn1.Unmarshal(der, &pkcs8)
-	if err != nil {
-		return cdx.Component{}, fmt.Errorf("parsing PKCS#8 via ASN.1: %w", err)
+	if _, err = asn1.Unmarshal(der, &pkcs8); err != nil {
+		err = fmt.Errorf("parsing PKCS#8 via ASN.1: %w", err)
+		return
 	}
 	info, ok := unsupportedAlgorithms[pkcs8.Algo.Algorithm.String()]
 	if !ok {
-		return cdx.Component{}, fmt.Errorf("unsupported fallback oid %q", pkcs8.Algo.Algorithm.String())
+		err = fmt.Errorf("unsupported fallback oid %q", pkcs8.Algo.Algorithm.String())
+		return
 	}
 
-	algo := info.componentWOBomRef(c.ilm)
+	algo = info.componentWOBomRef(c.ilm)
 	// This path set no primitive at all, so every PQC private key produced an
 	// algorithm component with the field missing, while the public-key path
 	// produced one with it set. Both now take it from the registry.
 	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
-	return algo, nil
+
+	relatedProps := &cdx.RelatedCryptoMaterialProperties{
+		Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
+		AlgorithmRef: cdx.BOMReference(algo.BOMRef),
+		// No Value. unsupportedPKIX sets it because the DER it holds is a
+		// PUBLIC key; the same field here would publish the secret into a
+		// document that gets uploaded and shared. Converter.PrivateKey sets
+		// none either.
+	}
+
+	// Size only when the registry states one, exactly mirroring the guard in
+	// unsupportedPKIX so the two post-quantum paths cannot drift. Every
+	// registry keySize is currently 0, so no size is emitted.
+	//
+	// It deliberately does NOT fall back to pqcInfo.privKeySize or
+	// kemInfo.decapKeySize. The schema's relatedCryptoMaterialProperties.size
+	// is in BITS, while those are the byte counts from FIPS 204 and FIPS 203 --
+	// 4032 for ML-DSA-65 would understate the key eightfold AND validate, so
+	// nothing downstream would ever catch it.
+	if info.keySize > 0 {
+		relatedProps.Size = &info.keySize
+	}
+
+	key = cdx.Component{
+		Type:        cdx.ComponentTypeCryptographicAsset,
+		Name:        info.name,
+		Description: "Private Key",
+		// The ref hashes the PRIVATE DER, because pkcs8Struct decodes only
+		// version and privateKeyAlgorithm -- the public key is not recoverable
+		// here. So the correlation Converter.PrivateKey deliberately buys, the
+		// private and public halves of one keypair sharing a digest, is NOT
+		// available for post-quantum keys: these pair with their public
+		// counterpart only through AlgorithmRef, i.e. by algorithm and not by
+		// keypair. Do not read the classical invariant into the shared
+		// crypto/private_key/ prefix.
+		BOMRef: fmt.Sprintf("crypto/private_key/%s@%s", strings.ToLower(info.name), c.bomRefHasher(der)),
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,
+			OID:                             info.oid,
+			RelatedCryptoMaterialProperties: relatedProps,
+		},
+	}
+
+	return
 }
 
 // registryPrimitive returns the primitive a registry entry declares, falling

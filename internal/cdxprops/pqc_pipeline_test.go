@@ -2,7 +2,9 @@ package cdxprops_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	pemlib "encoding/pem"
 	"testing"
 
 	"github.com/OmniTrustILM/cbom-lens/internal/bom"
@@ -311,5 +313,89 @@ func TestPQCPipeline_1_7RegistryFields(t *testing.T) {
 			require.Empty(t, c.CryptoProperties.AlgorithmProperties.EllipticCurve,
 				"%s is not an elliptic-curve algorithm", c.Name)
 		}
+	}
+}
+
+// TestPQCPipeline_PrivateKeyYieldsKeyMaterial closes the gap where a
+// post-quantum private key contributed no related-crypto-material asset at all.
+//
+// unsupportedPKCS8PrivateKey returned only an algorithm component while its
+// sibling unsupportedPKIX returned a key and an algorithm, so once #213 stopped
+// stamping relatedCryptoMaterialProperties onto everything, a scan of an
+// ML-DSA, SLH-DSA or ML-KEM private key named the algorithm and never said a
+// key existed. A consumer counting key material saw zero.
+//
+// The last assertion is the load-bearing one and the reason this test builds a
+// whole document rather than inspecting a component: the private DER must not
+// appear in the output. unsupportedPKIX publishes its DER as
+// relatedCryptoMaterialProperties.value, which is correct there because that
+// DER is a public key; the same field on this path would put the secret into a
+// document that gets uploaded and shared.
+func TestPQCPipeline_PrivateKeyYieldsKeyMaterial(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		fixture string
+		name    string
+	}{
+		{cdxtest.MLDSA65PrivateKey, "ML-DSA-65"},
+		{cdxtest.SLHDSASHA2128sPrivateKey, "SLH-DSA-SHA2-128S"},
+		{cdxtest.MLKEM768PrivateKey, "ML-KEM-768"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := buildPQCDocument(t, tt.fixture)
+
+			var doc cdx.BOM
+			require.NoError(t, json.Unmarshal(raw, &doc))
+			require.NotNil(t, doc.Components)
+
+			refs := map[string]cdx.Component{}
+			var material []cdx.Component
+			for _, compo := range *doc.Components {
+				refs[compo.BOMRef] = compo
+				if compo.CryptoProperties != nil &&
+					compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeRelatedCryptoMaterial {
+					material = append(material, compo)
+				}
+			}
+			require.Len(t, material, 1,
+				"a post-quantum private key must contribute exactly one key-material asset")
+
+			key := material[0]
+			require.Equal(t, tt.name, key.Name)
+
+			props := key.CryptoProperties.RelatedCryptoMaterialProperties
+			require.NotNil(t, props)
+			require.Equal(t, cdx.RelatedCryptoMaterialTypePrivateKey, props.Type)
+			require.Equal(t, "PEM", props.Format)
+			// size is in bits in the schema while the registry's post-quantum
+			// sizes are FIPS 203/204 byte counts. Emitting one would understate
+			// the key eightfold and still validate, so nothing downstream would
+			// catch it.
+			require.Nil(t, props.Size)
+
+			// The algorithmRef must resolve inside the document. It is the only
+			// link this key has to its algorithm: the bom-ref hashes the
+			// private DER, from which the public half cannot be recovered, so
+			// unlike a classical keypair there is no shared digest to pair on.
+			require.NotEmpty(t, props.AlgorithmRef)
+			algo, ok := refs[string(props.AlgorithmRef)]
+			require.True(t, ok, "algorithmRef %q does not resolve in the document", props.AlgorithmRef)
+			require.Equal(t, cdx.CryptoAssetTypeAlgorithm, algo.CryptoProperties.AssetType)
+
+			// The secret must not be in the document, in any component or
+			// property. This is the assertion protecting "no secret in the
+			// BOM"; everything else above is descriptive.
+			data, err := cdxtest.TestData(tt.fixture)
+			require.NoError(t, err)
+			block, _ := pemlib.Decode(data)
+			require.NotNil(t, block)
+			require.NotContains(t, string(raw), base64.StdEncoding.EncodeToString(block.Bytes),
+				"the private key DER reached the emitted document")
+		})
 	}
 }

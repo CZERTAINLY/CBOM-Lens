@@ -55,7 +55,7 @@ func TestMLKEM768PKCS8PrivateKey(t *testing.T) {
 	t.Parallel()
 
 	c := NewConverter().WithIlmExtensions(true)
-	algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, mlKEM768OID))
+	_, algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, mlKEM768OID))
 	require.NoError(t, err, "an ML-KEM PKCS#8 key must be recognised, not rejected")
 
 	require.Equal(t, "ML-KEM-768", algo.Name)
