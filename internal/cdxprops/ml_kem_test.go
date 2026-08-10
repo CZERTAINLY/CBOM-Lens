@@ -15,19 +15,32 @@ import (
 var mlKEM768OID = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}
 
 // synthPKCS8 builds a minimal PKCS#8 PrivateKeyInfo carrying oid, with a
-// privateKey body exactly the size the registry states for that OID.
+// privateKey body the size of that algorithm's expanded private key.
 //
 // unsupportedPKCS8PrivateKey reads the body only to measure it -- never to
 // interpret it -- so zero bytes of the right length exercise the real parse
 // path without embedding key material. The length matters: the function
 // refuses to report a key from a body too small to hold one, so the old
-// four-byte placeholder would now make every sized OID in the sweep return an
+// four-byte placeholder would make every sized OID in the sweep return an
 // algorithm and no key, and the sweep's key assertions would be testing the
 // rejection path while claiming to test the happy one.
+//
+// This deliberately uses the EXPANDED size rather than
+// registryMinimumBodySize, which returns the seed. Both are accepted, and
+// sizing the synthetic body at the floor would make the sweep pass even if the
+// floor were raised back to something that rejects real seed-only keys.
 func synthPKCS8(t *testing.T, oid asn1.ObjectIdentifier) []byte {
 	t.Helper()
 
-	return synthPKCS8Body(t, oid, registryPrivateKeySize(unsupportedAlgorithms[oid.String()]))
+	info := unsupportedAlgorithms[oid.String()]
+	size := 0
+	switch sizes := info.pqc.(type) {
+	case kemInfo:
+		size = sizes.decapKeySize
+	case pqcInfo:
+		size = sizes.privKeySize
+	}
+	return synthPKCS8Body(t, oid, size)
 }
 
 // synthPKCS8Body is synthPKCS8 with the privateKey body length chosen, so the

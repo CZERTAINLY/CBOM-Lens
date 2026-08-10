@@ -52,6 +52,9 @@ var (
 // Sources, once, for the whole table:
 //
 //	RFC 9881 sec. 3    - ML-DSA object identifiers
+//	RFC 9881 sec. 6    - ML-DSA privateKey CHOICE; seed is OCTET STRING (SIZE (32))
+//	FIPS 203 sec. 7.1  - ML-KEM KeyGen takes d and z, 32 bytes each, so the
+//	                     stored (d, z) seed is 64 bytes
 //	FIPS 204 Table 1   - ML-DSA claimed security category and lambda
 //	FIPS 204 Table 2   - ML-DSA key and signature sizes in bytes
 //	NIST CSOR          - SLH-DSA object identifiers (sigAlgs 20..31)
@@ -84,7 +87,7 @@ var wantRegistry = map[string]expectedAlgorithm{
 		// observe the signer's RBG, so the standard's headline claim applies.
 		nqsl: nistCategory2,
 		// FIPS 204 Table 2.
-		pqc: pqcInfo{privKeySize: 2560, pubKeySize: 1312, signatureSize: 2420},
+		pqc: pqcInfo{privKeySize: 2560, pubKeySize: 1312, signatureSize: 2420, seedSize: 32},
 	},
 	"2.16.840.1.101.3.4.3.18": {
 		// RFC 9881: id-ml-dsa-65 ::= { ... sigAlgs(3) 18 }
@@ -92,7 +95,7 @@ var wantRegistry = map[string]expectedAlgorithm{
 		oid: "2.16.840.1.101.3.4.3.18", functions: signVerify, primitive: cdx.CryptoPrimitiveSignature,
 		classical: 192,           // FIPS 204 Table 1, lambda
 		nqsl:      nistCategory3, // FIPS 204 Table 1, Category 3
-		pqc:       pqcInfo{privKeySize: 4032, pubKeySize: 1952, signatureSize: 3309},
+		pqc:       pqcInfo{privKeySize: 4032, pubKeySize: 1952, signatureSize: 3309, seedSize: 32},
 	},
 	"2.16.840.1.101.3.4.3.19": {
 		// RFC 9881: id-ml-dsa-87 ::= { ... sigAlgs(3) 19 }
@@ -101,7 +104,7 @@ var wantRegistry = map[string]expectedAlgorithm{
 		// FIPS 204 Table 1 gives lambda = 256 for ML-DSA-87 and Category 5.
 		classical: 256,
 		nqsl:      nistCategory5,
-		pqc:       pqcInfo{privKeySize: 4896, pubKeySize: 2592, signatureSize: 4627},
+		pqc:       pqcInfo{privKeySize: 4896, pubKeySize: 2592, signatureSize: 4627, seedSize: 32},
 	},
 
 	// ---------- SLH-DSA (FIPS 205), SHA2 ----------
@@ -229,21 +232,21 @@ var wantRegistry = map[string]expectedAlgorithm{
 		oid: "2.16.840.1.101.3.4.4.1", functions: encapDecap,
 		primitive: cdx.CryptoPrimitiveKEM,
 		classical: 128, nqsl: nistCategory1,
-		pqc: kemInfo{encapKeySize: 800, decapKeySize: 1632, ciphertextSize: 768},
+		pqc: kemInfo{encapKeySize: 800, decapKeySize: 1632, ciphertextSize: 768, seedSize: 64},
 	},
 	"2.16.840.1.101.3.4.4.2": {
 		name: "ML-KEM-768", paramSetID: "768",
 		oid: "2.16.840.1.101.3.4.4.2", functions: encapDecap,
 		primitive: cdx.CryptoPrimitiveKEM,
 		classical: 192, nqsl: nistCategory3,
-		pqc: kemInfo{encapKeySize: 1184, decapKeySize: 2400, ciphertextSize: 1088},
+		pqc: kemInfo{encapKeySize: 1184, decapKeySize: 2400, ciphertextSize: 1088, seedSize: 64},
 	},
 	"2.16.840.1.101.3.4.4.3": {
 		name: "ML-KEM-1024", paramSetID: "1024",
 		oid: "2.16.840.1.101.3.4.4.3", functions: encapDecap,
 		primitive: cdx.CryptoPrimitiveKEM,
 		classical: 256, nqsl: nistCategory5,
-		pqc: kemInfo{encapKeySize: 1568, decapKeySize: 3168, ciphertextSize: 1568},
+		pqc: kemInfo{encapKeySize: 1568, decapKeySize: 3168, ciphertextSize: 1568, seedSize: 64},
 	},
 
 	// ---------- Stateful hash-based signatures (SP 800-208) ----------

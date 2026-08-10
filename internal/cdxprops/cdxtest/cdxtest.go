@@ -21,6 +21,23 @@ const MLDSA65Certificate = "testdata/ml-dsa-65-cert.pem"
 // the block, then ASN.1 parsing of the PKCS#8 structure fails.
 const MLDSA65MalformedPrivateKey = "testdata/ml-dsa-65-malformed-private-key.pem"
 
+// MLDSA65SeedOnlyPrivateKey and MLKEM768SeedOnlyPrivateKey are real keys stored
+// in the seed form. RFC 9881 sec. 6 makes the ML-DSA privateKey field a CHOICE
+// of seed [0] (32 bytes), expandedKey, or both, and calls the seed the
+// RECOMMENDED form; ML-KEM has the same shape with a 64-byte (d, z) seed.
+//
+// Every other post-quantum fixture here is OpenSSL's default "both" encoding,
+// so the expanded and seed lengths differ by two orders of magnitude and a
+// size check calibrated on the expanded form rejects these while passing all
+// the others. Generated with
+// `openssl genpkey -algorithm ML-DSA-65 -provparam ml-dsa.output_formats=seed-only`
+// on OpenSSL 3.5.3; Node.js exports this form by default.
+const MLDSA65SeedOnlyPrivateKey = "testdata/ml-dsa-65-seed-only-private-key.pem"
+
+// MLKEM768SeedOnlyPrivateKey is the ML-KEM counterpart of
+// MLDSA65SeedOnlyPrivateKey.
+const MLKEM768SeedOnlyPrivateKey = "testdata/ml-kem-768-seed-only-private-key.pem"
+
 // SLH-DSA-SHA2-128s: the smallest SLH-DSA parameter set, and the one RFC 9909
 // App. C uses for its own examples.
 const SLHDSASHA2128sPrivateKey = "testdata/slh-dsa-sha2-128s-private-key.pem"

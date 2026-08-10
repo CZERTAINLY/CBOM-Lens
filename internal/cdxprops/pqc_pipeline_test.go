@@ -279,12 +279,21 @@ func TestPQCPipeline_UndersizedBodyYieldsAlgorithmNotKey(t *testing.T) {
 		// The original reproduction: four bytes, 0xdeadbeef's length.
 		{"ML-DSA-65 four-byte body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 4},
 		{"ML-KEM-768 four-byte body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 4},
-		// One byte short of the registry size. The check is a lower bound, so
-		// this is the boundary it must still reject; 4032 and 2400 are the
-		// FIPS 204 / FIPS 203 byte counts the registry states.
-		{"ML-DSA-65 one byte short", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 4031},
-		{"ML-KEM-768 one byte short", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 2399},
+		// One byte short of the SMALLEST legal encoding, which is the seed:
+		// 32 bytes for ML-DSA (RFC 9881 sec. 6) and 64 for ML-KEM's (d, z).
+		// This is the boundary the lower bound must still reject.
+		//
+		// It is deliberately not one byte short of the EXPANDED key. A body of
+		// 4031 is accepted, and must be: an ML-DSA-65 key stored as a seed is
+		// 32 bytes, so any floor high enough to reject 4031 also rejects every
+		// seed-encoded key in existence. See
+		// TestPQCPipeline_SeedEncodedKeysYieldTheirKey.
+		{"ML-DSA-65 one byte under the seed", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 31},
+		{"ML-KEM-768 one byte under the seed", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 63},
+		// SLH-DSA has no seed alternative (RFC 9882), so its floor stays the
+		// full 64-byte private key.
 		{"SLH-DSA-SHA2-128S empty body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}, 0},
+		{"SLH-DSA-SHA2-128S one byte short", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}, 63},
 	}
 
 	for _, tt := range tests {
@@ -313,6 +322,69 @@ func TestPQCPipeline_UndersizedBodyYieldsAlgorithmNotKey(t *testing.T) {
 				"the OID establishes the algorithm is referenced, whatever the body holds")
 			require.Empty(t, material,
 				"a body too small to be the key must not be reported as a key")
+		})
+	}
+}
+
+// TestPQCPipeline_SeedEncodedKeysYieldTheirKey is the regression test for a
+// false negative the size guard shipped with: it rejected real keys.
+//
+// RFC 9881 sec. 6 makes the ML-DSA privateKey field a CHOICE of seed [0] (32
+// bytes), expandedKey (4032 for ML-DSA-65), or both, and calls the seed the
+// RECOMMENDED form. ML-KEM has the same shape with a 64-byte (d, z) seed. So
+// one algorithm has legal bodies differing by two orders of magnitude.
+//
+// Every other post-quantum fixture in this repo is OpenSSL's default "both"
+// encoding -- decoding their bodies gives SEQUENCE{OCTET STRING(32), OCTET
+// STRING(4032)} and SEQUENCE{OCTET STRING(64), OCTET STRING(2400)} -- so a
+// floor set at the expanded size passed every fixture and still reported a
+// genuine seed-only key as no key at all. Node.js exports seed-only by
+// default, so those are keys in the wild, and "this file has no private key"
+// about a file that does is the same defect as #213 with the sign flipped.
+//
+// The fixtures are real `openssl genpkey` output, not synthetic lengths,
+// because the bug was in believing the corpus represented the encoding space.
+func TestPQCPipeline_SeedEncodedKeysYieldTheirKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		fixture string
+		algo    string
+	}{
+		{"ML-DSA-65 seed-only", cdxtest.MLDSA65SeedOnlyPrivateKey, "ML-DSA-65"},
+		{"ML-KEM-768 seed-only", cdxtest.MLKEM768SeedOnlyPrivateKey, "ML-KEM-768"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := cdxtest.TestData(tt.fixture)
+			require.NoError(t, err)
+
+			bundle, err := pem.Scanner{}.Scan(t.Context(), data, tt.fixture)
+			require.NoError(t, err)
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+			require.NotNil(t, d)
+
+			var material []cdx.Component
+			for _, compo := range d.Components {
+				if compo.CryptoProperties != nil &&
+					compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeRelatedCryptoMaterial {
+					material = append(material, compo)
+				}
+			}
+
+			require.Len(t, material, 1,
+				"a seed-encoded %s private key is a private key; the size guard "+
+					"must not report it as absent", tt.algo)
+			require.Equal(t, tt.algo, material[0].Name)
+			require.Equal(t, cdx.RelatedCryptoMaterialTypePrivateKey,
+				material[0].CryptoProperties.RelatedCryptoMaterialProperties.Type)
+			require.Empty(t, material[0].CryptoProperties.RelatedCryptoMaterialProperties.Value,
+				"a seed IS the secret, so it must not be published either")
 		})
 	}
 }

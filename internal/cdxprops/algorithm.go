@@ -56,6 +56,13 @@ type pqcInfo struct {
 	privKeySize   int
 	pubKeySize    int
 	signatureSize int
+	// seedSize is the length in bytes of the seed a private key may be stored
+	// as instead of its expanded form, or 0 for a scheme with no seed
+	// encoding. RFC 9881 sec. 6 makes the ML-DSA privateKey field a CHOICE of
+	// seed [0] (32 bytes, and the RECOMMENDED form), expandedKey, or both, so
+	// a stored ML-DSA key is legitimately either 32 bytes or privKeySize.
+	// RFC 9882 gives SLH-DSA no such alternative, so it leaves this 0.
+	seedSize int
 }
 
 func (pqcInfo) isPqcInfo() {}
@@ -69,6 +76,9 @@ type kemInfo struct {
 	encapKeySize   int
 	decapKeySize   int
 	ciphertextSize int
+	// seedSize is the length in bytes of the (d, z) seed pair a decapsulation
+	// key may be stored as instead of its expanded form. See pqcInfo.seedSize.
+	seedSize int
 }
 
 func (kemInfo) isPqcInfo() {}
@@ -96,6 +106,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			privKeySize:   2560,
 			pubKeySize:    1312,
 			signatureSize: 2420,
+			seedSize:      32,
 		},
 	},
 	"2.16.840.1.101.3.4.3.18": {
@@ -115,6 +126,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			privKeySize:   4032,
 			pubKeySize:    1952,
 			signatureSize: 3309,
+			seedSize:      32,
 		},
 	},
 	"2.16.840.1.101.3.4.3.19": {
@@ -134,6 +146,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			privKeySize:   4896,
 			pubKeySize:    2592,
 			signatureSize: 4627,
+			seedSize:      32,
 		},
 	},
 
@@ -405,6 +418,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			encapKeySize:   800,
 			decapKeySize:   1632,
 			ciphertextSize: 768,
+			seedSize:       64,
 		},
 	},
 	"2.16.840.1.101.3.4.4.2": {
@@ -424,6 +438,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			encapKeySize:   1184,
 			decapKeySize:   2400,
 			ciphertextSize: 1088,
+			seedSize:       64,
 		},
 	},
 	"2.16.840.1.101.3.4.4.3": {
@@ -443,6 +458,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			encapKeySize:   1568,
 			decapKeySize:   3168,
 			ciphertextSize: 1568,
+			seedSize:       64,
 		},
 	},
 

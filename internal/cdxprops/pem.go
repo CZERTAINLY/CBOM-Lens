@@ -253,19 +253,36 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
-	// Lower bound, never equality. The private key the standard specifies is
-	// the innermost value; PKCS#8 wraps it in an algorithm-specific encoding
-	// whose overhead varies -- of the three fixtures in the corpus the
-	// privateKey OCTET STRING runs 4074 bytes for a 4032-byte ML-DSA-65 key,
-	// 2474 for a 2400-byte ML-KEM-768 decapsulation key and 64 for a 64-byte
-	// SLH-DSA-SHA2-128S key. Requiring equality would reject two of those
-	// three real keys.
+	// Lower bound against the SMALLEST legal encoding, never equality and never
+	// the expanded size. RFC 9881 sec. 6 makes the ML-DSA privateKey field a
+	// CHOICE -- seed [0] (32 bytes), expandedKey, or both -- and names the seed
+	// the RECOMMENDED form; ML-KEM has the same shape with a 64-byte (d, z)
+	// seed. So one algorithm has several legal body lengths that differ by two
+	// orders of magnitude.
+	//
+	// Checking against the expanded size rejected real keys. Every fixture in
+	// the corpus is OpenSSL's default "both" encoding -- decoding their bodies
+	// gives SEQUENCE{OCTET STRING(32), OCTET STRING(4032)} = 4074 for ML-DSA-65
+	// and SEQUENCE{OCTET STRING(64), OCTET STRING(2400)} = 2474 for ML-KEM-768
+	// -- so a floor of 4032/2400 passed all three and looked correct, while a
+	// genuine seed-only key from `openssl genpkey -provparam
+	// ml-dsa.output_formats=seed-only` (body 34) was reported as no key at all.
+	// Node.js exports seed-only by default, so those are keys in the wild.
+	// Reporting a real key as absent is the same defect as reporting an absent
+	// one as real, only harder to notice.
+	//
+	// The seed is the floor because nothing legal is smaller, and 32 arbitrary
+	// bytes is exactly what a seed is -- there is no content test that
+	// distinguishes a valid seed from noise, so length is all this can check.
+	// It still rejects what it was written for: a body of a few bytes under a
+	// valid post-quantum OID, which used to yield a confident "a private key
+	// exists here".
 	//
 	// A registry entry that states no size (XMSS, XMSS-MT, HSS-LMS: RFC 9802
 	// puts the parameters in the key value, not in the OID) is not checked. We
 	// cannot validate what we do not know, and refusing those keys would be a
 	// worse error than the one this guards against.
-	if wantSize := registryPrivateKeySize(info); wantSize > 0 && len(pkcs8.PrivateKey) < wantSize {
+	if wantSize := registryMinimumBodySize(info); wantSize > 0 && len(pkcs8.PrivateKey) < wantSize {
 		slog.WarnContext(ctx, "not reporting a private key: PKCS#8 body is too small for the algorithm",
 			"algorithm", info.name,
 			"oid", info.oid,
@@ -332,22 +349,34 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 	return
 }
 
-// registryPrivateKeySize returns the size in BYTES of the private half of a
-// key pair as the registry states it, or 0 when the registry states none.
+// registryMinimumBodySize returns the size in BYTES of the smallest legal
+// PKCS#8 privateKey body for an algorithm, or 0 when the registry states none.
+//
+// That is the seed for a scheme that has a seed encoding, and the expanded
+// private key otherwise. It is deliberately NOT the expanded size for
+// everything: a scheme with a seed CHOICE stores either form legitimately, so
+// the expanded size is an upper bound on one alternative rather than a floor
+// on all of them, and using it rejects real keys.
 //
 // A KEM's private half is its decapsulation key and a signature scheme's is
-// its private key, and the two are carried by different registry shapes
-// (kemInfo vs pqcInfo), so reading only privKeySize would silently return 0 --
-// no check at all -- for every ML-KEM parameter set.
+// its private key, carried by different registry shapes (kemInfo vs pqcInfo),
+// so reading only privKeySize would silently return 0 -- no check at all --
+// for every ML-KEM parameter set.
 //
-// These are byte counts from FIPS 203/204/205 and RFC 9909. They are NOT the
-// schema's relatedCryptoMaterialProperties.size, which is in bits; see the
-// comment on that field's guard below.
-func registryPrivateKeySize(info algorithmInfo) int {
+// These are byte counts from FIPS 203/204/205, RFC 9881 and RFC 9909. They are
+// NOT the schema's relatedCryptoMaterialProperties.size, which is in bits; see
+// the comment on that field's guard above.
+func registryMinimumBodySize(info algorithmInfo) int {
 	switch sizes := info.pqc.(type) {
 	case kemInfo:
+		if sizes.seedSize > 0 {
+			return sizes.seedSize
+		}
 		return sizes.decapKeySize
 	case pqcInfo:
+		if sizes.seedSize > 0 {
+			return sizes.seedSize
+		}
 		return sizes.privKeySize
 	}
 	return 0
