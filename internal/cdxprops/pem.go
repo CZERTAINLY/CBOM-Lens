@@ -308,6 +308,19 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 		// counterpart only through AlgorithmRef, i.e. by algorithm and not by
 		// keypair. Do not read the classical invariant into the shared
 		// crypto/private_key/ prefix.
+		//
+		// Accepted trade-off, recorded because it is the only ref in a
+		// cbom-lens document derived from secret material. Builder.safeRef
+		// rewrites this to <prefix>@<uuidv5>, which hides the digest but does
+		// NOT break the derivation -- uuid.NewSHA1 is deterministic over the
+		// raw ref, so the emitted UUID is reconstructible from a candidate key
+		// file. The CBOM is therefore a confirmation oracle: someone who
+		// already holds a key can prove it was scanned, and
+		// evidence.occurrences tells them where. Judged acceptable because it
+		// discloses nothing to anyone who does not already have the key, and
+		// content addressing is what lets the same key found at two paths
+		// dedupe to one asset. The alternative, hashing the location, trades
+		// that away and makes refs move when the scan root changes.
 		BOMRef: fmt.Sprintf("crypto/private_key/%s@%s", strings.ToLower(info.name), c.bomRefHasher(der)),
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,

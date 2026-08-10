@@ -537,13 +537,18 @@ func TestPQCPipeline_PrivateKeyYieldsKeyMaterial(t *testing.T) {
 			require.NotContains(t, string(raw), base64.StdEncoding.EncodeToString(block.Bytes),
 				"the private key DER reached the emitted document")
 
-			// Nor its digest. The bom-ref is built from sha256(private DER),
-			// and what keeps that off the wire is Builder.safeRef rewriting
-			// every ref to <prefix>@<uuidv5> -- an indirection in another
-			// package that nothing here would otherwise notice losing. Without
-			// it the document would carry a value derived from the secret,
-			// letting anyone holding a candidate key file confirm that exact
-			// file was scanned, at the location evidence records.
+			// Nor the literal digest. Builder.safeRef rewrites the ref to
+			// <prefix>@<uuidv5>, so the sha256 hex does not appear.
+			//
+			// Be clear about what this does and does not buy. safeRef is
+			// uuid.NewSHA1(NameSpaceDNS, rawRef) -- deterministic -- and the
+			// raw ref contains the digest, so the emitted UUID is still a
+			// function of the private DER and reconstructible from a candidate
+			// key file alone. This assertion pins the encoding, NOT secrecy;
+			// the accepted-and-documented oracle is described on
+			// unsupportedPKCS8PrivateKey. What it would catch is the digest
+			// being emitted somewhere safeRef does not reach -- a property, a
+			// description, a second ref field added later.
 			derDigest := sha256.Sum256(block.Bytes)
 			require.NotContains(t, string(raw), hex.EncodeToString(derDigest[:]),
 				"the private key's digest reached the emitted document")
