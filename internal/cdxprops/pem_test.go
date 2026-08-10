@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OmniTrustILM/cbom-lens/internal/bom"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
@@ -327,6 +328,51 @@ func csrCRLBundle(t *testing.T, location string) model.PEMBundle {
 		CertificateRequests: []*x509.CertificateRequest{csr},
 		CRLs:                []*x509.RevocationList{crl},
 	}
+}
+
+// TestPEMBundle_CRLWithoutNextUpdateOmitsTheProperty covers the branch nothing
+// else reaches: RFC 5280 makes nextUpdate OPTIONAL, and crlToCDX used to format
+// it unconditionally, so a CRL without one reported
+// next_update=0001-01-01T00:00:00Z -- a fabricated expiry, indistinguishable
+// from a real one to anything consuming the property.
+//
+// The CRL is built by the generator and then has the field cleared, because
+// x509.CreateRevocationList refuses to marshal a zero NextUpdate (it compares
+// against ThisUpdate), so a genuinely field-less CRL cannot be produced with
+// Go's own encoder. Clearing it after parsing exercises crlToCDX on exactly the
+// struct a third-party CRL would yield, and keeps Raw realistic so the
+// content-addressed bom-ref stays meaningful.
+func TestPEMBundle_CRLWithoutNextUpdateOmitsTheProperty(t *testing.T) {
+	t.Parallel()
+
+	bundle := csrCRLBundle(t, "/test/no-next-update.pem")
+	require.Len(t, bundle.CRLs, 1)
+	require.False(t, bundle.CRLs[0].NextUpdate.IsZero(),
+		"the generator must set NextUpdate, or clearing it proves nothing")
+	bundle.CRLs[0].NextUpdate = time.Time{}
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+
+	var found bool
+	for _, compo := range d.Components {
+		if !strings.HasPrefix(compo.BOMRef, "crypto/crl/") {
+			continue
+		}
+		found = true
+		require.NotNil(t, compo.Properties)
+		names := make([]string, 0, len(*compo.Properties))
+		for _, p := range *compo.Properties {
+			names = append(names, p.Name)
+			require.NotEqual(t, "next_update", p.Name,
+				"a CRL with no nextUpdate must omit the property, not invent %q", p.Value)
+		}
+		// The rest must survive, or "omitted" could just mean the property set
+		// was dropped wholesale. A CRL carries no pem_type -- only csrToCDX
+		// sets that one.
+		require.Subset(t, names, []string{"issuer", "this_update", "revoked_count"})
+	}
+	require.True(t, found, "no CRL component emitted")
 }
 
 // emitDocument runs a detection through the real Builder for the given spec

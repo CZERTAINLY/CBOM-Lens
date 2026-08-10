@@ -2,7 +2,9 @@ package cdxprops_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	pemlib "encoding/pem"
 	"testing"
@@ -396,6 +398,17 @@ func TestPQCPipeline_PrivateKeyYieldsKeyMaterial(t *testing.T) {
 			require.NotNil(t, block)
 			require.NotContains(t, string(raw), base64.StdEncoding.EncodeToString(block.Bytes),
 				"the private key DER reached the emitted document")
+
+			// Nor its digest. The bom-ref is built from sha256(private DER),
+			// and what keeps that off the wire is Builder.safeRef rewriting
+			// every ref to <prefix>@<uuidv5> -- an indirection in another
+			// package that nothing here would otherwise notice losing. Without
+			// it the document would carry a value derived from the secret,
+			// letting anyone holding a candidate key file confirm that exact
+			// file was scanned, at the location evidence records.
+			derDigest := sha256.Sum256(block.Bytes)
+			require.NotContains(t, string(raw), hex.EncodeToString(derDigest[:]),
+				"the private key's digest reached the emitted document")
 		})
 	}
 }
