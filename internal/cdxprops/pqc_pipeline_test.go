@@ -279,19 +279,17 @@ func TestPQCPipeline_UndersizedBodyYieldsAlgorithmNotKey(t *testing.T) {
 		// The original reproduction: four bytes, 0xdeadbeef's length.
 		{"ML-DSA-65 four-byte body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 4},
 		{"ML-KEM-768 four-byte body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 4},
-		// One byte short of the SMALLEST legal encoding, which is the seed:
-		// 32 bytes for ML-DSA (RFC 9881 sec. 6) and 64 for ML-KEM's (d, z).
-		// This is the boundary the lower bound must still reject.
+		// One byte short of the smallest thing that could be a key: the seed is
+		// 32 bytes for ML-DSA (RFC 9881 sec. 6) and 64 for ML-KEM's (d, z), so
+		// nothing at 31 or 63 bytes is an encoding of anything.
 		//
-		// It is deliberately not one byte short of the EXPANDED key. A body of
-		// 4031 is accepted, and must be: an ML-DSA-65 key stored as a seed is
-		// 32 bytes, so any floor high enough to reject 4031 also rejects every
-		// seed-encoded key in existence. See
-		// TestPQCPipeline_SeedEncodedKeysYieldTheirKey.
+		// These are the sizes; which ENCODINGS are legal is
+		// TestPQCPipeline_IllegalBodyEncodingYieldsAlgorithmNotKey, and it is
+		// the check that rejects a body of exactly 32 bytes as well.
 		{"ML-DSA-65 one byte under the seed", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 31},
 		{"ML-KEM-768 one byte under the seed", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 63},
-		// SLH-DSA has no seed alternative (RFC 9882), so its floor stays the
-		// full 64-byte private key.
+		// SLH-DSA has no seed alternative (RFC 9882) and stores the key raw, so
+		// the only body that can be one is 64 bytes exactly.
 		{"SLH-DSA-SHA2-128S empty body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}, 0},
 		{"SLH-DSA-SHA2-128S one byte short", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}, 63},
 	}
@@ -394,10 +392,11 @@ func TestPQCPipeline_SeedEncodedKeysYieldTheirKey(t *testing.T) {
 //
 // It is not redundant with TestPQCPipeline_PrivateKeyYieldsKeyMaterial, which
 // asserts the shape of the emitted key. This asserts only that the key is
-// there, and says why the bound has to be ">=" rather than "==": PKCS#8 wraps
-// the standardised key in an algorithm-specific encoding whose overhead varies
-// -- 42 bytes for ML-DSA-65, 74 for ML-KEM-768, 0 for SLH-DSA-SHA2-128S. An
-// equality check would reject two of these three real files.
+// there, on real `openssl genpkey` output, and it is the test that keeps the
+// encoding check honest: the three files use two different encodings -- the
+// `both` SEQUENCE for ML-DSA-65 and ML-KEM-768, bodies of 4074 and 2474, and a
+// raw unwrapped 64-byte key for SLH-DSA-SHA2-128S. Any check that assumes one
+// of those two layouts drops the other file's key.
 func TestPQCPipeline_RealFixturesStillYieldTheirKey(t *testing.T) {
 	t.Parallel()
 

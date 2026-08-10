@@ -18,7 +18,12 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 
-// PEMBundleToCDX converts a PEM bundle to CycloneDX components
+// restOfPEMBundleToCDX converts the parts of a PEM bundle Converter.PEMBundle
+// does not handle itself -- certificate requests, standalone public keys, CRLs,
+// and the blocks the scanner could not parse -- into CycloneDX components.
+//
+// PEMBundle takes the certificates and the keypairs, and calls this for the
+// rest; the name says which half is which.
 func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle) ([]cdx.Component, error) {
 	components := make([]cdx.Component, 0)
 	var errs []error
@@ -236,8 +241,28 @@ func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, 
 // material.
 func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (key, algo cdx.Component, err error) {
 	var pkcs8 pkcs8Struct
-	if _, err = asn1.Unmarshal(der, &pkcs8); err != nil {
-		err = fmt.Errorf("parsing PKCS#8 via ASN.1: %w", err)
+	rest, uerr := asn1.Unmarshal(der, &pkcs8)
+	if uerr != nil {
+		err = fmt.Errorf("parsing PKCS#8 via ASN.1: %w", uerr)
+		return
+	}
+	// asn1.Unmarshal returns what it did not consume, and discarding that
+	// accepted anything appended after the PrivateKeyInfo. Since the ref is a
+	// digest of the whole block, one key plus n different tails is n distinct
+	// private-key assets all claiming to be the same key -- unbounded, and
+	// indistinguishable in the document from n real keys.
+	// x509.ParsePKCS8PrivateKey rejects trailing data for the same reason.
+	if len(rest) > 0 {
+		err = fmt.Errorf("parsing PKCS#8 via ASN.1: %d bytes of trailing data", len(rest))
+		return
+	}
+	// RFC 5208 defines version 0, RFC 5958 adds 1 for a OneAsymmetricKey that
+	// carries a publicKey. Any other value means this is not a structure whose
+	// layout is known, so the field measured below need not be the private key
+	// at all -- and the field was decoded and then never looked at, so version
+	// -1 was reported as a full private key.
+	if pkcs8.Version != 0 && pkcs8.Version != 1 {
+		err = fmt.Errorf("unsupported PKCS#8 version %d", pkcs8.Version)
 		return
 	}
 	info, ok := unsupportedAlgorithms[pkcs8.Algo.Algorithm.String()]
@@ -253,41 +278,32 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
-	// Lower bound against the SMALLEST legal encoding, never equality and never
-	// the expanded size. RFC 9881 sec. 6 makes the ML-DSA privateKey field a
-	// CHOICE -- seed [0] (32 bytes), expandedKey, or both -- and names the seed
-	// the RECOMMENDED form; ML-KEM has the same shape with a 64-byte (d, z)
-	// seed. So one algorithm has several legal body lengths that differ by two
-	// orders of magnitude.
+	// Check the ENCODING, not a length floor. RFC 9881 sec. 6 makes the ML-DSA
+	// privateKey field a CHOICE -- seed [0] (32 bytes), expandedKey, or both --
+	// and names the seed the RECOMMENDED form; ML-KEM has the same shape with a
+	// 64-byte (d, z) seed. So one algorithm has several legal body lengths that
+	// differ by two orders of magnitude, and neither bound works alone:
 	//
-	// Checking against the expanded size rejected real keys. Every fixture in
-	// the corpus is OpenSSL's default "both" encoding -- decoding their bodies
-	// gives SEQUENCE{OCTET STRING(32), OCTET STRING(4032)} = 4074 for ML-DSA-65
-	// and SEQUENCE{OCTET STRING(64), OCTET STRING(2400)} = 2474 for ML-KEM-768
-	// -- so a floor of 4032/2400 passed all three and looked correct, while a
-	// genuine seed-only key from `openssl genpkey -provparam
-	// ml-dsa.output_formats=seed-only` (body 34) was reported as no key at all.
-	// Node.js exports seed-only by default, so those are keys in the wild.
-	// Reporting a real key as absent is the same defect as reporting an absent
-	// one as real, only harder to notice.
+	//   - A floor at the expanded size rejected real keys. Every PQC fixture in
+	//     the corpus is OpenSSL's default "both" encoding, so 4032/2400 passed
+	//     all of them and looked correct, while a genuine seed-only key from
+	//     `openssl genpkey -provparam ml-dsa.output_formats=seed-only` (body 34)
+	//     was reported as no key at all. Node.js exports seed-only by default,
+	//     so those are keys in the wild.
+	//   - A floor at the seed accepted 32 bytes of noise under an ML-DSA OID as
+	//     a full private key -- the exact confident-report-over-garbage this
+	//     guard exists to prevent, back one alternative lower.
 	//
-	// The seed is the floor because nothing legal is smaller, and 32 arbitrary
-	// bytes is exactly what a seed is -- there is no content test that
-	// distinguishes a valid seed from noise, so length is all this can check.
-	// It still rejects what it was written for: a body of a few bytes under a
-	// valid post-quantum OID, which used to yield a confident "a private key
-	// exists here".
-	//
-	// A registry entry that states no size (XMSS, XMSS-MT, HSS-LMS: RFC 9802
-	// puts the parameters in the key value, not in the OID) is not checked. We
-	// cannot validate what we do not know, and refusing those keys would be a
-	// worse error than the one this guards against.
-	if wantSize := registryMinimumBodySize(info); wantSize > 0 && len(pkcs8.PrivateKey) < wantSize {
-		slog.WarnContext(ctx, "not reporting a private key: PKCS#8 body is too small for the algorithm",
+	// There is no content test to make: nothing distinguishes a valid seed from
+	// 32 arbitrary bytes. But the legal encodings are enumerable, so the tags
+	// and declared lengths can be checked, and that rules out every body between
+	// the alternatives without rejecting any of the alternatives themselves.
+	if reason := rejectPrivateKeyBody(info, pkcs8.PrivateKey); reason != "" {
+		slog.WarnContext(ctx, "not reporting a private key: the PKCS#8 body is not a legal encoding of one",
 			"algorithm", info.name,
 			"oid", info.oid,
 			"body_bytes", len(pkcs8.PrivateKey),
-			"minimum_bytes", wantSize)
+			"reason", reason)
 		return
 	}
 
@@ -349,37 +365,102 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 	return
 }
 
-// registryMinimumBodySize returns the size in BYTES of the smallest legal
-// PKCS#8 privateKey body for an algorithm, or 0 when the registry states none.
+// registryKeyBodySizes returns the two sizes in BYTES that a PKCS#8 privateKey
+// body for this algorithm can declare: the seed, when the scheme has a seed
+// alternative, and the expanded private key. Either is 0 when the registry
+// states none.
 //
-// That is the seed for a scheme that has a seed encoding, and the expanded
-// private key otherwise. It is deliberately NOT the expanded size for
-// everything: a scheme with a seed CHOICE stores either form legitimately, so
-// the expanded size is an upper bound on one alternative rather than a floor
-// on all of them, and using it rejects real keys.
-//
-// A KEM's private half is its decapsulation key and a signature scheme's is
-// its private key, carried by different registry shapes (kemInfo vs pqcInfo),
-// so reading only privKeySize would silently return 0 -- no check at all --
-// for every ML-KEM parameter set.
+// A KEM's private half is its decapsulation key and a signature scheme's is its
+// private key, carried by different registry shapes (kemInfo vs pqcInfo), so
+// reading only privKeySize would silently return 0 -- no check at all -- for
+// every ML-KEM parameter set.
 //
 // These are byte counts from FIPS 203/204/205, RFC 9881 and RFC 9909. They are
 // NOT the schema's relatedCryptoMaterialProperties.size, which is in bits; see
 // the comment on that field's guard above.
-func registryMinimumBodySize(info algorithmInfo) int {
+func registryKeyBodySizes(info algorithmInfo) (seed, expanded int) {
 	switch sizes := info.pqc.(type) {
 	case kemInfo:
-		if sizes.seedSize > 0 {
-			return sizes.seedSize
-		}
-		return sizes.decapKeySize
+		return sizes.seedSize, sizes.decapKeySize
 	case pqcInfo:
-		if sizes.seedSize > 0 {
-			return sizes.seedSize
-		}
-		return sizes.privKeySize
+		return sizes.seedSize, sizes.privKeySize
 	}
-	return 0
+	return 0, 0
+}
+
+// rejectPrivateKeyBody returns why body cannot be a private key for info, or ""
+// when it is one of the legal encodings.
+//
+// The accepted set is, in the order tried:
+//
+//   - the raw key, unwrapped. This is how SLH-DSA is stored (RFC 9883 gives it
+//     no seed alternative) and it is what the fixtures hold: 64 bytes for
+//     SHA2-128s, not 66. It is also accepted for the seed-bearing schemes,
+//     where RFC 9881 does not define it: a producer that skips the CHOICE
+//     wrapper emits a real key, and reporting a real key as absent is the
+//     failure this check exists to avoid, inverted.
+//   - expandedKey, a plain OCTET STRING of the expanded size.
+//   - seed, `[0] OCTET STRING` of the seed size -- the RECOMMENDED form, and
+//     what Node.js writes by default.
+//   - both, SEQUENCE { seed, expandedKey } -- OpenSSL's default.
+//
+// An empty body is refused whatever the algorithm, including the entries the
+// registry states no size for (XMSS, XMSS-MT, HSS-LMS: RFC 9802 puts the
+// parameters in the key value, not in the OID). Those cannot be validated and
+// refusing them would be the worse error, but no encoding of any key is zero
+// bytes, so that much can be ruled out without knowing the algorithm.
+func rejectPrivateKeyBody(info algorithmInfo, body []byte) string {
+	if len(body) == 0 {
+		return "empty body"
+	}
+
+	seed, expanded := registryKeyBodySizes(info)
+	if expanded == 0 {
+		return ""
+	}
+
+	if len(body) == expanded ||
+		derOctetStringOf(body, expanded) ||
+		(seed > 0 && derTaggedSeedOf(body, seed)) ||
+		(seed > 0 && derSeedAndExpandedOf(body, seed, expanded)) {
+		return ""
+	}
+
+	if seed > 0 {
+		return fmt.Sprintf("not a %d-byte seed, a %d-byte expanded key, or both", seed, expanded)
+	}
+	return fmt.Sprintf("not a %d-byte key", expanded)
+}
+
+// derOctetStringOf reports whether body is exactly one OCTET STRING carrying
+// want bytes. The trailing-byte check is what makes this a shape test rather
+// than a prefix test: raw noise whose first bytes happen to read as a valid
+// OCTET STRING header does not end where the header says it does.
+func derOctetStringOf(body []byte, want int) bool {
+	var content []byte
+	rest, err := asn1.Unmarshal(body, &content)
+	return err == nil && len(rest) == 0 && len(content) == want
+}
+
+// derTaggedSeedOf reports whether body is the seed alternative, `[0] OCTET
+// STRING` of want bytes -- 0x80 0x20 followed by 32 bytes for ML-DSA.
+func derTaggedSeedOf(body []byte, want int) bool {
+	var content []byte
+	rest, err := asn1.UnmarshalWithParams(body, &content, "tag:0")
+	return err == nil && len(rest) == 0 && len(content) == want
+}
+
+// derSeedAndExpandedOf reports whether body is the `both` alternative. The two
+// lengths are checked in position: swapping the halves gives a SEQUENCE whose
+// members are individually the right size and which encodes no key.
+func derSeedAndExpandedOf(body []byte, wantSeed, wantExpanded int) bool {
+	var both struct {
+		Seed     []byte
+		Expanded []byte
+	}
+	rest, err := asn1.Unmarshal(body, &both)
+	return err == nil && len(rest) == 0 &&
+		len(both.Seed) == wantSeed && len(both.Expanded) == wantExpanded
 }
 
 // registryPrimitive returns the primitive a registry entry declares, falling

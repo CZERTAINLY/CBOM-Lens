@@ -17,28 +17,38 @@ var mlKEM768OID = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}
 // synthPKCS8 builds a minimal PKCS#8 PrivateKeyInfo carrying oid, with a
 // privateKey body the size of that algorithm's expanded private key.
 //
-// unsupportedPKCS8PrivateKey reads the body only to measure it -- never to
-// interpret it -- so zero bytes of the right length exercise the real parse
-// path without embedding key material. The length matters: the function
-// refuses to report a key from a body too small to hold one, so the old
-// four-byte placeholder would make every sized OID in the sweep return an
-// algorithm and no key, and the sweep's key assertions would be testing the
-// rejection path while claiming to test the happy one.
+// unsupportedPKCS8PrivateKey never interprets the body as key material, so
+// zero bytes of the right length exercise the real parse path without embedding
+// a key. The length matters: the function refuses to report a key from a body
+// that is not a legal encoding of one, so the old four-byte placeholder would
+// make every sized OID in the sweep return an algorithm and no key, and the
+// sweep's key assertions would be testing the rejection path while claiming to
+// test the happy one.
 //
-// This deliberately uses the EXPANDED size rather than
-// registryMinimumBodySize, which returns the seed. Both are accepted, and
-// sizing the synthetic body at the floor would make the sweep pass even if the
-// floor were raised back to something that rejects real seed-only keys.
+// This deliberately uses the EXPANDED size rather than the seed. Both are
+// accepted, and sizing the synthetic body at the seed would make the sweep pass
+// even if the seed alternative stopped being accepted -- which is how real
+// seed-only keys were dropped once already.
+//
+// Algorithms the registry states no size for (XMSS, XMSS-MT, HSS-LMS) get one
+// byte. Nothing can be validated for them, so any non-empty body yields their
+// key -- but the body has to be non-empty: an empty one is refused for every
+// algorithm, and a zero-length body would put those three OIDs back on the
+// rejection path this helper exists to stay off.
 func synthPKCS8(t *testing.T, oid asn1.ObjectIdentifier) []byte {
 	t.Helper()
 
 	info := unsupportedAlgorithms[oid.String()]
-	size := 0
+	size := 1
 	switch sizes := info.pqc.(type) {
 	case kemInfo:
-		size = sizes.decapKeySize
+		if sizes.decapKeySize > 0 {
+			size = sizes.decapKeySize
+		}
 	case pqcInfo:
-		size = sizes.privKeySize
+		if sizes.privKeySize > 0 {
+			size = sizes.privKeySize
+		}
 	}
 	return synthPKCS8Body(t, oid, size)
 }
