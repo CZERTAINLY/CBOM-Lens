@@ -56,7 +56,7 @@ func TestLeakToComponent(t *testing.T) {
 			},
 			then: &model.Detection{
 				Source:   "LEAKS",
-				Type:     "PRIVATE-KEY",
+				Type:     model.DetectionTypeLeakPrivateKey,
 				Location: "/path/to/file",
 			},
 		},
@@ -234,7 +234,7 @@ func TestLeakToComponent(t *testing.T) {
 				require.Nil(t, detection)
 				return
 			}
-			if tt.then.Type == "PRIVATE-KEY" {
+			if tt.then.Type == model.DetectionTypeLeakPrivateKey {
 				require.Len(t, detection.Components, 1)
 			} else {
 				require.Equal(t, tt.then, detection)
@@ -246,25 +246,19 @@ func TestLeakToComponent(t *testing.T) {
 // TestLeak_PrivateKeyBundleDoesNotPanic covers the mainline "gitleaks found a
 // private key" path, which no test reached before: the private-key row above
 // leaves Finding.PEMBundle zero, so leakToComponents never delegates to
-// PEMBundle there.
+// PEMBundle there. In production the gitleaks scanner attaches a real bundle
+// for that rule.
 //
-// In production the gitleaks scanner attaches a real bundle for that rule, and
-// Converter.Leak then reads
-// compos[0].CryptoProperties.RelatedCryptoMaterialProperties.Type. compos[0]
+// It no longer pins a nil-guard. Converter.Leak used to read
+// compos[0].CryptoProperties.RelatedCryptoMaterialProperties.Type, and compos[0]
 // from a PEM bundle is the key's ALGORITHM, which carries no material
-// properties -- the blanket format=PEM loop was the only thing keeping that
-// pointer non-nil (#213).
+// properties once the blanket format=PEM loop is gone (#213). That positional
+// read has been deleted -- the detection type comes from the rule -- so there
+// is no dereference left to protect.
 //
-// So this test is green on the unfixed tree by construction: it pins the guard,
-// not the bug. Restoring the unconditional dereference while keeping the
-// asset-type-gated setPEMFormat panics here, which is the regression it exists
-// to catch.
-//
-// It deliberately does not assert d.Type. That is "" on this path both before
-// and after the fix, because compos[0] is an algorithm whose material Type is
-// empty; Leak derives the detection type positionally from compos[0], which is
-// wrong independently of #213. Asserting the current "" would bless it and
-// asserting PRIVATE-KEY would fail, so the field is left to its own fix.
+// What survives is the end-to-end shape of the path: a real bundle, classical
+// and post-quantum, still yields components. TestLeak_DetectionTypeIsRuleDerived
+// asserts the type these findings report.
 func TestLeak_PrivateKeyBundleDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
@@ -326,6 +320,140 @@ func TestLeak_PrivateKeyBundleDoesNotPanic(t *testing.T) {
 			require.NotEmpty(t, d.Components)
 		})
 	}
+}
+
+// TestLeak_DetectionTypeIsRuleDerived pins Detection.Type to the gitleaks rule
+// rather than to whatever component happened to land first.
+//
+// The three private-key rows are the point: the same rule, once bare, once with
+// an RSA PEM bundle and once with an ML-DSA one, must all report PRIVATE-KEY.
+// Reading the type off compos[0] gave "PRIVATE-KEY" only for the bare finding
+// -- an RSA bundle leads with the key's algorithm and a PQC bundle has nothing
+// but an algorithm, so both reported "". The remaining rows pin the values the
+// other rules have always produced, including jwt reporting TOKEN.
+func TestLeak_DetectionTypeIsRuleDerived(t *testing.T) {
+	t.Parallel()
+
+	rsaKey, err := cdxtest.GenRSAPrivateKey(2048)
+	require.NoError(t, err)
+	rsaDER, err := x509.MarshalPKCS8PrivateKey(rsaKey)
+	require.NoError(t, err)
+	rsaPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: rsaDER})
+
+	mldsaPEM, err := cdxtest.TestData(cdxtest.MLDSA65PrivateKey)
+	require.NoError(t, err)
+
+	scan := func(t *testing.T, content []byte, location string) model.PEMBundle {
+		t.Helper()
+		bundle, err := pemscan.Scanner{}.Scan(t.Context(), content, location)
+		require.NoError(t, err)
+		return bundle
+	}
+
+	tests := []struct {
+		scenario string
+		findings func(t *testing.T) []model.Finding
+		want     model.DetectionType
+	}{
+		{
+			scenario: "private-key rule without a PEM bundle",
+			findings: func(*testing.T) []model.Finding {
+				return []model.Finding{{RuleID: "private-key", StartLine: 1, Secret: string(rsaPEM)}}
+			},
+			want: model.DetectionTypeLeakPrivateKey,
+		},
+		{
+			scenario: "private-key rule with an RSA PEM bundle",
+			findings: func(t *testing.T) []model.Finding {
+				return []model.Finding{{
+					RuleID:    "private-key",
+					StartLine: 1,
+					Secret:    string(rsaPEM),
+					PEMBundle: scan(t, rsaPEM, "rsa-private-key.pem"),
+				}}
+			},
+			want: model.DetectionTypeLeakPrivateKey,
+		},
+		{
+			scenario: "private-key rule with an ML-DSA PEM bundle",
+			findings: func(t *testing.T) []model.Finding {
+				return []model.Finding{{
+					RuleID:    "private-key",
+					StartLine: 1,
+					Secret:    string(mldsaPEM),
+					PEMBundle: scan(t, mldsaPEM, cdxtest.MLDSA65PrivateKey),
+				}}
+			},
+			want: model.DetectionTypeLeakPrivateKey,
+		},
+		{
+			scenario: "jwt rule reports TOKEN",
+			findings: func(*testing.T) []model.Finding {
+				return []model.Finding{{RuleID: "jwt-token", StartLine: 1, Secret: "header.payload.sig"}}
+			},
+			want: model.DetectionTypeLeakTOKEN,
+		},
+		{
+			scenario: "password rule",
+			findings: func(*testing.T) []model.Finding {
+				return []model.Finding{{RuleID: "password-leak", StartLine: 1, Secret: "hunter2"}}
+			},
+			want: model.DetectionTypeLeakPASSWORD,
+		},
+		{
+			scenario: "unrecognised rule",
+			findings: func(*testing.T) []model.Finding {
+				return []model.Finding{{RuleID: "something-else", StartLine: 1, Secret: "x"}}
+			},
+			want: model.DetectionTypeUNKNOWN,
+		},
+		{
+			// One detection carries one type for a whole file, so the first
+			// finding that contributes a component wins. Pinned so a later
+			// refactor cannot silently switch to last-wins.
+			scenario: "two findings: the first one wins",
+			findings: func(*testing.T) []model.Finding {
+				return []model.Finding{
+					{RuleID: "jwt-token", StartLine: 1, Secret: "header.payload.sig"},
+					{RuleID: "password-leak", StartLine: 2, Secret: "hunter2"},
+				}
+			},
+			want: model.DetectionTypeLeakTOKEN,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.scenario, func(t *testing.T) {
+			t.Parallel()
+
+			d := cdxprops.NewConverter().Leak(t.Context(), model.Leaks{
+				Location: "/path/to/file",
+				Findings: tt.findings(t),
+			})
+			require.NotNil(t, d)
+			require.NotEmpty(t, d.Components)
+			require.Equal(t, tt.want, d.Type)
+		})
+	}
+}
+
+// TestPEMBundle_DetectionTypeIsPEM pins the PEM converter's own detection type.
+// It reported PORT, copy-pasted from the nmap converter, while DetectionTypePEM
+// sat unused.
+func TestPEMBundle_DetectionTypeIsPEM(t *testing.T) {
+	t.Parallel()
+
+	cert, err := cdxtest.GenSelfSignedCert()
+	require.NoError(t, err)
+	certPEM, err := cert.CertPEM()
+	require.NoError(t, err)
+
+	bundle, err := pemscan.Scanner{}.Scan(t.Context(), certPEM, "cert.pem")
+	require.NoError(t, err)
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+	require.Equal(t, model.DetectionTypePEM, d.Type)
 }
 
 // helper function to create int pointer

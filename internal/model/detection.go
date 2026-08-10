@@ -15,6 +15,15 @@ const (
 	DetectionTypeCertificate  DetectionType = "CERTIFICATE"
 	DetectionTypePort         DetectionType = "PORT"
 	DetectionTypePEM          DetectionType = "PEM"
+	// DetectionTypeLeakPrivateKey is the value Converter.Leak has always
+	// produced for the gitleaks "private-key" rule: the uppercase of
+	// cdx.RelatedCryptoMaterialTypePrivateKey. It was never declared, so the
+	// vocabulary above looked closed while the field carried a ninth value.
+	//
+	// It is deliberately not folded into DetectionTypeLeakKEY: that would merge
+	// a leaked private key with an api-key finding and change a value tests
+	// already assert.
+	DetectionTypeLeakPrivateKey DetectionType = "PRIVATE-KEY"
 )
 
 // Detection is CycloneDX data converted from scanners

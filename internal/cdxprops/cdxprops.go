@@ -61,8 +61,18 @@ func (c Converter) WithImplementationPlatform(platform cdx.ImplementationPlatfor
 func (c Converter) Leak(ctx context.Context, leaks model.Leaks) *model.Detection {
 	var compos = make([]cdx.Component, 0, len(leaks.Findings))
 	var deps = make([]cdx.Dependency, 0, len(leaks.Findings))
+	// The detection carries one type for a whole file of findings, so it takes
+	// the type of the first finding that actually contributed a component --
+	// which is the value this produced before, when the type was read back off
+	// compos[0]. leakToComponents derives it from the rule, so a private-key
+	// finding no longer changes its label depending on whether a PEM bundle
+	// came with it.
+	var typ model.DetectionType
 	for _, finding := range leaks.Findings {
-		leakCompos, leakDeps := c.leakToComponents(ctx, leaks.Location, finding)
+		leakType, leakCompos, leakDeps := c.leakToComponents(ctx, leaks.Location, finding)
+		if typ == "" && len(leakCompos) > 0 {
+			typ = leakType
+		}
 		compos = append(compos, leakCompos...)
 		deps = append(deps, leakDeps...)
 	}
@@ -74,17 +84,9 @@ func (c Converter) Leak(ctx context.Context, leaks model.Leaks) *model.Detection
 		deps = nil
 	}
 
-	// Components from a PEM bundle (a private-key finding delegates to
-	// PEMBundle) lead with the key's ALGORITHM, which carries no
-	// relatedCryptoMaterialProperties. Reading it blindly was only safe while
-	// PEMBundle stamped that struct onto every component it produced (#213).
-	var typ string
-	if cp := compos[0].CryptoProperties; cp != nil && cp.RelatedCryptoMaterialProperties != nil {
-		typ = strings.ToUpper(string(cp.RelatedCryptoMaterialProperties.Type))
-	}
 	return &model.Detection{
 		Source:       "LEAKS",
-		Type:         model.DetectionType(typ),
+		Type:         typ,
 		Location:     leaks.Location,
 		Components:   compos,
 		Dependencies: deps,
@@ -208,8 +210,11 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 	}
 
 	return &model.Detection{
-		Source:       "PEM",
-		Type:         model.DetectionTypePort,
+		Source: "PEM",
+		// A PEM bundle is not a port. DetectionTypePort here was a copy-paste
+		// from the nmap converter, and it left DetectionTypePEM -- which exists
+		// for exactly this -- assigned nowhere.
+		Type:         model.DetectionTypePEM,
 		Location:     bundle.Location,
 		Components:   compos,
 		Dependencies: deps,
