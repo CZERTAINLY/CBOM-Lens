@@ -6,9 +6,11 @@ import (
 	"crypto"
 	"crypto/elliptic"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -495,6 +497,57 @@ func TestPEMBundle_TwoCSRsSameSubjectStayDistinct(t *testing.T) {
 	require.Len(t, refs, 2,
 		"two requests for the same subject with different keys collapsed into one component")
 	require.NotEqual(t, refs[0], refs[1])
+}
+
+// TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock pins the only information
+// an operator ever gets about a key the converter could not describe.
+//
+// PEMBundle has no error return, so restOfPEMBundleToCDX's joined error dies in
+// this one Warn. It used to carry "error" and nothing else, and the join
+// discarded which block produced which line -- so a host whose keys sit under
+// OIDs the registry does not carry (no LMS, no XMSS, no composite arcs) lost
+// every one of them from the CBOM, and the evidence was an anonymous
+// multi-line blob per file next to statistics showing nothing amiss.
+//
+// Not parallel: it swaps the process-wide slog default, and a parallel sibling
+// emitting a Warn would land in this buffer. Go resumes parallel tests only
+// after the sequential ones finish, so staying sequential is the isolation.
+func TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	// 1.3.9999.6.1.1 is not in the registry. It is a real OID -- oqs-provider
+	// assigns it to SPHINCS+-Haraka-128f-robust -- so this is exactly the
+	// "PQC key under an OID we do not carry" case, not a synthetic impossibility.
+	unregistered := asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1}
+
+	// Two blocks, so an index that is merely always-zero cannot pass.
+	var raw bytes.Buffer
+	raw.Write(pkcs8PEM(t, unregistered, 32))
+	raw.Write(pkcs8PEM(t, unregistered, 64))
+
+	const location = "/etc/pki/unknown-algorithms.pem"
+	bundle, err := pemscan.Scanner{}.Scan(t.Context(), raw.Bytes(), location)
+	require.NoError(t, err, "the PEM envelopes themselves are well formed")
+	require.Len(t, bundle.ParseErrors, 2,
+		"both blocks must reach analyzeParseError, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+	require.Empty(t, d.Components,
+		"an unregistered OID must not be guessed at")
+
+	logged := logBuf.String()
+	require.Contains(t, logged, "analyzing bundle returned an error")
+	require.Contains(t, logged, location,
+		"the warning must name the file; it is the only place the location is known")
+	require.Contains(t, logged, "pem block 0 (PRIVATE KEY)")
+	require.Contains(t, logged, "pem block 1 (PRIVATE KEY)",
+		"the join must keep the blocks apart, not merge them into one blob")
+	require.Contains(t, logged, "1.3.9999.6.1.1",
+		"the underlying cause must survive the wrapping")
 }
 
 // TestPEMBundle_SameCRLTwoLocationsDedupes is the other half of dropping the

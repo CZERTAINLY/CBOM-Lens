@@ -202,7 +202,19 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 
 	bundleCompos, err := c.restOfPEMBundleToCDX(ctx, bundle)
 	if err != nil {
-		slog.WarnContext(ctx, "analyzing bundle returned an error", "error", err)
+		// This log is the error's only destination: PEMBundle has no error
+		// return and the caller gets a Detection either way. Without the
+		// location it named neither the file nor the block, so a host whose
+		// keys all sit under OIDs the registry does not carry lost every one
+		// of them from the CBOM and the operator got an anonymous multi-line
+		// blob per file. restOfPEMBundleToCDX now tags each joined error with
+		// its block index and PEM type; the location can only be added here.
+		//
+		// Giving PEMBundle an error return is the real fix and is out of
+		// scope, so this stays a Warn.
+		slog.WarnContext(ctx, "analyzing bundle returned an error",
+			"location", bundle.Location,
+			"error", err)
 	}
 	compos = append(compos, bundleCompos...)
 

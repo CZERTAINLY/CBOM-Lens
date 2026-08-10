@@ -58,7 +58,14 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 		block := bundle.RawBlocks[i]
 		compos, err := c.analyzeParseError(ctx, block, parseErr)
 		if err != nil {
-			errs = append(errs, err)
+			// Say WHICH block failed. errors.Join below flattens every block's
+			// error into one multi-line blob, and PEMBundle logs that blob and
+			// drops it -- so for a file holding several keys under OIDs outside
+			// the registry (no LMS, no XMSS, no composite arcs) the operator got
+			// a wall of "unsupported fallback oid" naming neither the file nor
+			// which key in it, while the BOM's statistics showed nothing amiss.
+			// The index and type are both in hand here and nowhere afterwards.
+			errs = append(errs, fmt.Errorf("pem block %d (%s): %w", i, block.Type, err))
 			continue
 		}
 		components = append(components, compos...)
