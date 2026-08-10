@@ -22,6 +22,7 @@ import (
 	"github.com/OmniTrustILM/cbom-lens/internal/bom"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/log"
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
 	pemscan "github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
@@ -511,13 +512,23 @@ func TestPEMBundle_TwoCSRsSameSubjectStayDistinct(t *testing.T) {
 // every one of them from the CBOM, and the evidence was an anonymous
 // multi-line blob per file next to statistics showing nothing amiss.
 //
+// The location reaches the record from the context, not from this call site:
+// service.scan installs it with log.ContextAttrs for every log emitted about
+// that file. So the handler here is the production ContextHandler -- with a
+// plain one the attribute would be dropped and this test would pass or fail for
+// a reason that has nothing to do with the code under test -- and the location
+// is asserted to appear ONCE. Adding it at the call site as well emitted a
+// duplicate "location" key in every JSON record, which is last-wins in most
+// parsers and a validation error in some log pipelines.
+//
 // Not parallel: it swaps the process-wide slog default, and a parallel sibling
 // emitting a Warn would land in this buffer. Go resumes parallel tests only
 // after the sequential ones finish, so staying sequential is the isolation.
 func TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock(t *testing.T) {
 	var logBuf bytes.Buffer
 	restore := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	handler := log.NewContextHandler(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	slog.SetDefault(slog.New(handler))
 	t.Cleanup(func() { slog.SetDefault(restore) })
 
 	// 1.3.9999.6.1.1 is not in the registry. It is a real OID -- oqs-provider
@@ -531,20 +542,24 @@ func TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock(t *testing.T) {
 	raw.Write(pkcs8PEM(t, unregistered, 64))
 
 	const location = "/etc/pki/unknown-algorithms.pem"
-	bundle, err := pemscan.Scanner{}.Scan(t.Context(), raw.Bytes(), location)
+	// The context service.scan builds, so the record carries what it carries in
+	// production and no more.
+	ctx := log.ContextAttrs(t.Context(), slog.String("location", location))
+
+	bundle, err := pemscan.Scanner{}.Scan(ctx, raw.Bytes(), location)
 	require.NoError(t, err, "the PEM envelopes themselves are well formed")
 	require.Len(t, bundle.ParseErrors, 2,
 		"both blocks must reach analyzeParseError, or this proves nothing")
 
-	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	d := cdxprops.NewConverter().PEMBundle(ctx, bundle)
 	require.NotNil(t, d)
 	require.Empty(t, d.Components,
 		"an unregistered OID must not be guessed at")
 
 	logged := logBuf.String()
 	require.Contains(t, logged, "analyzing bundle returned an error")
-	require.Contains(t, logged, location,
-		"the warning must name the file; it is the only place the location is known")
+	require.Equal(t, 1, strings.Count(logged, "location="+location),
+		"the warning must name the file exactly once; a second copy is a duplicate JSON key")
 	require.Contains(t, logged, "pem block 0 (PRIVATE KEY)")
 	require.Contains(t, logged, "pem block 1 (PRIVATE KEY)",
 		"the join must keep the blocks apart, not merge them into one blob")

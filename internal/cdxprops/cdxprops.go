@@ -203,18 +203,22 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 	bundleCompos, err := c.restOfPEMBundleToCDX(ctx, bundle)
 	if err != nil {
 		// This log is the error's only destination: PEMBundle has no error
-		// return and the caller gets a Detection either way. Without the
-		// location it named neither the file nor the block, so a host whose
-		// keys all sit under OIDs the registry does not carry lost every one
-		// of them from the CBOM and the operator got an anonymous multi-line
-		// blob per file. restOfPEMBundleToCDX now tags each joined error with
-		// its block index and PEM type; the location can only be added here.
+		// return and the caller gets a Detection either way. It used to name
+		// neither the file nor the block, so a host whose keys all sit under
+		// OIDs the registry does not carry lost every one of them from the CBOM
+		// and the operator got an anonymous multi-line blob per file.
+		// restOfPEMBundleToCDX now tags each joined error with its block index
+		// and PEM type.
+		//
+		// The location is NOT added here. service.scan already installs it on
+		// the context with log.ContextAttrs, so a "location" attribute at this
+		// call site emitted the key twice in every record -- last-wins in most
+		// parsers, a validation error in some pipelines. Pinned by
+		// TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock.
 		//
 		// Giving PEMBundle an error return is the real fix and is out of
 		// scope, so this stays a Warn.
-		slog.WarnContext(ctx, "analyzing bundle returned an error",
-			"location", bundle.Location,
-			"error", err)
+		slog.WarnContext(ctx, "analyzing bundle returned an error", "error", err)
 	}
 	compos = append(compos, bundleCompos...)
 
