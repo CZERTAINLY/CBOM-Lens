@@ -285,8 +285,9 @@ func TestLeak_PrivateKeyBundleDoesNotPanic(t *testing.T) {
 		},
 		{
 			// A PQC key never parses into bundle.PrivateKeys: it lands in
-			// ParseErrors and yields a single algorithm component, so compos[0]
-			// is an algorithm with no material properties at all.
+			// ParseErrors and is recovered by analyzeParseError, which yields
+			// the key material and its algorithm. Before that recovery emitted
+			// key material, this bundle produced an algorithm and nothing else.
 			scenario: "ML-DSA-65 private key",
 			content:  mldsaPEM,
 			location: cdxtest.MLDSA65PrivateKey,

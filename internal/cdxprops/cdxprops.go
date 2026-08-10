@@ -55,7 +55,8 @@ func (c Converter) WithImplementationPlatform(platform cdx.ImplementationPlatfor
 }
 
 // Leak converts the finding to detection.
-// Supports jwt, token, key and password.
+// Supports jwt, token, key, password, private-key and an unknown fallback;
+// leakToComponents maps the rule to both the component and the detection type.
 // Returns nil if given Leak should be ignored
 // safe to be used by different go routines
 func (c Converter) Leak(ctx context.Context, leaks model.Leaks) *model.Detection {
