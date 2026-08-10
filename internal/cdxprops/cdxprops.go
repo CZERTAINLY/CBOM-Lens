@@ -74,7 +74,14 @@ func (c Converter) Leak(ctx context.Context, leaks model.Leaks) *model.Detection
 		deps = nil
 	}
 
-	typ := strings.ToUpper(string(compos[0].CryptoProperties.RelatedCryptoMaterialProperties.Type))
+	// Components from a PEM bundle (a private-key finding delegates to
+	// PEMBundle) lead with the key's ALGORITHM, which carries no
+	// relatedCryptoMaterialProperties. Reading it blindly was only safe while
+	// PEMBundle stamped that struct onto every component it produced (#213).
+	var typ string
+	if cp := compos[0].CryptoProperties; cp != nil && cp.RelatedCryptoMaterialProperties != nil {
+		typ = strings.ToUpper(string(cp.RelatedCryptoMaterialProperties.Type))
+	}
 	return &model.Detection{
 		Source:       "LEAKS",
 		Type:         model.DetectionType(typ),
@@ -197,13 +204,7 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 	compos = append(compos, bundleCompos...)
 
 	for i := range compos {
-		if compos[i].CryptoProperties == nil {
-			compos[i].CryptoProperties = &cdx.CryptoProperties{}
-		}
-		if compos[i].CryptoProperties.RelatedCryptoMaterialProperties == nil {
-			compos[i].CryptoProperties.RelatedCryptoMaterialProperties = &cdx.RelatedCryptoMaterialProperties{}
-		}
-		compos[i].CryptoProperties.RelatedCryptoMaterialProperties.Format = "PEM"
+		setPEMFormat(&compos[i])
 	}
 
 	return &model.Detection{
@@ -264,6 +265,37 @@ func setAlgorithmPrimitive(compo *cdx.Component, primitive cdx.CryptoPrimitive) 
 		compo.CryptoProperties.AlgorithmProperties = &cdx.CryptoAlgorithmProperties{}
 	}
 	compo.CryptoProperties.AlgorithmProperties.Primitive = primitive
+}
+
+// setPEMFormat records the bundle's serialisation on a component, but only on
+// key material. relatedCryptoMaterialProperties describes a serialised object:
+// an algorithm is not serialised and has no encoding, and a certificate's
+// encoding belongs in certificateProperties.certificateFormat. Stamping it onto
+// everything the bundle produced made 20 of 32 assets in a real scan answer
+// "yes" to "is this key material?" (#213).
+//
+// The gate is the asset type, not "did the producer already build the struct":
+// gating on the struct's existence would encode which producer happened to
+// build it, so a future related-crypto-material producer that leaves it nil
+// would silently lose its format.
+//
+// CryptoProperties is deliberately NOT created. publicKeyComponents returns a
+// zero Component for a key it cannot identify, and inventing an assetType-less
+// cryptoProperties on it is worse than leaving it for Builder.appendDetection
+// to drop. This stays central rather than moving into the producers: the
+// assignment lived in restOfPEMBundleToCDX once and dereferenced exactly that
+// nil, taking the whole scan down (see pem.go).
+func setPEMFormat(compo *cdx.Component) {
+	if compo == nil || compo.CryptoProperties == nil {
+		return
+	}
+	if compo.CryptoProperties.AssetType != cdx.CryptoAssetTypeRelatedCryptoMaterial {
+		return
+	}
+	if compo.CryptoProperties.RelatedCryptoMaterialProperties == nil {
+		compo.CryptoProperties.RelatedCryptoMaterialProperties = &cdx.RelatedCryptoMaterialProperties{}
+	}
+	compo.CryptoProperties.RelatedCryptoMaterialProperties.Format = "PEM"
 }
 
 func addAlgorithmCrpyoFunctions(compo *cdx.Component, functions ...cdx.CryptoFunction) {

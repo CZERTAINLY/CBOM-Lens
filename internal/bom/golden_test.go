@@ -192,6 +192,56 @@ func TestGolden_1_6(t *testing.T) {
 	require.Equal(t, string(want), buf.String())
 }
 
+// TestGolden_NoMaterialPropsOnNonMaterialAssets states #213 over the whole
+// pipeline, in both spec versions: relatedCryptoMaterialProperties describes a
+// serialised object, so only a related-crypto-material asset may carry it.
+//
+// The corpus used to emit it on one algorithm (with format=PEM, from
+// Converter.PEMBundle's blanket loop) and on all three certificates (empty,
+// from certificateRelatedProperties), so a consumer filtering assets by the
+// presence of that field over-counted key material by a factor of three.
+func TestGolden_NoMaterialPropsOnNonMaterialAssets(t *testing.T) {
+	detections := fixtureDetections(t)
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			b, err := NewBuilder(model.CBOM{Version: version})
+			require.NoError(t, err)
+			fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+			b = b.WithClock(func() time.Time { return fixed }).
+				WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" }).
+				AppendDetections(context.Background(), detections...)
+
+			var buf bytes.Buffer
+			require.NoError(t, b.AsJSON(context.Background(), &buf))
+
+			var decoded cdx.BOM
+			require.NoError(t, cdx.NewBOMDecoder(bytes.NewReader(buf.Bytes()), cdx.BOMFileFormatJSON).Decode(&decoded))
+			require.NotNil(t, decoded.Components)
+
+			// Counted so a corpus change cannot make this vacuous.
+			var material, other int
+			for _, c := range *decoded.Components {
+				cp := c.CryptoProperties
+				if cp == nil {
+					continue
+				}
+				if cp.AssetType == cdx.CryptoAssetTypeRelatedCryptoMaterial {
+					material++
+					continue
+				}
+				other++
+				require.Nil(t, cp.RelatedCryptoMaterialProperties,
+					"%s (%s): a %s asset must not carry "+
+						"relatedCryptoMaterialProperties (#213)",
+					c.Name, c.BOMRef, cp.AssetType)
+			}
+			require.NotZero(t, material, "corpus must contain key material")
+			require.NotZero(t, other, "corpus must contain non-material crypto assets")
+		})
+	}
+}
+
 // certFromPEMFixture reads and parses the first certificate from a committed
 // PEM fixture file.
 func certFromPEMFixture(t *testing.T, path string) *x509.Certificate {

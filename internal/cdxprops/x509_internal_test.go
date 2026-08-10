@@ -79,6 +79,55 @@ func TestConverter_certConverter(t *testing.T) {
 	require.NotZero(t, compo)
 }
 
+// TestCertHitToComponents_NoMaterialPropsOnCertificate pins the removal of
+// certificateRelatedProperties (#213).
+//
+// That helper created an empty relatedCryptoMaterialProperties on every
+// certificate and wrote nothing into it, which is what produced the
+// "relatedCryptoMaterialProperties": {} blocks in the goldens and made every
+// certificate answer "yes" to "is this key material?". The certificate's own
+// properties -- including the two refs certHitToComponents writes right after
+// the deleted call -- must be untouched by its removal.
+//
+// This is deliberately at the certHitToComponents level rather than per
+// caller. Every certificate in the tool comes through here: the PEM bundle via
+// Converter.PEMBundle, a scanned file via Converter.CertHit, and a TLS service
+// via Converter.NMAP -> tlsToCompos, which forwards TLSCerts to CertHit. So the
+// deletion's whole blast radius is one function, pinned once. The golden corpus
+// covers the emitted end of it, including a certificate lifted from the nmap
+// fixture (see buildRepresentativeCorpus in internal/bom).
+func TestCertHitToComponents_NoMaterialPropsOnCertificate(t *testing.T) {
+	t.Parallel()
+
+	selfSigned, err := cdxtest.GenSelfSignedCert()
+	require.NoError(t, err)
+
+	compos, _, err := NewConverter().certHitToComponents(
+		t.Context(),
+		model.CertHit{Cert: selfSigned.Cert, Source: "cdxtest", Location: t.Name()},
+	)
+	require.NoError(t, err)
+
+	var found bool
+	for _, compo := range compos {
+		if compo.CryptoProperties == nil ||
+			compo.CryptoProperties.AssetType != cdx.CryptoAssetTypeCertificate {
+			continue
+		}
+		found = true
+
+		require.Nil(t, compo.CryptoProperties.RelatedCryptoMaterialProperties,
+			"a certificate is not key material: its encoding belongs in "+
+				"certificateProperties.certificateFormat (#213)")
+
+		certProps := compo.CryptoProperties.CertificateProperties
+		require.NotNil(t, certProps)
+		require.NotEmpty(t, certProps.SignatureAlgorithmRef)
+		require.NotEmpty(t, certProps.SubjectPublicKeyRef)
+	}
+	require.True(t, found, "no certificate component emitted")
+}
+
 func Test_hashRawPublicKey(t *testing.T) {
 	t.Parallel()
 	data, err := cdxtest.TestData(cdxtest.MLDSA65PublicKey)

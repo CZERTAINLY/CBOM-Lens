@@ -36,9 +36,10 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 		// MarshalPKIXPublicKey refuses *dsa.PublicKey, and with no certificate
 		// there is no SPKI to hash instead. Appending the zero Component here
 		// and setting Format on it dereferenced a nil CryptoProperties and took
-		// the whole scan down. The Format assignment was redundant anyway: the
-		// dispatch loop in PEMBundle sets it for every component, nil-checking
-		// first.
+		// the whole scan down, which is why the assignment stays out of the
+		// producers. The Format assignment was redundant anyway: PEMBundle's
+		// central setPEMFormat applies it to every component whose asset type is
+		// related-crypto-material, and only those (#213).
 		if pubKeyCompo.BOMRef == "" {
 			continue
 		}

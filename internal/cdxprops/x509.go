@@ -98,7 +98,6 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 		hit.Cert.PublicKey,
 		hit.Cert,
 	)
-	certificateRelatedProperties(&mainCertCompo, hit.Cert)
 	mainCertCompo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef = cdx.BOMReference(signatureAlgCompo.BOMRef)
 	// The subject public key reference names the KEY, not the algorithm that
 	// key uses (#204). The specification's own 1.7 conformance fixtures make
@@ -228,19 +227,6 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 		hashAlgCompo = &compo
 	}
 	return
-}
-
-func certificateRelatedProperties(compo *cdx.Component, cert *x509.Certificate) {
-	// Use certificate serial number as ID if available
-	if compo == nil || cert == nil {
-		return
-	}
-	if compo.CryptoProperties == nil {
-		compo.CryptoProperties = &cdx.CryptoProperties{}
-	}
-	if compo.CryptoProperties.RelatedCryptoMaterialProperties == nil {
-		compo.CryptoProperties.RelatedCryptoMaterialProperties = &cdx.RelatedCryptoMaterialProperties{}
-	}
 }
 
 // formatCertificateName creates a human-readable name for the certificate

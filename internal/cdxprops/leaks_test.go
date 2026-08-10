@@ -11,6 +11,7 @@ import (
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	pemscan "github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/stretchr/testify/require"
@@ -238,6 +239,91 @@ func TestLeakToComponent(t *testing.T) {
 			} else {
 				require.Equal(t, tt.then, detection)
 			}
+		})
+	}
+}
+
+// TestLeak_PrivateKeyBundleDoesNotPanic covers the mainline "gitleaks found a
+// private key" path, which no test reached before: the private-key row above
+// leaves Finding.PEMBundle zero, so leakToComponents never delegates to
+// PEMBundle there.
+//
+// In production the gitleaks scanner attaches a real bundle for that rule, and
+// Converter.Leak then reads
+// compos[0].CryptoProperties.RelatedCryptoMaterialProperties.Type. compos[0]
+// from a PEM bundle is the key's ALGORITHM, which carries no material
+// properties -- the blanket format=PEM loop was the only thing keeping that
+// pointer non-nil (#213).
+//
+// So this test is green on the unfixed tree by construction: it pins the guard,
+// not the bug. Restoring the unconditional dereference while keeping the
+// asset-type-gated setPEMFormat panics here, which is the regression it exists
+// to catch.
+//
+// It deliberately does not assert d.Type. That is "" on this path both before
+// and after the fix, because compos[0] is an algorithm whose material Type is
+// empty; Leak derives the detection type positionally from compos[0], which is
+// wrong independently of #213. Asserting the current "" would bless it and
+// asserting PRIVATE-KEY would fail, so the field is left to its own fix.
+func TestLeak_PrivateKeyBundleDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	// Both cases mirror internal/scanner/gitleaks: rule "private-key" plus the
+	// bundle produced by the real PEM scanner over the same bytes.
+	ecKey, err := cdxtest.GenECPrivateKey(elliptic.P256())
+	require.NoError(t, err)
+	ecDER, err := x509.MarshalPKCS8PrivateKey(ecKey)
+	require.NoError(t, err)
+	ecPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: ecDER})
+
+	mldsaPEM, err := cdxtest.TestData(cdxtest.MLDSA65PrivateKey)
+	require.NoError(t, err)
+
+	tests := []struct {
+		scenario string
+		content  []byte
+		location string
+	}{
+		{
+			scenario: "classical EC private key",
+			content:  ecPEM,
+			location: "ec-private-key.pem",
+		},
+		{
+			// A PQC key never parses into bundle.PrivateKeys: it lands in
+			// ParseErrors and yields a single algorithm component, so compos[0]
+			// is an algorithm with no material properties at all.
+			scenario: "ML-DSA-65 private key",
+			content:  mldsaPEM,
+			location: cdxtest.MLDSA65PrivateKey,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.scenario, func(t *testing.T) {
+			t.Parallel()
+
+			bundle, err := pemscan.Scanner{}.Scan(t.Context(), tt.content, tt.location)
+			require.NoError(t, err)
+
+			leaks := model.Leaks{
+				Location: tt.location,
+				Findings: []model.Finding{
+					{
+						RuleID:    "private-key",
+						StartLine: 1,
+						Secret:    string(tt.content),
+						PEMBundle: bundle,
+					},
+				},
+			}
+
+			var d *model.Detection
+			require.NotPanics(t, func() {
+				d = cdxprops.NewConverter().Leak(t.Context(), leaks)
+			})
+			require.NotNil(t, d)
+			require.NotEmpty(t, d.Components)
 		})
 	}
 }

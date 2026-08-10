@@ -344,9 +344,6 @@
           ],
           "classicalSecurityLevel": 112
         },
-        "relatedCryptoMaterialProperties": {
-          "format": "PEM"
-        },
         "oid": "1.2.840.113549.1.1.1"
       }
     },
@@ -513,8 +510,7 @@
               "ref": "crypto/key/ecdsa-p-256@823fb799-8521-59bf-8e82-a78baf0e1daa"
             }
           ]
-        },
-        "relatedCryptoMaterialProperties": {}
+        }
       }
     },
     {
@@ -557,8 +553,7 @@
               "ref": "crypto/key/ed25519@f5edef3c-85d9-5b3a-ae14-b7aaac1a70e0"
             }
           ]
-        },
-        "relatedCryptoMaterialProperties": {}
+        }
       }
     },
     {
@@ -604,8 +599,7 @@
               "ref": "crypto/key/rsa-2048@3d136069-8bc9-5281-85be-5b768dde13fc"
             }
           ]
-        },
-        "relatedCryptoMaterialProperties": {}
+        }
       }
     },
     {
