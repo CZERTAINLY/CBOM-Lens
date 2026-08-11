@@ -1546,3 +1546,712 @@ func TestAppendDetection_DropWarningSurvivesNilCryptoProperties(t *testing.T) {
 	require.Contains(t, logBuf.String(), "dropping component: cannot be identified")
 	require.Empty(t, b.components)
 }
+
+// The tests below pin one property: nothing the Builder does after
+// AppendDetections returns is observable through the model.Detection the caller
+// handed it.
+//
+// appendDetection used to store a shallow struct copy of each cdx.Component,
+// which shares every pointer field with the caller's memory, and four separate
+// Builder writes then reached back through those pointers: addEvidenceLocation
+// replaced the caller's evidence.occurrences (dropping the line number gitleaks
+// had recorded), mergeRelatedCryptoMaterialFormat wrote -- and on one arm
+// allocated -- the caller's relatedCryptoMaterialProperties, and the bom-ref
+// canonicalisation replaceBOMReferences performs on every BOM()/AsJSON() call
+// rewrote the caller's reference fields, including ones no comment named.
+// cmd/cbom-lens drains detections and drops them, so no shipped path observed
+// it; the property is pinned anyway, because "the Builder does not write
+// through its input" is what makes a Detection safe to hold on to, log, assert
+// on or feed to a second Builder.
+//
+// They are deliberately four tests and not one. A clone that forgets Evidence,
+// or forgets securedBy, must fail exactly one of them and name the field it
+// forgot -- a single end-to-end assertion would only say "the detection
+// changed".
+
+// TestAppendDetection_DoesNotMutateCallerEvidence targets addEvidenceLocation,
+// which allocates an Evidence only when the component has none. Converter.Leak
+// (internal/cdxprops/leaks.go) always brings its own, carrying the finding's
+// start line, so the allocation is skipped and the occurrence-set rebuild lands
+// on the caller's struct.
+//
+// The first case is the shape Leak actually produces -- Detection.Location and
+// the occurrence's Location are both leaks.Location, so the rebuilt set has the
+// same single entry and only the line number silently disappears. The second
+// case is the one where the caller's slice visibly grows.
+func TestAppendDetection_DoesNotMutateCallerEvidence(t *testing.T) {
+	const leakLocation = "/src/config.yaml"
+
+	tests := []struct {
+		name              string
+		detectionLocation string
+		wantStored        []string
+	}{
+		{
+			name:              "detection reports the occurrence's own file",
+			detectionLocation: leakLocation,
+			wantStored:        []string{leakLocation},
+		},
+		{
+			name:              "detection reports a second file",
+			detectionLocation: "/src/config.yaml.bak",
+			// addEvidenceLocation emits the location set in sorted order.
+			wantStored: []string{leakLocation, "/src/config.yaml.bak"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := 42
+			detection := model.Detection{
+				Source:   "LEAKS",
+				Type:     model.DetectionTypeLeakPrivateKey,
+				Location: tt.detectionLocation,
+				Components: []cdx.Component{{
+					BOMRef: sharedKeyRef,
+					Name:   "private-key",
+					Type:   cdx.ComponentTypeCryptographicAsset,
+					Evidence: &cdx.Evidence{
+						Occurrences: &[]cdx.EvidenceOccurrence{
+							{Location: leakLocation, Line: &line},
+						},
+					},
+				}},
+			}
+
+			b, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+			b.AppendDetections(t.Context(), detection)
+
+			callerEvidence := detection.Components[0].Evidence
+			require.NotNil(t, callerEvidence.Occurrences)
+			require.Len(t, *callerEvidence.Occurrences, 1,
+				"the Builder's own evidence locations must not appear in the caller's component")
+			caller := (*callerEvidence.Occurrences)[0]
+			require.Equal(t, leakLocation, caller.Location)
+			require.NotNil(t, caller.Line,
+				"addEvidenceLocation rebuilds occurrences from locations alone, so "+
+					"writing through the caller's Evidence erases the finding's line number")
+			require.Equal(t, 42, *caller.Line)
+
+			// The Builder must still do its job on its own copy: isolating the
+			// caller is worthless if it also stops evidence being recorded.
+			stored := b.components[sharedKeyRef]
+			require.NotNil(t, stored)
+			require.NotSame(t, callerEvidence, stored.Evidence,
+				"the stored component must own its Evidence struct")
+			var storedLocations []string
+			for _, occ := range *stored.Evidence.Occurrences {
+				storedLocations = append(storedLocations, occ.Location)
+			}
+			require.Equal(t, tt.wantStored, storedLocations)
+		})
+	}
+}
+
+// TestAppendDetection_MergeDoesNotMutateFirstDetection targets
+// mergeRelatedCryptoMaterialFormat, which runs only when a second detection
+// collides on a stored bom-ref and writes format into the STORED component --
+// which, before the clone, was the first detection's own
+// relatedCryptoMaterialProperties.
+//
+// The second case forces the allocating arm: with the struct absent the merge
+// assigns a fresh one onto stored.CryptoProperties, so the leak is not a
+// changed string but a caller pointer that turns non-nil, and the caller's
+// component acquires a sub-struct describing a serialisation it never saw.
+func TestAppendDetection_MergeDoesNotMutateFirstDetection(t *testing.T) {
+	tests := []struct {
+		name         string
+		withMaterial bool
+	}{
+		{name: "format is written on the stored copy only", withMaterial: true},
+		{name: "the allocating arm allocates on the stored copy only", withMaterial: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cp := &cdx.CryptoProperties{AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial}
+			if tt.withMaterial {
+				cp.RelatedCryptoMaterialProperties = &cdx.RelatedCryptoMaterialProperties{
+					Type: cdx.RelatedCryptoMaterialTypePublicKey,
+				}
+			}
+			first := model.Detection{
+				Source:   "PKCS12",
+				Location: "/etc/ssl/store.p12",
+				Components: []cdx.Component{{
+					BOMRef:           sharedKeyRef,
+					Name:             "RSA-2048",
+					Type:             cdx.ComponentTypeCryptographicAsset,
+					CryptoProperties: cp,
+				}},
+			}
+
+			b, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+			b.AppendDetections(t.Context(), first,
+				publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"))
+
+			callerProps := first.Components[0].CryptoProperties.RelatedCryptoMaterialProperties
+			if tt.withMaterial {
+				require.NotNil(t, callerProps)
+				require.Empty(t, callerProps.Format,
+					"the PKCS#12 detection never knew an encoding; the PEM detection's "+
+						"format belongs to the merged component, not to it")
+			} else {
+				require.Nil(t, callerProps,
+					"the merge allocates the struct it needs on the Builder's copy, "+
+						"not on the detection that arrived without one")
+			}
+
+			// The merge itself must still happen, or this test would pass on a
+			// Builder that simply stopped merging.
+			stored := b.components[sharedKeyRef]
+			require.NotNil(t, stored)
+			require.NotNil(t, stored.CryptoProperties.RelatedCryptoMaterialProperties)
+			require.Equal(t, "PEM", stored.CryptoProperties.RelatedCryptoMaterialProperties.Format)
+		})
+	}
+}
+
+// componentByRef returns the emitted component with the given bom-ref, failing
+// the test if the document does not carry one.
+func componentByRef(t *testing.T, bom cdx.BOM, ref string) cdx.Component {
+	t.Helper()
+	require.NotNil(t, bom.Components)
+	for _, c := range *bom.Components {
+		if c.BOMRef == ref {
+			return c
+		}
+	}
+	require.FailNowf(t, "component not emitted", "no component with bom-ref %q", ref)
+	return cdx.Component{}
+}
+
+// TestBuilder_BOMDoesNotMutateCallerRefs targets the widest writer of the four:
+// safeRefs.component -> replaceBOMReferences, a reflect walk that rewrites every
+// cdx.BOMReference-typed struct field in place, on every stored component, on
+// every BOM() call. It is the only writer that fires without a second detection
+// and without pre-set evidence, so a caller that appends one detection and never
+// touches the Builder again still saw its raw refs replaced by UUID ones the
+// moment the document was rendered.
+//
+// securedBy.algorithmRef is here because it is reachable and was named in no
+// comment: it sits two structs below cryptoProperties and a clone that stopped
+// at relatedCryptoMaterialProperties would leave it aliased. The ikev2 subtest
+// is the same story one level deeper -- the transform-type structs each carry a
+// BOMRef field, so the walk descends into the caller's *[]IKEv2Enc backing
+// array. No producer in this repo emits ikev2TransformTypes today, which is
+// precisely why nothing would have noticed.
+func TestBuilder_BOMDoesNotMutateCallerRefs(t *testing.T) {
+	const (
+		algRef   = "crypto/algorithm/sha-256-rsa@0"
+		keyRef   = "crypto/key/rsa-2048@0"
+		certRef  = "crypto/certificate/leaf@0"
+		matRef   = "crypto/key/wrapped@0"
+		protoRef = "crypto/protocol/ike@0"
+	)
+
+	// The referenced components must be stored too: safeRefs only carries
+	// entries for components the Builder knows, so without them the walk would
+	// find nothing to substitute and the test would pass on the broken Builder.
+	targets := func() []cdx.Component {
+		return []cdx.Component{
+			{BOMRef: algRef, Name: "sha-256-rsa", Type: cdx.ComponentTypeCryptographicAsset},
+			{BOMRef: keyRef, Name: "rsa-2048", Type: cdx.ComponentTypeCryptographicAsset},
+		}
+	}
+
+	t.Run("certificate, material and securedBy refs", func(t *testing.T) {
+		detection := model.Detection{
+			Source:   "PEM",
+			Location: "/etc/ssl/certs/ca.pem",
+			Components: append(targets(),
+				cdx.Component{
+					BOMRef: certRef, Name: "leaf", Type: cdx.ComponentTypeCryptographicAsset,
+					CryptoProperties: &cdx.CryptoProperties{
+						AssetType: cdx.CryptoAssetTypeCertificate,
+						CertificateProperties: &cdx.CertificateProperties{
+							SignatureAlgorithmRef: cdx.BOMReference(algRef),
+							SubjectPublicKeyRef:   cdx.BOMReference(keyRef),
+						},
+					},
+				},
+				cdx.Component{
+					BOMRef: matRef, Name: "wrapped", Type: cdx.ComponentTypeCryptographicAsset,
+					CryptoProperties: &cdx.CryptoProperties{
+						AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+						RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+							Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
+							AlgorithmRef: cdx.BOMReference(algRef),
+							SecuredBy: &cdx.SecuredBy{
+								Mechanism:    "PBKDF2",
+								AlgorithmRef: cdx.BOMReference(algRef),
+							},
+						},
+					},
+				}),
+		}
+
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b.AppendDetections(t.Context(), detection)
+		bom := b.BOM(t.Context())
+
+		certProps := detection.Components[2].CryptoProperties.CertificateProperties
+		require.Equal(t, cdx.BOMReference(algRef), certProps.SignatureAlgorithmRef,
+			"rendering a document must not renumber the caller's certificate refs")
+		require.Equal(t, cdx.BOMReference(keyRef), certProps.SubjectPublicKeyRef)
+
+		matProps := detection.Components[3].CryptoProperties.RelatedCryptoMaterialProperties
+		require.Equal(t, cdx.BOMReference(algRef), matProps.AlgorithmRef)
+		require.NotNil(t, matProps.SecuredBy)
+		require.Equal(t, cdx.BOMReference(algRef), matProps.SecuredBy.AlgorithmRef,
+			"securedBy sits two structs deep; a clone that stops at "+
+				"relatedCryptoMaterialProperties leaves it aliased")
+
+		// Canonicalisation must still reach the document, or the refs it emits
+		// would dangle against the renamed components.
+		emittedCert := componentByRef(t, bom, safeRef(certRef))
+		require.Equal(t, cdx.BOMReference(safeRef(algRef)),
+			emittedCert.CryptoProperties.CertificateProperties.SignatureAlgorithmRef)
+		require.Equal(t, cdx.BOMReference(safeRef(keyRef)),
+			emittedCert.CryptoProperties.CertificateProperties.SubjectPublicKeyRef)
+
+		emittedMat := componentByRef(t, bom, safeRef(matRef))
+		emittedProps := emittedMat.CryptoProperties.RelatedCryptoMaterialProperties
+		require.Equal(t, cdx.BOMReference(safeRef(algRef)), emittedProps.AlgorithmRef)
+		require.NotNil(t, emittedProps.SecuredBy)
+		require.Equal(t, cdx.BOMReference(safeRef(algRef)), emittedProps.SecuredBy.AlgorithmRef)
+	})
+
+	t.Run("ikev2 transform type refs", func(t *testing.T) {
+		encr := []cdx.IKEv2Enc{{BOMRef: cdx.BOMReference(algRef), Name: "aes"}}
+		prf := []cdx.IKEv2Prf{{BOMRef: cdx.BOMReference(algRef), Name: "prf"}}
+		integ := []cdx.IKEv2Integ{{BOMRef: cdx.BOMReference(algRef), Name: "integ"}}
+		ke := []cdx.IKEv2Ke{{BOMRef: cdx.BOMReference(keyRef)}}
+		auth := []cdx.IKEv2Auth{{BOMRef: cdx.BOMReference(algRef), Name: "auth"}}
+
+		detection := model.Detection{
+			Source:   "NMAP",
+			Location: "10.0.0.1:500",
+			Components: append(targets(),
+				cdx.Component{
+					BOMRef: protoRef, Name: "ike", Type: cdx.ComponentTypeCryptographicAsset,
+					CryptoProperties: &cdx.CryptoProperties{
+						AssetType: cdx.CryptoAssetTypeProtocol,
+						ProtocolProperties: &cdx.CryptoProtocolProperties{
+							Type: cdx.CryptoProtocolTypeIKE,
+							IKEv2TransformTypes: &cdx.IKEv2TransformTypes{
+								Encr: &encr, PRF: &prf, Integ: &integ, KE: &ke, Auth: &auth,
+							},
+						},
+					},
+				}),
+		}
+
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b.AppendDetections(t.Context(), detection)
+		bom := b.BOM(t.Context())
+
+		caller := detection.Components[2].CryptoProperties.ProtocolProperties.IKEv2TransformTypes
+		require.Equal(t, cdx.BOMReference(algRef), (*caller.Encr)[0].BOMRef)
+		require.Equal(t, cdx.BOMReference(algRef), (*caller.PRF)[0].BOMRef)
+		require.Equal(t, cdx.BOMReference(algRef), (*caller.Integ)[0].BOMRef)
+		require.Equal(t, cdx.BOMReference(keyRef), (*caller.KE)[0].BOMRef)
+		require.Equal(t, cdx.BOMReference(algRef), (*caller.Auth)[0].BOMRef)
+
+		// The slice headers the caller declared are the same backing arrays, so
+		// check them directly: a clone that copied the IKEv2TransformTypes
+		// struct but shared its five slices would pass the reads above only if
+		// they went through a fresh array, which they do not.
+		require.Equal(t, cdx.BOMReference(algRef), encr[0].BOMRef)
+		require.Equal(t, cdx.BOMReference(keyRef), ke[0].BOMRef)
+
+		emitted := componentByRef(t, bom, safeRef(protoRef)).
+			CryptoProperties.ProtocolProperties.IKEv2TransformTypes
+		require.Equal(t, cdx.BOMReference(safeRef(algRef)), (*emitted.Encr)[0].BOMRef)
+		require.Equal(t, cdx.BOMReference(safeRef(keyRef)), (*emitted.KE)[0].BOMRef)
+	})
+}
+
+// TestAppendDetection_DoesNotMutateCallerDetection is the catch-all: it puts
+// every sub-struct the Builder is known to reach into one detection, drives the
+// full path (store, collide, merge, render, validate), and compares the whole
+// caller-side component slice against an independently built expectation.
+//
+// The three tests above each name the field they defend, which is what makes a
+// forgotten one diagnosable; this one is what catches a field nobody thought to
+// name -- including one added to cdx.Component by a future cyclonedx-go bump.
+//
+// want is rebuilt by calling the same constructor a second time rather than
+// deep-copied from the input, for the reason publicKeyDetection gives: a copy
+// taken by reflection would share whatever the constructor shares, so an
+// aliased sub-struct would compare equal to itself and the test would pass on
+// exactly the defect it exists to catch.
+func TestAppendDetection_DoesNotMutateCallerDetection(t *testing.T) {
+	line := 7
+	size := 2048
+
+	components := func() []cdx.Component {
+		encr := []cdx.IKEv2Enc{{BOMRef: cdx.BOMReference("crypto/algorithm/aes@0"), Name: "aes"}}
+		suiteAlgs := []cdx.BOMReference{"crypto/algorithm/aes@0"}
+		suites := []cdx.CipherSuite{{Name: "TLS_AES_128_GCM_SHA256", Algorithms: &suiteAlgs}}
+		cryptoRefs := []cdx.BOMReference{"crypto/algorithm/aes@0"}
+		occurrences := []cdx.EvidenceOccurrence{{Location: "/etc/ssl/certs/ca.pem", Line: &line}}
+
+		return []cdx.Component{
+			{
+				BOMRef: "crypto/algorithm/aes@0", Name: "AES-128",
+				Type: cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeAlgorithm,
+					AlgorithmProperties: &cdx.CryptoAlgorithmProperties{
+						Primitive:              cdx.CryptoPrimitiveBlockCipher,
+						ParameterSetIdentifier: "128",
+					},
+				},
+			},
+			{
+				BOMRef: "crypto/key/rsa-2048@0", Name: "RSA-2048",
+				Type: cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+					RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+						Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
+						AlgorithmRef: cdx.BOMReference("crypto/algorithm/aes@0"),
+						Size:         &size,
+						SecuredBy: &cdx.SecuredBy{
+							Mechanism:    "PBKDF2",
+							AlgorithmRef: cdx.BOMReference("crypto/algorithm/aes@0"),
+						},
+					},
+				},
+				Evidence: &cdx.Evidence{Occurrences: &occurrences},
+			},
+			{
+				BOMRef: "crypto/certificate/leaf@0", Name: "leaf",
+				Type: cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeCertificate,
+					CertificateProperties: &cdx.CertificateProperties{
+						SubjectName:           "CN=leaf",
+						SignatureAlgorithmRef: cdx.BOMReference("crypto/algorithm/aes@0"),
+						SubjectPublicKeyRef:   cdx.BOMReference("crypto/key/rsa-2048@0"),
+					},
+				},
+			},
+			{
+				BOMRef: "crypto/protocol/tls@0", Name: "tls",
+				Type: cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeProtocol,
+					ProtocolProperties: &cdx.CryptoProtocolProperties{
+						Type:                cdx.CryptoProtocolTypeTLS,
+						Version:             "1.3",
+						CipherSuites:        &suites,
+						CryptoRefArray:      &cryptoRefs,
+						IKEv2TransformTypes: &cdx.IKEv2TransformTypes{Encr: &encr},
+					},
+				},
+			},
+		}
+	}
+
+	detection := model.Detection{
+		Source:     "PEM",
+		Type:       model.DetectionTypeCertificate,
+		Location:   "/etc/ssl/certs/ca.pem",
+		Components: components(),
+	}
+	want := components()
+
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	b.AppendDetections(t.Context(), detection)
+
+	// A second detection on the same refs, so the merge branch runs too: the
+	// store path and the merge path write different fields.
+	b.AppendDetections(t.Context(), model.Detection{
+		Source:   "PKCS12",
+		Location: "/etc/ssl/store.p12",
+		Components: []cdx.Component{{
+			BOMRef: "crypto/key/rsa-2048@0", Name: "RSA-2048",
+			Type: cdx.ComponentTypeCryptographicAsset,
+			CryptoProperties: &cdx.CryptoProperties{
+				AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+					Type:   cdx.RelatedCryptoMaterialTypePrivateKey,
+					Format: "PEM",
+				},
+			},
+		}},
+	})
+
+	var buf bytes.Buffer
+	require.NoError(t, b.AsJSON(t.Context(), &buf))
+	require.NotZero(t, buf.Len())
+
+	require.Equal(t, want, detection.Components,
+		"a detection handed to AppendDetections must come back unchanged")
+}
+
+// TestAppendDetection_DoesNotMutateCollidingDetection carries the property the
+// four tests above pin for the FIRST detection over to every later one.
+//
+// cloneOnStore runs on the first-store path only. A detection that collides on
+// an already-stored bom-ref is never cloned and never stored: it is read by
+// mergeRelatedCryptoMaterialFormat and then dropped. That is safe exactly as
+// long as the merge stays a READER. The moment it assigns a sub-struct out of
+// incoming into stored, the Builder has adopted caller memory on the one path
+// where no clone runs, and every write that follows -- a third detection's
+// merge, and the bom-ref canonicalisation replaceBOMReferences performs on
+// every BOM()/AsJSON() call -- lands in the second detection instead. The merge
+// names that hazard in its own doc comment and nothing enforced it: mutating
+// the allocating arm to adopt incoming's struct, and mutating the tie-break to
+// write the kept value back into incoming, both passed the suite untouched.
+//
+// The cases are the merge's four arms, chosen by what the STORED component
+// carries; the colliding detection is byte-identical across them so the arm is
+// the only variable. It carries algorithmRef and securedBy.algorithmRef, and
+// their target is stored too, because those are the fields a render rewrites --
+// an adopted struct is invisible until something writes through it.
+func TestAppendDetection_DoesNotMutateCollidingDetection(t *testing.T) {
+	const algRef = "crypto/algorithm/sha-256-rsa@0"
+
+	// Rebuilt per call and never copied out of the value under test: a want
+	// lifted from the same memory would share whatever the input shares and
+	// compare equal to itself. Same reasoning as publicKeyDetection's.
+	colliding := func() []cdx.Component {
+		return []cdx.Component{{
+			BOMRef: sharedKeyRef,
+			Name:   "RSA-2048",
+			Type:   cdx.ComponentTypeCryptographicAsset,
+			CryptoProperties: &cdx.CryptoProperties{
+				AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+					Type:         cdx.RelatedCryptoMaterialTypePublicKey,
+					Format:       "PEM",
+					AlgorithmRef: cdx.BOMReference(algRef),
+					SecuredBy: &cdx.SecuredBy{
+						Mechanism:    "PBKDF2",
+						AlgorithmRef: cdx.BOMReference(algRef),
+					},
+				},
+			},
+		}}
+	}
+
+	tests := []struct {
+		name string
+		// stored is the related-crypto-material half of the FIRST detection's
+		// component. nil selects the arm on which the merge has to allocate.
+		stored     *cdx.RelatedCryptoMaterialProperties
+		wantFormat string
+	}{
+		{
+			name:       "the merge allocates its own struct",
+			stored:     nil,
+			wantFormat: "PEM",
+		},
+		{
+			name:       "the merge fills in a missing format",
+			stored:     &cdx.RelatedCryptoMaterialProperties{Type: cdx.RelatedCryptoMaterialTypePublicKey},
+			wantFormat: "PEM",
+		},
+		{
+			// min("DER", "PEM"); which value wins is pinned elsewhere. What
+			// matters here is that the winner is not written back into the
+			// detection that lost.
+			name: "the merge tie-breaks two disagreeing formats",
+			stored: &cdx.RelatedCryptoMaterialProperties{
+				Type: cdx.RelatedCryptoMaterialTypePublicKey, Format: "DER",
+			},
+			wantFormat: "DER",
+		},
+		{
+			// The arm that returns without writing anything. It can catch no
+			// mutant today; it is here so that an arm which STARTS writing is
+			// covered by construction rather than by someone remembering.
+			name: "the merge has nothing to do",
+			stored: &cdx.RelatedCryptoMaterialProperties{
+				Type: cdx.RelatedCryptoMaterialTypePublicKey, Format: "PEM",
+			},
+			wantFormat: "PEM",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first := model.Detection{
+				Source:   "PKCS12",
+				Location: "/etc/ssl/store.p12",
+				Components: []cdx.Component{
+					// The algorithm has to be stored, or safeRefs holds no
+					// entry for algRef, replaceBOMReferences finds nothing to
+					// substitute and an adopted struct stays invisible.
+					{BOMRef: algRef, Name: "sha-256-rsa", Type: cdx.ComponentTypeCryptographicAsset},
+					{
+						BOMRef: sharedKeyRef,
+						Name:   "RSA-2048",
+						Type:   cdx.ComponentTypeCryptographicAsset,
+						CryptoProperties: &cdx.CryptoProperties{
+							AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,
+							RelatedCryptoMaterialProperties: tt.stored,
+						},
+					},
+				},
+			}
+			second := model.Detection{
+				Source:     "PEM",
+				Location:   "/etc/ssl/certs/ca.pem",
+				Components: colliding(),
+			}
+			want := colliding()
+
+			b, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+			b.AppendDetections(t.Context(), first, second)
+
+			// Rendering is what makes an adopted struct observable: it is the
+			// only Builder write reaching algorithmRef and securedBy.
+			bom := b.BOM(t.Context())
+
+			require.Equal(t, want, second.Components,
+				"a detection that collided with a stored bom-ref must come back unchanged")
+
+			storedProps := b.components[sharedKeyRef].CryptoProperties.RelatedCryptoMaterialProperties
+			require.NotNil(t, storedProps)
+			require.NotSame(t,
+				second.Components[0].CryptoProperties.RelatedCryptoMaterialProperties, storedProps,
+				"the Builder must not go on holding the colliding detection's struct")
+
+			// The merge must still do its job, or this test would pass on a
+			// Builder that simply stopped merging.
+			emitted := componentByRef(t, bom, safeRef(sharedKeyRef))
+			require.Equal(t, tt.wantFormat,
+				emitted.CryptoProperties.RelatedCryptoMaterialProperties.Format)
+
+			if tt.stored == nil {
+				// The allocating arm allocates an EMPTY struct and sets only
+				// the format, so it cannot be carrying the incoming
+				// component's other fields.
+				require.Empty(t, storedProps.AlgorithmRef,
+					"the allocated struct describes an encoding, not the incoming component")
+				require.Nil(t, storedProps.SecuredBy)
+				require.Empty(t, string(storedProps.Type))
+			}
+		})
+	}
+}
+
+// TestAppendDetection_CloneLeavesTransformSlicesAsTheyCame pins the one thing
+// cloneTransforms must not do: change the value it is copying.
+//
+// The three shapes a *[]T arrives in are not interchangeable in the emitted
+// document. A nil POINTER omits the field, a non-nil pointer to a NIL slice
+// emits null, and a non-nil pointer to an EMPTY slice emits []. cloneTransforms
+// has to detach the backing array of a populated slice without promoting either
+// of the other two, and its guard returns both untouched precisely because
+// there is no backing array to protect.
+//
+// Dropping the `*p == nil` half of that guard was the single mutation of the
+// clone the rest of the suite did not notice, and it is not cosmetic: encr/prf/
+// integ/ke/auth are all cryptoRefArray, which is `"type": "array"`, so null
+// fails schema validation and [] passes. A clone that quietly turns one into
+// the other repairs a producer's mistake in the one place nobody is looking,
+// and AsJSON -- whose whole job is to refuse a document like that -- would then
+// emit it. A clone changes ownership, never content.
+func TestAppendDetection_CloneLeavesTransformSlicesAsTheyCame(t *testing.T) {
+	const (
+		protoRef = "crypto/protocol/ike@0"
+		algRef   = "crypto/algorithm/aes@0"
+	)
+
+	// One of each shape. KE and Auth are left out entirely, so they arrive as
+	// nil POINTERS -- the third shape.
+	populated := []cdx.IKEv2Enc{{BOMRef: cdx.BOMReference(algRef), Name: "aes"}}
+	var nilSlice []cdx.IKEv2Prf // non-nil POINTER to a nil slice
+	empty := []cdx.IKEv2Integ{} // non-nil pointer to an EMPTY slice
+
+	detection := model.Detection{
+		Source:   "NMAP",
+		Location: "10.0.0.1:500",
+		Components: []cdx.Component{
+			{BOMRef: algRef, Name: "aes", Type: cdx.ComponentTypeCryptographicAsset},
+			{
+				BOMRef: protoRef, Name: "ike", Type: cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeProtocol,
+					ProtocolProperties: &cdx.CryptoProtocolProperties{
+						Type: cdx.CryptoProtocolTypeIKE,
+						IKEv2TransformTypes: &cdx.IKEv2TransformTypes{
+							Encr: &populated, PRF: &nilSlice, Integ: &empty,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	b.AppendDetections(t.Context(), detection)
+	emitted := componentByRef(t, b.BOM(t.Context()), safeRef(protoRef)).
+		CryptoProperties.ProtocolProperties.IKEv2TransformTypes
+
+	// The populated slice is the one the clone must detach; that half is pinned
+	// by TestBuilder_BOMDoesNotMutateCallerRefs. Here it only has to still hold
+	// its element, so a cloneTransforms that dropped content would be caught.
+	require.NotNil(t, emitted.Encr)
+	require.Len(t, *emitted.Encr, 1)
+	require.Equal(t, cdx.BOMReference(safeRef(algRef)), (*emitted.Encr)[0].BOMRef)
+
+	// Asserted through the encoding rather than the Go value, because null and
+	// [] are the same `len == 0` in Go and different documents on the wire.
+	raw, err := json.Marshal(emitted)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		fragment string
+		present  bool
+	}{
+		{
+			name:     "a pointer to a nil slice still emits null",
+			fragment: `"prf":null`,
+			present:  true,
+		},
+		{
+			name:     "a pointer to a nil slice is not promoted to an empty array",
+			fragment: `"prf":[]`,
+			present:  false,
+		},
+		{
+			name:     "a pointer to an empty slice still emits an empty array",
+			fragment: `"integ":[]`,
+			present:  true,
+		},
+		{
+			name:     "a nil pointer emits no key exchange field at all",
+			fragment: `"ke"`,
+			present:  false,
+		},
+		{
+			name:     "a nil pointer emits no auth field at all",
+			fragment: `"auth"`,
+			present:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.present {
+				require.Contains(t, string(raw), tt.fragment)
+				return
+			}
+			require.NotContains(t, string(raw), tt.fragment)
+		})
+	}
+}

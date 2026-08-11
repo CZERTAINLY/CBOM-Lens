@@ -98,6 +98,25 @@ func (b *Builder) WithSerial(f func() string) *Builder {
 	return b
 }
 
+// AppendDetections folds each detection into the Builder: one component stored
+// per bom-ref, plus the detection's dependency edges (first ref wins). A repeat
+// of a bom-ref does not replace the component already held -- what the second
+// detection knows and the first does not is merged into it explicitly, which
+// today means its evidence location and its related-crypto-material format.
+//
+// A detection passed here comes back unchanged. The components are stored as
+// copies: cloneOnStore detaches the parts the Builder writes to -- evidence, and
+// the cryptoProperties a Builder writer can reach, meaning the certificate and
+// related-material refs down to securedBy and the ikev2 transform slices -- so
+// neither a later merge, a later evidence location, nor the bom-ref
+// canonicalisation performed on every BOM()/AsJSON() call is observable through
+// the model.Detection the caller still holds. Everything else reachable from a
+// stored component remains the caller's memory: licenses, pedigree, external
+// references and nested components, and also parts of cryptoProperties nothing
+// here writes, such as algorithmProperties, cipherSuites and cryptoRefArray.
+// That is a statement about today's writers, not a promise about the type or an
+// exhaustive list; cloneOnStore says why the named omissions are safe and what a
+// new Builder write would have to add.
 func (b *Builder) AppendDetections(ctx context.Context, detections ...model.Detection) *Builder {
 	for _, d := range detections {
 		b.appendDetection(ctx, d)
@@ -166,9 +185,110 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 			addEvidenceLocation(stored, detection.Location)
 			continue
 		}
-		addEvidenceLocation(&compo, detection.Location)
-		b.components[compo.BOMRef] = &compo
+		// Clone BEFORE addEvidenceLocation, not after: addEvidenceLocation is
+		// itself one of the writers being contained, so a copy taken after it
+		// ran would already have clobbered the caller's Evidence.
+		owned := cloneOnStore(compo)
+		addEvidenceLocation(&owned, detection.Location)
+		b.components[owned.BOMRef] = &owned
 	}
+}
+
+// cloneOnStore returns compo with the parts the Builder writes to detached from
+// the caller's memory.
+//
+// appendDetection stores a struct copy of each component, and a struct copy
+// shares every pointer field with the model.Detection the caller still holds.
+// Four Builder writes reached back through those pointers, so each item copied
+// below is here because a named writer reaches it -- this is not a deep copy
+// and must not drift into one.
+//
+// Evidence, because addEvidenceLocation allocates one only when the component
+// arrives without it. Converter.Leak brings its own, carrying the line number
+// gitleaks reported, and the occurrence set is rebuilt from locations alone --
+// so writing through the caller's Evidence silently erased that line.
+// RelatedCryptoMaterialProperties, because mergeRelatedCryptoMaterialFormat
+// writes format into it and, on the arm where the stored component has none,
+// hangs a freshly allocated one off cryptoProperties. CertificateProperties,
+// RelatedCryptoMaterialProperties.SecuredBy and the five transform slices under
+// ProtocolProperties.IKEv2TransformTypes, because replaceBOMReferences is a
+// reflect walk that rewrites every cdx.BOMReference-typed struct field in
+// place, on every stored component, on every render. Those nine fields are the
+// walk's entire reach within one component; the ikev2 ones had nothing watching
+// them, since no producer here emits ikev2TransformTypes.
+//
+// Deliberately not copied, and why that is safe. AlgorithmProperties,
+// ProtocolProperties.CipherSuites and ProtocolProperties.CryptoRefArray: no
+// Builder code writes any of them, and emit17's mapComponent17, which does,
+// takes its own copy in emit17.cloneComponent first. That is why the two helpers
+// stay separate and differently shaped -- one shared helper would over-copy at
+// both call sites and would falsify emit17's promise to clone only what
+// mapComponent17 writes. CipherSuites.Algorithms and CryptoRefArray also survive
+// the reflect walk for a structural reason worth knowing: both are
+// []cdx.BOMReference, and the walk substitutes BOMReference-typed FIELDS OF A
+// STRUCT, never elements of a slice of them. Component.Components and
+// Component.Pedigree are the one place the walk could still reach caller memory
+// -- a nested component re-exposes all nine paths -- but nothing in this repo
+// ever builds a nested component or a pedigree, so the walk never descends
+// there. A producer that starts to, or a Builder write aimed at anything else on
+// cdx.Component, has to extend this helper, or it will quietly reach into the
+// caller's detection again.
+func cloneOnStore(compo cdx.Component) cdx.Component {
+	if compo.Evidence != nil {
+		ev := *compo.Evidence
+		compo.Evidence = &ev
+	}
+	if compo.CryptoProperties == nil {
+		return compo
+	}
+
+	cp := *compo.CryptoProperties
+	if cp.CertificateProperties != nil {
+		certp := *cp.CertificateProperties
+		cp.CertificateProperties = &certp
+	}
+	if cp.RelatedCryptoMaterialProperties != nil {
+		matp := *cp.RelatedCryptoMaterialProperties
+		if matp.SecuredBy != nil {
+			sb := *matp.SecuredBy
+			matp.SecuredBy = &sb
+		}
+		cp.RelatedCryptoMaterialProperties = &matp
+	}
+	if cp.ProtocolProperties != nil {
+		pp := *cp.ProtocolProperties
+		if pp.IKEv2TransformTypes != nil {
+			tt := *pp.IKEv2TransformTypes
+			tt.Encr = cloneTransforms(tt.Encr)
+			tt.PRF = cloneTransforms(tt.PRF)
+			tt.Integ = cloneTransforms(tt.Integ)
+			tt.KE = cloneTransforms(tt.KE)
+			tt.Auth = cloneTransforms(tt.Auth)
+			pp.IKEv2TransformTypes = &tt
+		}
+		cp.ProtocolProperties = &pp
+	}
+	compo.CryptoProperties = &cp
+
+	return compo
+}
+
+// cloneTransforms copies the backing array behind one IKEv2 transform-type
+// slice, so replaceBOMReferences rewrites the Builder's elements and not the
+// caller's. Copying the IKEv2TransformTypes struct alone would not do it: its
+// fields are slice pointers, and the BOMRefs the walk writes live in the
+// elements.
+//
+// A nil pointer, and a non-nil pointer to a nil slice, are returned as they
+// came: there is no backing array to protect, and replacing the latter with an
+// allocated empty slice would turn a null into a [] in the emitted document.
+func cloneTransforms[T any](p *[]T) *[]T {
+	if p == nil || *p == nil {
+		return p
+	}
+	out := make([]T, len(*p))
+	copy(out, *p)
+	return &out
 }
 
 // missingIdentity reports whether a component lacks the bom-ref and/or name
@@ -216,8 +336,9 @@ func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 
 	var rels []cbom.Relationship
 
-	// Extract crypto rels before the assets loop: sr.component below mutates
-	// shared nested pointers in place, so this reads the raw reference fields.
+	// Extract crypto rels before the assets loop: sr.component below rewrites
+	// the reference fields of the Builder's stored components in place, so this
+	// reads them while they are still raw.
 	wire := make(map[string]struct{}, len(sr.refs))
 	for _, w := range sr.refs {
 		wire[w] = struct{}{}
@@ -290,8 +411,11 @@ func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 // cryptoRels derives version-neutral crypto relationships from the embedded
 // 1.6 reference fields still written by the converters. Endpoints resolve
 // through refs (raw -> wire) with an identity fallback for already-canonical
-// values (model() mutates shared nested pointers in place on its first run —
-// pre-existing quirk). Unresolvable targets are dropped with a warning,
+// values: model() canonicalises the Builder's OWN stored components in place,
+// so a second model() call on the same Builder reads refs that are already wire
+// values and must still resolve them. That in-place rewrite no longer escapes
+// the Builder -- appendDetection clones what it stores -- but it is still what
+// makes the fallback necessary. Unresolvable targets are dropped with a warning,
 // mirroring dependsOn handling. Transitional: this extraction retires per
 // converter as they migrate to emitting Rels natively.
 func cryptoRels(ctx context.Context, r refs, wire map[string]struct{}, compo *cdx.Component) []cbom.Relationship {
@@ -461,11 +585,13 @@ func addEvidenceLocation(c *cdx.Component, locations ...string) {
 // a whole cryptoProperties would fabricate an assetType no producer chose. No
 // current producer leaves it nil on material, so that arm guards the next one.
 //
-// Both writes land on stored.CryptoProperties, a pointer the caller's
-// model.Detection still holds -- appendDetection stores a shallow copy of the
-// component -- so merging mutates the caller's detection, the same in-place
-// mutation of shared nested pointers cryptoRels records for model(). No caller
-// reuses a drained Detection, and a deep copy would be Builder-wide hardening.
+// Both writes land on stored.CryptoProperties, which appendDetection cloned
+// before storing, so they stay inside the Builder. The merge needs no copy of
+// its own: nothing it takes from incoming escapes into stored -- it reads one
+// string, and the struct it allocates when stored has none is made here. What
+// it must never become is a merge that assigns a sub-struct OUT of incoming
+// INTO stored; that would re-alias the second detection, and cloneOnStore,
+// which runs only on the first-store path, could not undo it.
 func mergeRelatedCryptoMaterialFormat(ctx context.Context, stored, incoming *cdx.Component) {
 	if stored == nil || incoming == nil {
 		return
