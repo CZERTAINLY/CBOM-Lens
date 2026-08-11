@@ -460,6 +460,14 @@ func TestPQCPipeline_CSRUnsizedAlgorithmStillYieldsItsKey(t *testing.T) {
 		"the key is named by the registry entry the OID matched, got %s", keys[0])
 	require.Len(t, d.Dependencies, 1,
 		"a request that establishes a key depends on it")
+	// Naming the target, not just counting the edges. Pointing the edge at
+	// algo.BOMRef instead of the key keeps this slice one long, so a count
+	// leaves the whole claim -- that the request depends on the KEY it
+	// establishes -- unstated. Seven sibling tests kill that mutation, but all
+	// of them go through a sized algorithm; this XMSS fixture is the only one
+	// exercising the unsized branch, so the assertion has to be here.
+	require.Equal(t, []string{keys[0]}, *d.Dependencies[0].Dependencies,
+		"the edge names the key the request establishes, not the algorithm describing it")
 }
 
 // TestPQCPipeline_CertificateUnsizedAlgorithmRejectsOnlyAnEmptyBody is the
