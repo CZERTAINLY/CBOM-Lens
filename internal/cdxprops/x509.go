@@ -253,7 +253,7 @@ func (c Converter) signatureAlgorithmComponents(ctx context.Context, sigAlg x509
 	if algName == "0" {
 		info, ok := unsupportedAlgorithms[oid]
 		if ok {
-			algName = info.algorithmName
+			algName = info.name
 		}
 	}
 

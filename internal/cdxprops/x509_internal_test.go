@@ -1,6 +1,7 @@
 package cdxprops
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -217,14 +218,24 @@ var ecdsaSHA256Components = wantSignatureAlg{
 // green under mutations of everything it appeared to cover. Values written by
 // hand are the only ones that go red when the core is wrong.
 //
-// The three rows are chosen for the paths they reach. ECDSA is answered by Go's
+// The four rows are chosen for the paths they reach. ECDSA is answered by Go's
 // enum alone. Ed25519 is answered by the enum too and still decomposes into
 // SHA-512, because RFC 8032 builds it on SHA-512 -- it is not the no-hash case,
-// and two production comments used to say it was. ML-DSA is a real fixture
-// whose algorithm Go's enum does not name, so its name, its ref and its
-// parameters all have to come from the OID in the certificate's own DER, and it
-// is the row with no hash. Its Name is the registry's algorithmName, ref path
-// and all; that is what the code emits today, pinned as found.
+// and two production comments used to say it was. ML-DSA and SLH-DSA are real
+// fixtures whose algorithms Go's enum does not name, so their names, their refs
+// and their parameters all have to come from the OID in the certificate's own
+// DER; ML-DSA is the row with no hash, and SLH-DSA-SHA2 is the one that takes
+// that same OID-only route and still decomposes, into the SHA-256 its parameter
+// set is built on.
+//
+// Those two rows are also where the registry's two name-like fields have to be
+// told apart. An entry carries a name, "ML-DSA-65", which is what a reader of
+// the document sees, and an algorithmName, "crypto/algorithm/ml-dsa-65", which
+// is the path BOMRefHash turns into a bom-ref. The sigAlg.String()=="0"
+// fallback assigned the latter where the former belonged, so every
+// post-quantum-signed structure named its algorithm by its own ref path. Name
+// and refName are stated separately below because they are separate things: the
+// name moves when that is fixed, the ref path does not.
 func TestSignatureAlgorithmComponents_PinsAlgorithmAndHash(t *testing.T) {
 	t.Parallel()
 
@@ -252,10 +263,19 @@ func TestSignatureAlgorithmComponents_PinsAlgorithmAndHash(t *testing.T) {
 		"ML-DSA": {
 			cert: mlDSA65Cert,
 			want: wantSignatureAlg{
-				name:    "crypto/algorithm/ml-dsa-65",
+				name:    "ML-DSA-65",
 				refName: "crypto/algorithm/ml-dsa-65",
 				oid:     "2.16.840.1.101.3.4.3.18",
 				hash:    "",
+			},
+		},
+		"SLH-DSA": {
+			cert: slhDSASHA2128sCert,
+			want: wantSignatureAlg{
+				name:    "SLH-DSA-SHA2-128S",
+				refName: "crypto/algorithm/slh-dsa-sha2-128s",
+				oid:     "2.16.840.1.101.3.4.3.20",
+				hash:    "SHA-256",
 			},
 		},
 	} {
@@ -270,6 +290,116 @@ func TestSignatureAlgorithmComponents_PinsAlgorithmAndHash(t *testing.T) {
 			requireSignatureAlgComponents(t, tt.want, sigAlgCompo, hashAlgCompo)
 		})
 	}
+}
+
+// TestSignatureAlgorithmComponents_OIDOnlyEdgeCases states the other two ends
+// of the same fallback the table above enters, neither of which any fixture in
+// the tree reaches: the OID misses the registry entirely, and the OID hits an
+// entry that is not a signature scheme at all.
+//
+// A miss leaves the Name as the string x509.SignatureAlgorithm(0) prints for
+// itself, "0". That is a poor name for an algorithm and it is pinned as one
+// deliberately: it is produced one line above the assignment this commit
+// changed, and the value it could drift to is the empty string -- which Builder
+// drops, leaving the signed structure's algorithm ref pointing at a component
+// that is not in the document.
+//
+// The three ML-KEM OIDs are keys in the registry the fallback reads, so a
+// malformed certificate or list declaring one where a signature scheme belongs
+// is named for the KEM it is, and carries a KEM's primitive and functions
+// rather than a half-answer of `primitive: signature` beside
+// `cryptoFunctions: [decapsulate, encapsulate]`. Its ref stem stays
+// crypto/algorithm/unknown either way, because pqcSigOIDRef excludes the KEM
+// OIDs -- which makes it the one input proving the Name and the ref come from
+// different lookups and are free to disagree.
+func TestSignatureAlgorithmComponents_OIDOnlyEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	c := NewConverter()
+
+	for name, tt := range map[string]struct {
+		sigAlgOID []byte
+		want      wantSignatureAlg
+		primitive cdx.CryptoPrimitive
+		functions []cdx.CryptoFunction
+	}{
+		"registry miss": {
+			// 2.16.840.1.101.3.4.3.99, unassigned: the arc the ML-DSA and
+			// SLH-DSA identifiers live on, in neither pqcSigOIDRef nor
+			// unsupportedAlgorithms.
+			sigAlgOID: []byte{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x63},
+			want: wantSignatureAlg{
+				name:    "0",
+				refName: "crypto/algorithm/unknown",
+				oid:     "2.16.840.1.101.3.4.3.99",
+				hash:    "",
+			},
+			primitive: cdx.CryptoPrimitiveSignature,
+			functions: []cdx.CryptoFunction{cdx.CryptoFunctionSign},
+		},
+		"KEM in the signature slot": {
+			// 2.16.840.1.101.3.4.4.1, id-alg-ml-kem-512.
+			sigAlgOID: []byte{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01},
+			want: wantSignatureAlg{
+				name:    "ML-KEM-512",
+				refName: "crypto/algorithm/unknown",
+				oid:     "2.16.840.1.101.3.4.4.1",
+				hash:    "",
+			},
+			primitive: cdx.CryptoPrimitiveKEM,
+			functions: []cdx.CryptoFunction{
+				cdx.CryptoFunctionDecapsulate,
+				cdx.CryptoFunctionEncapsulate,
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			sigAlgCompo, hashAlgCompo := c.signatureAlgorithmComponents(
+				t.Context(),
+				x509.UnknownSignatureAlgorithm,
+				certDERWithSignatureOID(t, tt.sigAlgOID),
+			)
+			requireSignatureAlgComponents(t, tt.want, sigAlgCompo, hashAlgCompo)
+
+			algoProps := sigAlgCompo.CryptoProperties.AlgorithmProperties
+			require.NotNil(t, algoProps)
+			require.Equal(t, tt.primitive, algoProps.Primitive)
+			require.NotNil(t, algoProps.CryptoFunctions)
+			require.Equal(t, tt.functions, *algoProps.CryptoFunctions,
+				"the primitive and the functions must come from one entry")
+		})
+	}
+}
+
+// certDERWithSignatureOID rewrites the ML-DSA-65 OID in the fixture
+// certificate's DER with the one given.
+//
+// It is crlWithSubstitutedSignatureOID's technique applied to a certificate and
+// for the same reason: the replacement encodes to the same nine bytes, so every
+// enclosing ASN.1 length stays correct, and nothing on this path verifies the
+// signature the substitution invalidates. Generating the certificate instead is
+// not an option, because x509.CreateCertificate will not sign with an algorithm
+// it cannot name, and an algorithm Go cannot name is the state under test.
+//
+// The self-signed fixture carries the OID three times: tbsCertificate.signature,
+// the SubjectPublicKeyInfo and the outer signatureAlgorithm. All three are
+// replaced and only the last is read, which is why this returns DER rather than
+// a parsed certificate -- signatureAlgorithmComponents takes the enum and the
+// bytes, so nothing has to accept the result as a certificate again.
+func certDERWithSignatureOID(t *testing.T, oid []byte) []byte {
+	t.Helper()
+
+	// 2.16.840.1.101.3.4.3.18, id-ml-dsa-65.
+	from := []byte{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12}
+	require.Len(t, oid, len(from),
+		"a replacement of a different length moves every enclosing ASN.1 length")
+
+	raw := mlDSA65Cert(t).Raw
+	require.Equal(t, 3, bytes.Count(raw, from),
+		"the OID must appear exactly three times, or the substitution is not the one described")
+	return bytes.ReplaceAll(raw, from, oid)
 }
 
 // TestSignatureAlgorithmComponents_CertificateAndCRLShareTheCore states the
@@ -378,6 +508,26 @@ func mlDSA65Cert(t *testing.T) *x509.Certificate {
 	t.Helper()
 
 	data, err := cdxtest.TestData(cdxtest.MLDSA65Certificate)
+	require.NoError(t, err)
+	block, _ := pem.Decode(data)
+	require.NotNil(t, block)
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+	require.Equal(t, x509.UnknownSignatureAlgorithm, cert.SignatureAlgorithm,
+		"the fixture is here for the algorithm Go's enum does not name")
+	return cert
+}
+
+// slhDSASHA2128sCert loads the SLH-DSA-SHA2-128s certificate fixture, which is
+// self-signed and so is signed with the scheme its subject key names. It is the
+// second unnamed-by-Go algorithm, and unlike ML-DSA it decomposes into a hash,
+// so it covers the OID-only path in the shape that also returns a hash
+// component.
+func slhDSASHA2128sCert(t *testing.T) *x509.Certificate {
+	t.Helper()
+
+	data, err := cdxtest.TestData(cdxtest.SLHDSASHA2128sCertificate)
 	require.NoError(t, err)
 	block, _ := pem.Decode(data)
 	require.NotNil(t, block)

@@ -96,8 +96,10 @@ func TestAlgorithmFamily17(t *testing.T) {
 		{"3DES-EDE-CBC", cdx.CryptoPrimitiveBlockCipher, "3DES"},
 		{"RC4-128", cdx.CryptoPrimitiveBlockCipher, "RC4"},
 		{"ML-DSA-65", cdx.CryptoPrimitiveSignature, "ML-DSA"},
+		{"ML-KEM-512", cdx.CryptoPrimitiveKEM, "ML-KEM"},
 		{"SLH-DSA-SHA2-128S", cdx.CryptoPrimitiveSignature, "SLH-DSA"},
 		{"XMSS", cdx.CryptoPrimitiveSignature, "XMSS"},
+		{"XMSS-MT", cdx.CryptoPrimitiveSignature, "XMSS"},
 		{"HSS-LMS", cdx.CryptoPrimitiveSignature, "LMS"},
 		{"DHE-2048", cdx.CryptoPrimitiveKeyAgree, "FFDH"},
 		{"ECDHE-ecdh_x25519", cdx.CryptoPrimitiveKeyAgree, "ECDH"},
@@ -106,11 +108,6 @@ func TestAlgorithmFamily17(t *testing.T) {
 		{"rsa-sha2-256", cdx.CryptoPrimitiveSignature, "RSASSA-PKCS1"},
 		{"ssh-rsa", cdx.CryptoPrimitiveSignature, "RSASSA-PKCS1"},
 		{"ssh-dss", cdx.CryptoPrimitiveSignature, "DSA"},
-		// PQC cert sig-alg components carry the fallback algorithmName form
-		{"crypto/algorithm/ml-dsa-65", cdx.CryptoPrimitiveSignature, "ML-DSA"},
-		{"crypto/algorithm/slh-dsa-sha2-128s", cdx.CryptoPrimitiveSignature, "SLH-DSA"},
-		{"crypto/algorithm/hss-lms", cdx.CryptoPrimitiveSignature, "LMS"},
-		{"crypto/algorithm/hqc-128", cdx.CryptoPrimitiveSignature, ""},
 		// TLS RSA facets share the name; primitive disambiguates
 		{"RSA-2048", cdx.CryptoPrimitiveKeyAgree, "RSAES-PKCS1"}, // kex facet
 		{"RSA-2048", cdx.CryptoPrimitiveSignature, ""},           // auth facet: PKCS1-vs-PSS unknowable
