@@ -20,7 +20,7 @@ import (
 func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate) (algo, key cdx.Component) {
 	info := publicKeyAlgorithmInfo(pubKeyAlg, pubKey)
 
-	if info.oid == "0.0.0.0" && cert != nil {
+	if info.oid == oidPlaceholder && cert != nil {
 		oidFallback := spkiOID(cert)
 		// Only overwrite info on a hit. The previous two-value assignment
 		// replaced it with the zero algorithmInfo on a miss, so both returned

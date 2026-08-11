@@ -683,7 +683,7 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 
 	default:
 		meta.name = "Unknown"
-		meta.oid = "0.0.0.0"
+		meta.oid = oidPlaceholder
 		meta.algorithmName = "crypto/algorithm/unknown"
 	}
 

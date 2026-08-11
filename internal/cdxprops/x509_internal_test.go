@@ -31,6 +31,51 @@ func Test_spkiOID(t *testing.T) {
 	require.Equal(t, "", res)
 }
 
+// TestOIDPlaceholder_IsTheSentinelEveryProducerStamps pins the VALUE of
+// oidPlaceholder, which nothing else in the package does.
+//
+// csrToCDX's guard reads algo.CryptoProperties.OID == oidPlaceholder and
+// extractAlgorithmInfo's default branch writes meta.oid = oidPlaceholder, so
+// the suppression stays correct under any value the two happen to share:
+// rewriting the constant to "0.0.0.1" leaves the whole cdxprops suite green.
+// That is not the same as the value being free. It is wire-visible. Every path
+// that keeps the placeholder still ships it as cryptoProperties.oid -- a
+// standalone X25519 PUBLIC KEY block does exactly that today, because
+// ParsePKIXPublicKey succeeds on it, getPublicKeyAlgorithm has no case for
+// *ecdh.PublicKey, and restOfPEMBundleToCDX appends the algorithm
+// unconditionally -- so the constant is part of what a consumer reads, and
+// moving it silently moves documents.
+//
+// It is also copied. hash.go's unsupportedInfo carries its own "0.0.0.0"
+// literal for a hash nothing names, and Test_readSignatureAlgorithmRef below
+// and signature_algorithm_test.go hand the literal in by hand as an oidFallback;
+// not one of them moves with the constant. The doc comment on oidPlaceholder
+// tells the next producer to TEST for this value, so the day the copies diverge
+// that test stops matching and the fabricated component it exists to catch
+// sails past it -- with every other assertion still green, exactly as they were
+// while this constant was rewritten.
+func TestOIDPlaceholder_IsTheSentinelEveryProducerStamps(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "0.0.0.0", oidPlaceholder,
+		"the sentinel is emitted, not private: changing it changes every "+
+			"document that still carries a placeholder")
+
+	require.Equal(t, oidPlaceholder, unsupportedInfo.OID,
+		"hash.go keeps its own copy of the literal, so a hash nothing names "+
+			"and a key algorithm nothing names must not drift apart")
+
+	// The two ends of csrToCDX's guard, stated at the seam rather than left to
+	// the end-to-end tests that catch it only incidentally, via the name.
+	require.Equal(t, oidPlaceholder,
+		extractAlgorithmInfo("no key type maps to this", nil).oid,
+		"the default branch must stamp the value the guard tests for")
+	require.Equal(t, oidPlaceholder,
+		publicKeyAlgorithmInfo(x509.UnknownPublicKeyAlgorithm, nil).oid,
+		"and this is the exact call csrToCDX makes for a request Go could "+
+			"not read")
+}
+
 func Test_readSignatureAlgorithmRef(t *testing.T) {
 	t.Parallel()
 

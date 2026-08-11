@@ -25,6 +25,19 @@ import (
 const (
 	refUnknownKey       cdx.BOMReference = "crypto/key/unknown@unknown"
 	refUnknownAlgorithm cdx.BOMReference = "crypto/algorithm/unknown@unknown"
+
+	// oidPlaceholder is what extractAlgorithmInfo's default branch writes into
+	// algorithmInfo.oid when nothing named the algorithm. It is a sentinel, not
+	// an OID: nothing is registered under 0.0.0.0, and cryptoProperties.oid has
+	// no in-band UNKNOWN. The field is omitempty and componentWOBomRef writes it
+	// only when the algorithm states an arc, so a component built that way
+	// either names one or carries no oid at all -- saying nothing is a shape the
+	// field already has.
+	// A sentinel is neither of those: it travels to the consumer through the
+	// very channel a real arc does and cannot be told apart from one there. A
+	// producer that can reach that branch therefore tests for this value and
+	// emits nothing rather than a component built around it -- see csrToCDX.
+	oidPlaceholder = "0.0.0.0"
 )
 
 // ---------- ASN.1 helpers (declared once) ----------
@@ -81,9 +94,29 @@ func sigAlgOIDFromRaw(raw []byte) string {
 	return outer.SigAlg.Algorithm.String()
 }
 
+// spkiOID returns the algorithm OID a certificate's subjectPublicKeyInfo
+// declares, or empty string if it fails
 func spkiOID(cert *x509.Certificate) string {
+	return spkiOIDFromRaw(cert.RawSubjectPublicKeyInfo)
+}
+
+// spkiOIDFromRaw returns the algorithm OID declared in the DER of a
+// SubjectPublicKeyInfo, or "" when the bytes do not have that shape.
+//
+// It takes the raw DER rather than a certificate for the reason
+// sigAlgOIDFromRaw does: a certificate request carries the identical
+// SubjectPublicKeyInfo structure and is not a certificate, so the OID is out of
+// reach for one until the parameter is the bytes rather than the container they
+// happen to sit in.
+//
+// For a request it feeds a diagnostic and not a component. Reading the OID off
+// the DER is not fabrication -- the arc is genuinely what the request declares
+// -- but whether it belongs in the emitted inventory is a separate decision
+// about what a request contributes, and csrToCDX's answer is that an arc
+// nothing is registered under goes to the operator's log instead.
+func spkiOIDFromRaw(raw []byte) string {
 	var info pkixStruct
-	if _, err := asn1.Unmarshal(cert.RawSubjectPublicKeyInfo, &info); err != nil {
+	if _, err := asn1.Unmarshal(raw, &info); err != nil {
 		return ""
 	}
 	return info.Algorithm.Algorithm.String()

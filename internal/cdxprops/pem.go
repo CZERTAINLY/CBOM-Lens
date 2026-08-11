@@ -109,14 +109,66 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // and the Builder's first-wins dedup would silently discard the second. The
 // DER covers the key. TestPEMBundle_TwoCSRsSameSubjectStayDistinct pins it.
 //
-// The key component is conditional because x509.ParseCertificateRequest does
-// NOT fail on an SPKI algorithm it does not recognise: it returns successfully
-// with PublicKeyAlgorithm=UnknownPublicKeyAlgorithm and a nil PublicKey, which
-// is what every post-quantum request in the wild currently produces.
-// publicKeyComponents then yields the algorithm and a zero Component, and
+// Both the key and the algorithm are conditional, because
+// x509.ParseCertificateRequest does NOT fail on an SPKI algorithm it does not
+// recognise: it returns successfully with
+// PublicKeyAlgorithm=UnknownPublicKeyAlgorithm and a nil PublicKey, which is
+// what every post-quantum request in the wild currently produces.
+//
+// The key goes because publicKeyComponents yields a zero Component for it, and
 // appending that would hand the Builder a refless component to drop while the
 // dependency edge below pointed at a ref present nowhere in the document. Same
 // guard, same reason, as the standalone public keys in restOfPEMBundleToCDX.
+//
+// The algorithm goes because on that path there is no algorithm to report.
+// publicKeyAlgorithmInfo falls through to a placeholder that names the asset
+// "Unknown", stamps it with oidPlaceholder and takes publicKeyComponents' own
+// default primitive, "signature" -- and none of those three is a fact about the
+// request, so an ML-KEM or X25519 request was published to the inventory as a
+// signature scheme under an arc nothing is registered under, which a consumer
+// cannot tell from a real one. The single true proposition in it, that the
+// request references SOME algorithm, was not expressible here in any case:
+// nothing pointed at the component, because the request carries no algorithmRef
+// and the key that would have carried one was never built. And its ref is a
+// Converter.BOMRefHash over content identical for every such request, so one
+// asset stood in for every post-quantum request on the host and did nothing but
+// accumulate an occurrence per file. What the SPKI really declares survives:
+// spkiOIDFromRaw reads the OID off the DER and the Warn hands it to the
+// operator, as a diagnostic about an input this tool cannot describe rather
+// than as a claim in the document.
+//
+// That branch discards the KEY as well, which is today a distinction without a
+// difference: the only way a request reaches the placeholder is
+// UnknownPublicKeyAlgorithm, whose PublicKey is nil, so hashPublicKey has
+// already failed and key is the zero Component the guard below would drop
+// anyway. It stops being one the day Go grows a PublicKeyAlgorithm value
+// publicKeyAlgorithmInfo's switch has no case for -- publicKeyComponents would
+// then hand over a real, marshallable key while the algorithm still fell
+// through to the placeholder, and this branch would drop a key it could have
+// described, under a Warn that names only the algorithm. Dropping it is still
+// the right answer, because such a key is no more describable than the
+// algorithm it belongs to: publicKeyComponents copies info.name and info.oid
+// onto it, so it would ship as an asset NAMED "Unknown" and stamped with
+// oidPlaceholder -- the same two fabrications, one component over -- and its
+// algorithmRef would point at the component this branch is refusing to emit --
+// a dangling ref of the same class the key guard below prevents, running the
+// other way: that one keeps the request's dependency edge off a key that was
+// never built, this one would leave a key pointing at an algorithm that never
+// was. What that
+// key wants is an SPKI-OID fallback for requests, the same one that would stop
+// this branch firing at all; publication under a name nothing gave it is not a
+// substitute.
+//
+// A DSA request keeps its algorithm, and that is why the test below is over the
+// emitted component and not over key.BOMRef. Go's getPublicKeyAlgorithmFromOID
+// maps the DSA OID and parsePublicKey builds a *dsa.PublicKey, so the name
+// DSA-2048 and the OID 1.2.840.10040.4.1 are both real -- but
+// MarshalPKIXPublicKey refuses a *dsa.PublicKey, so the request lands in the
+// same refless-key state while carrying a genuine migration finding, one
+// restOfPEMBundleToCDX already publishes for the same key met in a PUBLIC KEY
+// block. Stating the rule over the artefact also means it stops firing by
+// itself the day an SPKI-OID fallback for requests gives that branch something
+// true to say.
 func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) ([]cdx.Component, []cdx.Dependency) {
 	name := csrSubjectName(csr)
 	compo := cdx.Component{
@@ -140,6 +192,16 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 	// Builder.model turns that into a relationship generically. Adding a second
 	// one would emit the same edge twice.
 	algo, key := c.publicKeyComponents(ctx, csr.PublicKeyAlgorithm, csr.PublicKey, nil)
+	// The placeholder case satisfies key.BOMRef == "" too, so it has to be
+	// tested first or the branch below emits the component this one exists to
+	// suppress. CryptoProperties is never nil: componentWOBomRef allocates it
+	// unconditionally.
+	if algo.CryptoProperties.OID == oidPlaceholder {
+		slog.WarnContext(ctx, "not reporting an algorithm for a certificate request: nothing maps this SPKI OID to an algorithm",
+			"subject", csr.Subject.String(),
+			"spki_oid", spkiOIDFromRaw(csr.RawSubjectPublicKeyInfo))
+		return []cdx.Component{compo}, nil
+	}
 	if key.BOMRef == "" {
 		return []cdx.Component{compo, algo}, nil
 	}

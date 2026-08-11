@@ -1015,58 +1015,124 @@ func TestPEMBundle_CRLSignatureAlgorithmReachesTheBOM(t *testing.T) {
 // an unguarded dependency edge would point at a ref that exists nowhere in the
 // document. Every post-quantum request in the wild takes this path today, so it
 // is the common case for exactly the keys this tool exists to find.
+//
+// This test used to require that the algorithm survived, on the reasoning that
+// "the request references SOME algorithm" stays true whatever the SPKI holds.
+// That decision is reversed, and the assertions below are its negation, because
+// the proposition emitted was not that one. publicKeyAlgorithmInfo's default
+// branch names the asset "Unknown", stamps it with the OID 0.0.0.0 and takes
+// publicKeyComponents' own default primitive "signature", and not one of the
+// three is a fact about the request: an ML-KEM or an X25519 request was
+// published to the inventory as a signature scheme under an OID nothing is
+// registered under, which the consumer cannot tell from a real one. The part
+// that was true was not expressible anyway -- the request component carries no
+// algorithmRef and the key that would have carried one was never built, so the
+// component arrived pointed at by nothing. And its bom-ref is a content hash
+// over a component byte-identical for every such request, so forty pending PQC
+// requests on a host collapsed onto one asset that merely accumulated an
+// occurrence per file. Nothing is lost by dropping it: the SPKI's real OID is
+// read off the DER and handed to the operator at WARN, which is where a value
+// that names nothing belongs.
+//
+// Both spec versions are covered, for the reason given on
+// TestPEMBundle_CSRAndCRLReachTheBOM: the 1.7 emitter maps the IR into
+// components on its own, so a suppression proved only against 1.6 says nothing
+// about what a 1.7 document carries -- and "the fabricated asset is absent" is
+// exactly the claim a second emitter can quietly fail to honour.
 func TestPEMBundle_CSRWithUnregisteredOIDStaysWellFormed(t *testing.T) {
 	t.Parallel()
 
-	// 1.3.9999.6.1.1 is a real OID -- oqs-provider assigns it to
-	// SPHINCS+-Haraka-128f-robust -- and is not one Go or the registry knows,
-	// so this is a plausible request and not a synthetic impossibility.
-	csr := csrWithSPKIAlgorithm(t, asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1})
-	require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
-		"the fixture must reach the unparseable-key path, or this proves nothing")
-	require.Nil(t, csr.PublicKey)
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
 
-	var d *model.Detection
-	require.NotPanics(t, func() {
-		d = cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
-			Location:            "/test/pqc-request.pem",
-			CertificateRequests: []*x509.CertificateRequest{csr},
+			// 1.3.9999.6.1.1 is a real OID -- oqs-provider assigns it to
+			// SPHINCS+-Haraka-128f-robust -- and is not one Go or the registry
+			// knows, so this is a plausible request and not a synthetic
+			// impossibility.
+			csr := csrWithSPKIAlgorithm(t, asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1})
+			require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+				"the fixture must reach the unparseable-key path, or this proves nothing")
+			require.Nil(t, csr.PublicKey)
+
+			var d *model.Detection
+			require.NotPanics(t, func() {
+				d = cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+					Location:            "/test/pqc-request.pem",
+					CertificateRequests: []*x509.CertificateRequest{csr},
+				})
+			})
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, version, *d)
+			byRef := componentsByRef(doc)
+
+			// Stated over the values in the document rather than over a count of
+			// components: a count is satisfied by whichever asset happens to be
+			// there, and what shipped was an asset that was well-formed and untrue.
+			for ref, compo := range byRef {
+				require.False(t, strings.HasPrefix(ref, "crypto/key/"),
+					"a key that could not be identified must not be reported as an asset: %s", ref)
+				require.NotEqual(t, "Unknown", compo.Name,
+					"%q names no algorithm; it is the placeholder the enum falls through to", ref)
+				require.False(t, strings.HasPrefix(ref, "crypto/algorithm/unknown"),
+					"the placeholder algorithm reached the document: %s", ref)
+				require.NotNil(t, compo.CryptoProperties)
+				require.NotEqual(t, "0.0.0.0", compo.CryptoProperties.OID,
+					"nothing is registered under 0.0.0.0, and a consumer cannot tell it "+
+						"from an OID that is: %s", ref)
+				require.NotEqual(t, cdx.CryptoAssetTypeAlgorithm, compo.CryptoProperties.AssetType,
+					"nothing in this request names an algorithm: %s", ref)
+			}
+
+			// Everything the request itself asserts must survive. Refusing to
+			// invent the cryptography is not a licence to drop the artefact it was
+			// hung on: a pending PQC request is still a migration finding, and the
+			// file it was found in is the actionable part of it.
+			refs := csrRefs(doc)
+			require.Len(t, refs, 1, "got %v", slices.Sorted(maps.Keys(byRef)))
+			csrCompo := byRef[refs[0]]
+			require.Equal(t, "CSR: pqc-request.example", csrCompo.Name)
+			// By PREFIX, not by whole ref: the Builder rewrites the @sha256:... tail
+			// into a UUIDv5 before emission, so the digest csrToCDX computed is not
+			// what arrives here.
+			require.True(t, strings.HasPrefix(csrCompo.BOMRef, "crypto/csr/pqc-request.example@"),
+				"the request must keep its own identity: %s", csrCompo.BOMRef)
+			require.Equal(t, cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				csrCompo.CryptoProperties.AssetType)
+
+			require.NotNil(t, csrCompo.Properties)
+			props := map[string]string{}
+			for _, prop := range *csrCompo.Properties {
+				props[prop.Name] = prop.Value
+			}
+			require.Equal(t, "CSR", props["pem_type"],
+				"pem_type is the only machine-readable thing telling a CSR from a CRL")
+			require.Equal(t, "CN=pqc-request.example", props["subject"])
+
+			require.NotNil(t, csrCompo.Evidence)
+			require.NotNil(t, csrCompo.Evidence.Occurrences)
+			var locations []string
+			for _, occ := range *csrCompo.Evidence.Occurrences {
+				locations = append(locations, occ.Location)
+			}
+			require.Equal(t, []string{"/test/pqc-request.pem"}, locations)
+
+			// No edge may name a component that is not in the document. The Builder
+			// drops such edges with a warning, so this is stated over the emitted
+			// dependencies rather than over the detection.
+			if doc.Dependencies != nil {
+				for _, dep := range *doc.Dependencies {
+					require.Contains(t, byRef, dep.Ref)
+					if dep.Dependencies == nil {
+						continue
+					}
+					for _, to := range *dep.Dependencies {
+						require.Contains(t, byRef, to, "dangling dependency edge %s -> %s", dep.Ref, to)
+					}
+				}
+			}
 		})
-	})
-	require.NotNil(t, d)
-
-	doc := emitDocument(t, "1.6", *d)
-	byRef := componentsByRef(doc)
-
-	for ref := range byRef {
-		require.False(t, strings.HasPrefix(ref, "crypto/key/"),
-			"a key that could not be identified must not be reported as an asset: %s", ref)
-	}
-	// The algorithm still survives: that the request references SOME algorithm
-	// is true whatever the SPKI turns out to hold, and dropping it too would
-	// lose the request's only cryptographic content.
-	var algorithms int
-	for _, compo := range byRef {
-		if compo.CryptoProperties != nil &&
-			compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeAlgorithm {
-			algorithms++
-		}
-	}
-	require.Equal(t, 1, algorithms, "got %v", slices.Sorted(maps.Keys(byRef)))
-
-	// No edge may name a component that is not in the document. The Builder
-	// drops such edges with a warning, so this is stated over the emitted
-	// dependencies rather than over the detection.
-	if doc.Dependencies != nil {
-		for _, dep := range *doc.Dependencies {
-			require.Contains(t, byRef, dep.Ref)
-			if dep.Dependencies == nil {
-				continue
-			}
-			for _, to := range *dep.Dependencies {
-				require.Contains(t, byRef, to, "dangling dependency edge %s -> %s", dep.Ref, to)
-			}
-		}
 	}
 }
 
@@ -1077,7 +1143,28 @@ func TestPEMBundle_CSRWithUnregisteredOIDStaysWellFormed(t *testing.T) {
 // implements, which is the whole point -- the request under test is one Go
 // cannot make and can still parse. The signature is not a real one; nothing on
 // this path verifies it, and ParseCertificateRequest does not either.
+//
+// The subject is a real CN because the emitted request is asserted on by value:
+// its Name, its crypto/csr/<name>@ ref prefix and its subject property all read
+// it, and an empty DN would send csrSubjectName down its "unknown" fallback and
+// leave all three saying nothing that distinguishes this request from the
+// fabrication under test. TestPEMBundle_EmptyDNFallsBackToUnknown builds its own
+// subject-less request, so that fallback keeps its coverage.
 func csrWithSPKIAlgorithm(t *testing.T, algorithm asn1.ObjectIdentifier) *x509.CertificateRequest {
+	t.Helper()
+
+	return csrWithSPKI(t,
+		pkix.Name{CommonName: "pqc-request.example"},
+		pkix.AlgorithmIdentifier{Algorithm: algorithm},
+		asn1.BitString{Bytes: make([]byte, 32), BitLength: 32 * 8})
+}
+
+// csrWithSPKI is csrWithSPKIAlgorithm over the whole subjectPublicKeyInfo
+// rather than just its OID: the AlgorithmIdentifier with its parameters, and
+// the key body. A DSA request needs both -- Go's parsePublicKey reads p, q and
+// g out of the parameters and y out of the BIT STRING -- and neither is
+// expressible when the algorithm is a bare OID and the body is 32 zero bytes.
+func csrWithSPKI(t *testing.T, subject pkix.Name, algorithm pkix.AlgorithmIdentifier, keyBody asn1.BitString) *x509.CertificateRequest {
 	t.Helper()
 
 	type tbsCSR struct {
@@ -1090,16 +1177,15 @@ func csrWithSPKIAlgorithm(t *testing.T, algorithm asn1.ObjectIdentifier) *x509.C
 		Attributes []asn1.RawValue `asn1:"tag:0"`
 	}
 
-	var subject pkix.RDNSequence
-	subjectDER, err := asn1.Marshal(subject)
+	subjectDER, err := asn1.Marshal(subject.ToRDNSequence())
 	require.NoError(t, err)
 
 	tbs := tbsCSR{
 		Subject:    asn1.RawValue{FullBytes: subjectDER},
 		Attributes: []asn1.RawValue{},
 	}
-	tbs.PublicKey.Algorithm = pkix.AlgorithmIdentifier{Algorithm: algorithm}
-	tbs.PublicKey.PublicKey = asn1.BitString{Bytes: make([]byte, 32), BitLength: 32 * 8}
+	tbs.PublicKey.Algorithm = algorithm
+	tbs.PublicKey.PublicKey = keyBody
 	tbsDER, err := asn1.Marshal(tbs)
 	require.NoError(t, err)
 
@@ -1109,7 +1195,7 @@ func csrWithSPKIAlgorithm(t *testing.T, algorithm asn1.ObjectIdentifier) *x509.C
 		Signature asn1.BitString
 	}{
 		TBS:       asn1.RawValue{FullBytes: tbsDER},
-		SigAlg:    pkix.AlgorithmIdentifier{Algorithm: algorithm},
+		SigAlg:    algorithm,
 		Signature: asn1.BitString{Bytes: make([]byte, 8), BitLength: 8 * 8},
 	})
 	require.NoError(t, err)
@@ -1117,6 +1203,39 @@ func csrWithSPKIAlgorithm(t *testing.T, algorithm asn1.ObjectIdentifier) *x509.C
 	csr, err := x509.ParseCertificateRequest(der)
 	require.NoError(t, err, "an unrecognised SPKI algorithm must still parse")
 	return csr
+}
+
+// csrWithDSAKey builds a certificate request asking for a 2048-bit DSA key to
+// be certified, as real DER round-tripped through ParseCertificateRequest.
+//
+// Go will not create one: MarshalPKIXPublicKey refuses *dsa.PublicKey, which is
+// the very refusal that leaves the request key-less downstream. Parsing has no
+// such scruple. parsePublicKey's DSA arm wants an ASN.1 INTEGER in the BIT
+// STRING and a SEQUENCE{p,q,g} in the parameters, rejects only non-positive
+// values and checks nothing for primality, so p = 1<<2047 is a 2048-bit modulus
+// as far as dsaKeyAdapter and the "DSA-2048" it names are concerned. The
+// numbers are therefore not a pretend key: they are the smallest input that
+// exercises the same code Go runs on a real one.
+func csrWithDSAKey(t *testing.T) *x509.CertificateRequest {
+	t.Helper()
+
+	params, err := asn1.Marshal(struct{ P, Q, G *big.Int }{
+		P: new(big.Int).Lsh(big.NewInt(1), 2047),
+		Q: big.NewInt(0xFFFFFFFF),
+		G: big.NewInt(2),
+	})
+	require.NoError(t, err)
+
+	y, err := asn1.Marshal(big.NewInt(3))
+	require.NoError(t, err)
+
+	return csrWithSPKI(t,
+		pkix.Name{CommonName: "dsa-request.example"},
+		pkix.AlgorithmIdentifier{
+			Algorithm:  asn1.ObjectIdentifier{1, 2, 840, 10040, 4, 1},
+			Parameters: asn1.RawValue{FullBytes: params},
+		},
+		asn1.BitString{Bytes: y, BitLength: len(y) * 8})
 }
 
 // TestPEMBundle_TwoCSRsSameSubjectStayDistinct is what fails if someone
@@ -1943,9 +2062,28 @@ func TestPEMBundle_CSRWithUnidentifiableKeyHandsTheBuilderNothingToDrop(t *testi
 		require.NotEmpty(t, compo.BOMRef,
 			"the converter built a component the Builder can only drop: %+v", compo)
 		refs[compo.BOMRef] = struct{}{}
-	}
-	require.NotEmpty(t, refs)
 
+		// The same three claims the emitted document is checked for, asserted
+		// one stage earlier. A fabricated component is well-formed, so the
+		// Builder passes it through untouched and nothing downstream objects;
+		// this is the only place the converter can be caught building it.
+		require.NotEqual(t, "Unknown", compo.Name,
+			"the converter built an algorithm named after the enum's fallthrough")
+		require.False(t, strings.HasPrefix(compo.BOMRef, "crypto/algorithm/unknown"),
+			"the converter built the placeholder algorithm: %s", compo.BOMRef)
+		require.NotNil(t, compo.CryptoProperties)
+		require.NotEqual(t, "0.0.0.0", compo.CryptoProperties.OID,
+			"the converter stamped an OID nothing is registered under onto %s",
+			compo.BOMRef)
+	}
+	require.Len(t, d.Components, 1,
+		"an unreadable SPKI leaves the request and nothing else, got %v",
+		slices.Sorted(maps.Keys(refs)))
+	require.True(t, strings.HasPrefix(d.Components[0].BOMRef, "crypto/csr/"),
+		"the one component must be the request itself: %s", d.Components[0].BOMRef)
+
+	require.Empty(t, d.Dependencies,
+		"the request depends on nothing: the key it asks for was never built")
 	for _, dep := range d.Dependencies {
 		require.Contains(t, refs, dep.Ref,
 			"an edge starts at a component this detection does not carry")
@@ -1956,4 +2094,183 @@ func TestPEMBundle_CSRWithUnidentifiableKeyHandsTheBuilderNothingToDrop(t *testi
 					"has that ref", dep.Ref, to)
 		}
 	}
+}
+
+// TestPEMBundle_CSRWithDSAKeyKeepsItsTruthfulAlgorithm is what fails if the
+// guard in csrToCDX is ever "simplified" back to keying off key.BOMRef == "".
+//
+// That condition is a strict superset of the one that matters. Go's
+// getPublicKeyAlgorithmFromOID maps the DSA OID and parsePublicKey builds a
+// *dsa.PublicKey out of the request, so publicKeyAlgorithmInfo has the real
+// name and the real OID in hand -- but MarshalPKIXPublicKey refuses to marshal
+// a *dsa.PublicKey, so hashPublicKey fails and no key asset is emitted. The
+// request therefore reaches the same refless-key state as an unreadable SPKI
+// while carrying a genuine migration finding, and restOfPEMBundleToCDX already
+// publishes exactly this algorithm for the same key found in a PUBLIC KEY
+// block. Suppressing it here would make the document contradict itself
+// depending on which PEM block the key turned up in.
+func TestPEMBundle_CSRWithDSAKeyKeepsItsTruthfulAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	csr := csrWithDSAKey(t)
+	require.Equal(t, x509.DSA, csr.PublicKeyAlgorithm,
+		"the fixture must reach the DSA path, or this proves nothing")
+	require.NotNil(t, csr.PublicKey)
+	_, err := x509.MarshalPKIXPublicKey(csr.PublicKey)
+	require.Error(t, err,
+		"the refusal to marshal is the whole reason this looks like the "+
+			"unreadable-SPKI case")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/dsa-request.pem",
+		CertificateRequests: []*x509.CertificateRequest{csr},
+	})
+	require.NotNil(t, d)
+
+	doc := emitDocument(t, "1.6", *d)
+	byRef := componentsByRef(doc)
+
+	// Collected rather than assigned in the loop, and required to be exactly
+	// one. Keeping the last match over a map means a regression that emitted a
+	// second algorithm -- the placeholder alongside the real one, say -- would
+	// be caught or missed depending on Go's map iteration order, turning a
+	// failure into a flake; requiring the count states the stronger claim this
+	// test is actually about, which is the DSA algorithm and nothing else.
+	var algorithms []cdx.Component
+	for _, compo := range byRef {
+		if compo.CryptoProperties != nil &&
+			compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeAlgorithm {
+			algorithms = append(algorithms, compo)
+		}
+	}
+	require.Len(t, algorithms, 1,
+		"the request asks for exactly one algorithm, got %v",
+		slices.Sorted(maps.Keys(byRef)))
+	algo := algorithms[0]
+	require.NotEmpty(t, algo.BOMRef,
+		"the algorithm the request really asks for was dropped, got %v",
+		slices.Sorted(maps.Keys(byRef)))
+	require.Equal(t, "DSA-2048", algo.Name,
+		"the modulus is in the name, so this fails if the algorithm came from "+
+			"anywhere but the key in the request")
+	require.Equal(t, "1.2.840.10040.4.1", algo.CryptoProperties.OID,
+		"a real OID, read from a key Go really parsed")
+
+	// No key asset: MarshalPKIXPublicKey refuses *dsa.PublicKey and there is no
+	// certificate to fall back on, so there is no digest to keep this key apart
+	// from every other DSA key.
+	for ref := range byRef {
+		require.False(t, strings.HasPrefix(ref, "crypto/key/"),
+			"a key that could not be marshalled must not be reported: %s", ref)
+	}
+
+	requireNoDanglingEdges(t, doc)
+}
+
+// TestPEMBundle_CSRWithUnnameableAlgorithmIsLoggedAtWarn pins the other half of
+// the suppression: that it is a refusal and not a disappearance.
+//
+// The document is the wrong place for 0.0.0.0, but the SPKI's real OID is a
+// fact, and it is the only handle an operator has on a request the tool
+// declines to describe -- it is what identifies the request as, say, an
+// oqs-provider SPHINCS+ one. Reading it off the DER is not fabrication;
+// publishing it as a registry entry would be, which is why it goes here and not
+// into a component. Demoting this to Debug, in a tool whose default output is
+// not verbose, is silence: the request would appear in the BOM with no
+// cryptography and nothing anywhere would say why.
+//
+// Not parallel: it swaps the process-wide slog default. See the note on
+// TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock.
+func TestPEMBundle_CSRWithUnnameableAlgorithmIsLoggedAtWarn(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	csr := csrWithSPKIAlgorithm(t, asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1})
+	require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+		"the fixture must reach the unparseable-key path, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/pqc-request.pem",
+		CertificateRequests: []*x509.CertificateRequest{csr},
+	})
+	require.NotNil(t, d)
+
+	logged := logBuf.String()
+	// The level is stated as part of ONE record rather than as a substring of
+	// the buffer. publicKeyComponents logs its own "cannot identify public key"
+	// Warn into the same buffer on this exact input, so a bare
+	// Contains("level=WARN") is satisfied by that record and stays green with
+	// the Warn under test deleted outright -- the two halves of the claim,
+	// "this is reported" and "it is reported loudly enough to be seen", would
+	// be met by two different lines. TextHandler writes one record per line, so
+	// requiring the level immediately followed by the message pins them to the
+	// same one.
+	require.Regexp(t, `level=WARN msg="not reporting an algorithm for a certificate request`, logged,
+		"an asset dropped below the default log level is a silently dropped asset")
+	require.Contains(t, logged, "not reporting an algorithm for a certificate request")
+	require.Contains(t, logged, "CN=pqc-request.example",
+		"the operator has to know WHICH request was not described")
+	require.Contains(t, logged, "spki_oid=1.3.9999.6.1.1",
+		"and the OID in its DER, which is the only thing that identifies the "+
+			"algorithm the tool refused to name")
+}
+
+// TestPEMBundle_CSRWarnNamesItsAttributes states the same Warn over slog's
+// attributes rather than over a rendering of them.
+//
+// The test above reads a TextHandler's output as one string, and
+// "CN=pqc-request.example" appears in that string however the subject got
+// there: under any attribute key, under none, or interpolated into the message.
+// Renaming "subject" to anything at all therefore leaves it green -- while
+// "spki_oid", one line down, is pinned as key AND value. The two halves of one
+// log line are held to different standards, and the weaker half is the half
+// naming WHICH request was refused.
+//
+// The key is the contract, not a decoration on it. Nobody greps a Warn out of a
+// scan across ten thousand files by eye; these are attributes rather than a
+// sentence precisely so that a handler can index them, and an attribute whose
+// name moved is an attribute that is gone as far as any query is concerned,
+// with the value still sitting in the rendered line to make it look present.
+//
+// Not parallel: it swaps the process-wide slog default. See the note on
+// TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock.
+func TestPEMBundle_CSRWarnNamesItsAttributes(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	csr := csrWithSPKIAlgorithm(t, asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1})
+	require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+		"the fixture must reach the unparseable-key path, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/pqc-request.pem",
+		CertificateRequests: []*x509.CertificateRequest{csr},
+	})
+	require.NotNil(t, d)
+
+	// More than one Warn reaches the buffer on this path -- publicKeyComponents
+	// reports the unmarshallable key first -- so the record is picked by its
+	// message rather than by position.
+	var record map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logBuf.String()), "\n") {
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &got), "log line: %s", line)
+		if msg, _ := got["msg"].(string); strings.HasPrefix(msg,
+			"not reporting an algorithm for a certificate request") {
+			record = got
+		}
+	}
+	require.NotNil(t, record,
+		"nothing was logged about the refusal at WARN: %s", logBuf.String())
+
+	require.Equal(t, "WARN", record["level"])
+	require.Equal(t, "CN=pqc-request.example", record["subject"],
+		"the subject has to be queryable under its own key, not merely present "+
+			"somewhere in the rendered line")
+	require.Equal(t, "1.3.9999.6.1.1", record["spki_oid"],
+		"and the OID read off this request's own SubjectPublicKeyInfo")
 }
