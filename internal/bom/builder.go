@@ -119,7 +119,7 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 	}
 
 	for _, compo := range detection.Components {
-		if compo.BOMRef == "" || compo.Name == "" {
+		if reason, drop := missingIdentity(compo); drop {
 			// A component without a ref or a name cannot be stored: the map is
 			// keyed by ref, and a nameless component is unreadable in the
 			// emitted document. Dropping it silently is how a scanned .csr and
@@ -146,7 +146,7 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 				assetType = compo.CryptoProperties.AssetType
 			}
 			slog.WarnContext(ctx, "dropping component: cannot be identified",
-				"reason", missingIdentity(compo),
+				"reason", reason,
 				"name", compo.Name,
 				"ref", compo.BOMRef,
 				"component.type", compo.Type,
@@ -166,25 +166,25 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 	}
 }
 
-// missingIdentity names which half of a component's identity is absent, so the
-// drop warning says what is wrong with the component rather than reading as a
-// Builder failure.
+// missingIdentity reports whether a component lacks the bom-ref and/or name
+// needed to store and emit it, and if so, why: reason names which half of
+// the component's identity is absent, so the drop warning says what is
+// wrong with the component rather than reading as a Builder failure.
 //
-// It must only be called for a component that IS unidentifiable, i.e. under
-// its one caller's `c.BOMRef == "" || c.Name == ""` guard. Outside that guard
-// it is not merely useless but wrong: the default arm returns "no name" for a
-// fully-populated component. The alternative -- returning "" when nothing is
-// missing -- was rejected because it would put reason="" in a warning whose
-// entire job is to state the reason, turning a caller's mistake into a log
-// line that looks fine.
-func missingIdentity(c cdx.Component) string {
+// shouldDrop and reason are computed together from the same fields, so they
+// cannot disagree: reason is meaningful only when shouldDrop is true, and a
+// component reported "no name" is, by construction, one whose Name is "".
+// When shouldDrop is false, reason is "" and the caller must not log it.
+func missingIdentity(c cdx.Component) (reason string, shouldDrop bool) {
 	switch {
 	case c.BOMRef == "" && c.Name == "":
-		return "no bom-ref and no name"
+		return "no bom-ref and no name", true
 	case c.BOMRef == "":
-		return "no bom-ref"
+		return "no bom-ref", true
+	case c.Name == "":
+		return "no name", true
 	default:
-		return "no name"
+		return "", false
 	}
 }
 
