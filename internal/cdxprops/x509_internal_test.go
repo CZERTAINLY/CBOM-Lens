@@ -13,6 +13,7 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
 
 	"github.com/stretchr/testify/require"
@@ -243,6 +244,122 @@ func TestConverter_certConverter(t *testing.T) {
 	})
 
 	require.NotZero(t, compo)
+}
+
+// TestCertComponent_PublishesItsKeyUsage is where the fact this fix takes off
+// the algorithm asset has to reappear, and it is stated over the VANILLA
+// document on purpose.
+//
+// KeyUsage used to be published, lossily, as the RSA algorithm's primitive:
+// signature or pke, on the algorithm component, in every non-ILM document, and
+// hashed into that component's bom-ref. Moving it here has to keep it in the
+// plain CycloneDX output or the fix would REMOVE information from every non-ILM
+// consumer -- which is why it is not behind --ilm the way
+// ilm.CertificateProperties is. That gate is right for ILM-specific enrichment;
+// a keyUsage extension parsed out of a standard X.509 certificate is not
+// enrichment. pem_type, subject, issuer and revoked_count are already emitted
+// un-namespaced and ungated for the same reason.
+//
+// The value is asserted as one exact string, which is the assertion a map-based
+// implementation cannot pass: with nine bits to name, Go's randomised map
+// iteration would deliver this order roughly once in 24 runs. RFC 5280 sec.
+// 4.2.1.3's BIT STRING bit order is the emitted order, and the identifiers are
+// that section's ASN.1 names -- nonRepudiation for bit 1, which Go calls
+// KeyUsageContentCommitment after the newer spelling.
+//
+// A certificate with no keyUsage extension carries no such property rather than
+// an empty-valued one: RFC 5280 requires at least one bit set when the extension
+// is present, so zero bits means the certificate asserts nothing, and a property
+// whose value is "" asserts nothing while looking like an assertion.
+func TestCertComponent_PublishesItsKeyUsage(t *testing.T) {
+	t.Parallel()
+
+	const allFour = x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment |
+		x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+
+	// Spelled out rather than taken from propKeyUsage. The emitted name is the
+	// contract with every consumer of the document, so renaming the constant
+	// must fail here rather than silently rename the property.
+	const wantName = "key_usage"
+
+	countNamed := func(compo cdx.Component, name string) (int, string) {
+		var n int
+		var value string
+		if compo.Properties == nil {
+			return 0, ""
+		}
+		for _, p := range *compo.Properties {
+			if p.Name == name {
+				n++
+				value = p.Value
+			}
+		}
+		return n, value
+	}
+
+	certComponentFor := func(t *testing.T, c Converter, cert *x509.Certificate) cdx.Component {
+		t.Helper()
+		compos, _, err := c.certHitToComponents(t.Context(),
+			model.CertHit{Cert: cert, Source: "PEM", Location: "/etc/ssl/certs/fixture.pem"})
+		require.NoError(t, err)
+		for _, compo := range compos {
+			if compo.CryptoProperties != nil &&
+				compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeCertificate {
+				return compo
+			}
+		}
+		t.Fatal("no certificate component emitted")
+		return cdx.Component{}
+	}
+
+	t.Run("vanilla", func(t *testing.T) {
+		t.Parallel()
+
+		compo := certComponentFor(t, NewConverter(), selfSignedRSACert(t, allFour))
+
+		n, value := countNamed(compo, wantName)
+		require.Equal(t, 1, n, "exactly one key_usage property")
+		require.Equal(t, "digitalSignature,keyEncipherment,keyCertSign,cRLSign", value,
+			"RFC 5280 sec. 4.2.1.3 identifiers, in that section's bit order, "+
+				"comma-separated with no spaces")
+
+		require.NotNil(t, compo.Properties)
+		require.Len(t, *compo.Properties, 1,
+			"--ilm is off, so key_usage is the only property a certificate carries")
+	})
+
+	t.Run("ilm", func(t *testing.T) {
+		t.Parallel()
+
+		compo := certComponentFor(t,
+			NewConverter().WithIlmExtensions(true), selfSignedRSACert(t, allFour))
+
+		n, value := countNamed(compo, wantName)
+		require.Equal(t, 1, n)
+		require.Equal(t, "digitalSignature,keyEncipherment,keyCertSign,cRLSign", value)
+
+		// The ILM properties are additional, not alternative: turning --ilm on
+		// must not displace the vanilla fact, and turning it off must not take
+		// the ILM ones' place.
+		for _, name := range []string{
+			ilm.CertificateSourceFormat,
+			ilm.CertificateBase64Content,
+			ilm.CertificateFingerprint,
+		} {
+			got, _ := countNamed(compo, name)
+			require.Equal(t, 1, got, "%s", name)
+		}
+	})
+
+	t.Run("no keyUsage extension", func(t *testing.T) {
+		t.Parallel()
+
+		compo := certComponentFor(t, NewConverter(), selfSignedRSACert(t, 0))
+
+		require.Nil(t, compo.Properties,
+			"a certificate that constrains nothing must publish no constraint, "+
+				"and an empty properties array is not the same as no claim")
+	})
 }
 
 // TestCertHitToComponents_NoMaterialPropsOnCertificate pins the removal of

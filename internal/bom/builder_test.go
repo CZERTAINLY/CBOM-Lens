@@ -328,15 +328,20 @@ const (
 
 // Two more targets, sharing EVERYTHING before the "@". The three above all
 // differ there, so no test built from them can see a sort that stops at the
-// "@" -- and this pair is not a contrivance: publicKeyComponents stamps the
-// primitive onto the algorithm component before BOMRefHash hashes it, and RSA's
-// primitive is read off the certificate's KeyUsage, so a signing RSA-2048
-// certificate and an encipherment RSA-2048 certificate produce two components
-// both named crypto/algorithm/rsa-2048 and hashed differently. Both are
-// SHA256WithRSA, so both name ONE signature-algorithm ref as the source of their
-// edges and the union under it holds the pair.
-// TestCertHit_TwoRSACertificatesShareASigAlgRefAndNameTwoRSA2048Algorithms
-// proves that reachable through the real converter.
+// "@" -- and this pair is not a contrivance: cdxprops.parse_tls builds a
+// TLS_RSA_WITH_* key-exchange facet as crypto/algorithm/rsa-2048 with primitive
+// key-agree and functions [keyderive,keygen] (parse_tls.go:138), while a
+// certificate's subject key builds crypto/algorithm/rsa-2048 with primitive pke
+// off the rsaEncryption OID (algorithm.go:600). One name, two assets, two
+// digests, and a host serving RSA key transport with an RSA certificate
+// contributes both.
+//
+// It is reachable but not present in the committed corpus, so these two refs
+// stay hand-written. The pair this fixture used to stand for -- a signing and an
+// encipherment RSA-2048 certificate -- was real until #217: the primitive was
+// read off the certificate's KeyUsage and hashed into the component's ref, and
+// those two certificates now correctly name ONE asset
+// (TestCertHit_TwoRSACertificatesShareOneRSA2048Algorithm).
 //
 // The digests are chosen so the RAW order and the CANONICAL order DISAGREE:
 // safeRef keeps everything before the "@" and replaces the digest with a UUIDv5

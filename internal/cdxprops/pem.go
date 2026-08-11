@@ -536,7 +536,7 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 	// This path set no primitive at all, so every PQC private key produced an
 	// algorithm component with the field missing, while the public-key path
 	// produced one with it set. Both now take it from the registry.
-	setAlgorithmPrimitive(&algo, registryPrimitive(info))
+	setAlgorithmPrimitive(&algo, algorithmPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
 	// Check the ENCODING, not a length floor. RFC 9881 sec. 6 makes the ML-DSA
@@ -810,15 +810,6 @@ func derSeedAndExpandedOf(body []byte, wantSeed, wantExpanded int) bool {
 	return err == nil && len(afterExpanded) == 0 && len(expanded) == wantExpanded
 }
 
-// registryPrimitive returns the primitive a registry entry declares, falling
-// back to signature for entries that do not state one.
-func registryPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
-	if info.primitive != "" {
-		return info.primitive
-	}
-	return cdx.CryptoPrimitiveSignature
-}
-
 // unsupportedPKIX describes a SubjectPublicKeyInfo Go's stdlib cannot parse,
 // returning the key material component and the algorithm component that
 // describes it.
@@ -874,7 +865,7 @@ func (c Converter) unsupportedPKIX(ctx context.Context, der []byte) (key, algo c
 	algo = info.componentWOBomRef(c.ilm)
 	// Trust the registry's primitive. Hardcoding "signature" here reported an
 	// ML-KEM encapsulation key as a signature algorithm.
-	setAlgorithmPrimitive(&algo, registryPrimitive(info))
+	setAlgorithmPrimitive(&algo, algorithmPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
 	// Check the LENGTH, and check it exactly -- in bytes and in bits. Unlike

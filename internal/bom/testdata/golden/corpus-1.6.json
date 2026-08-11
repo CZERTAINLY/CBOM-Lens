@@ -313,33 +313,6 @@
       }
     },
     {
-      "bom-ref": "crypto/algorithm/rsa-2048@a11419cf-1522-5651-923d-17003bbaf47d",
-      "type": "cryptographic-asset",
-      "name": "RSA-2048",
-      "evidence": {
-        "occurrences": [
-          {
-            "location": "/fixtures/rsa-private-key.pem"
-          }
-        ]
-      },
-      "cryptoProperties": {
-        "assetType": "algorithm",
-        "algorithmProperties": {
-          "parameterSetIdentifier": "2048",
-          "executionEnvironment": "software-plain-ram",
-          "cryptoFunctions": [
-            "decrypt",
-            "encrypt",
-            "sign",
-            "verify"
-          ],
-          "classicalSecurityLevel": 112
-        },
-        "oid": "1.2.840.113549.1.1.1"
-      }
-    },
-    {
       "bom-ref": "crypto/algorithm/sha-256-ecdsa@cc3b5016-e3d3-5617-a8c9-a136bbac834f",
       "type": "cryptographic-asset",
       "name": "ECDSA-SHA256",
@@ -546,6 +519,12 @@
         {
           "alg": "SHA-1",
           "content": "fbcfc6360507a8b51578c00e0dea422a23055515"
+        }
+      ],
+      "properties": [
+        {
+          "name": "key_usage",
+          "value": "digitalSignature,keyEncipherment"
         }
       ],
       "evidence": {
@@ -774,7 +753,7 @@
         "assetType": "related-crypto-material",
         "relatedCryptoMaterialProperties": {
           "type": "private-key",
-          "algorithmRef": "crypto/algorithm/rsa-2048@a11419cf-1522-5651-923d-17003bbaf47d",
+          "algorithmRef": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0",
           "size": 2048,
           "format": "PEM"
         },

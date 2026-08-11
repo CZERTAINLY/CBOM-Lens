@@ -5,9 +5,11 @@ import (
 	"crypto/dsa" //nolint:staticcheck // a DSA certificate is the branch's one live classical user
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
@@ -103,13 +105,30 @@ func TestConverter_publicKeyComponents(t *testing.T) {
 	require.Equal(t, "ML-DSA-65", key.Name)
 }
 
-// selfSignedRSACert builds an RSA certificate with the given KeyUsage. It exists
-// so the keyEncipherment path can be exercised without committing a fixture.
+// selfSignedRSACert builds an RSA certificate with the given KeyUsage over a
+// freshly generated key. It exists so that the several KeyUsage values a
+// certificate can declare are all reachable without committing a fixture for
+// each.
 func selfSignedRSACert(t *testing.T, usage x509.KeyUsage) *x509.Certificate {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
+
+	return rsaCertForKey(t, key, usage)
+}
+
+// rsaCertForKey is the half of selfSignedRSACert that does not generate a key,
+// split out because the interesting statements are about ONE key certified
+// several ways: a fresh key per certificate cannot tell "the algorithm asset is
+// a function of the key" apart from "the algorithm asset is a function of
+// nothing the certificate carries".
+//
+// usage == 0 is a supported input and not a degenerate one: x509.CreateCertificate
+// omits the keyUsage extension entirely for it, which is the shape of every
+// certificate that declines to constrain its key.
+func rsaCertForKey(t *testing.T, key *rsa.PrivateKey, usage x509.KeyUsage) *x509.Certificate {
+	t.Helper()
 
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -126,32 +145,326 @@ func selfSignedRSACert(t *testing.T, usage x509.KeyUsage) *x509.Certificate {
 	return cert
 }
 
-// TestCertHitToComponents_RSAEnciphermentKeyIsPKE covers the classical half of
-// the primitive-overwrite defect. publicKeyComponents classifies an RSA key
-// whose KeyUsage is keyEncipherment only as "pke"; certHitToComponents used to
-// overwrite that with "signature" after the component had been hashed.
-func TestCertHitToComponents_RSAEnciphermentKeyIsPKE(t *testing.T) {
+// algorithmComponentOf picks the one algorithm asset out of compos, failing if
+// there is not exactly one. Written as a search rather than an index because
+// every producer under test returns its components in its own order, and an
+// index would silently start asserting about a different component the day one
+// of them appends something.
+func algorithmComponentOf(t *testing.T, compos []cdx.Component) cdx.Component {
+	t.Helper()
+
+	var found []cdx.Component
+	for _, compo := range compos {
+		if compo.CryptoProperties != nil &&
+			compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeAlgorithm {
+			found = append(found, compo)
+		}
+	}
+	require.Len(t, found, 1, "expected exactly one algorithm component")
+	return found[0]
+}
+
+// TestPublicKeyComponents_RSAAlgorithmIsAFunctionOfTheKeyNotTheCertificate is
+// the primary statement of this fix at the producer level: a cryptographic
+// primitive is a property of the ALGORITHM, so nothing a certificate declares
+// about how it intends to use a key may reach the algorithm asset built from
+// that key.
+//
+// publicKeyComponents used to read cert.KeyUsage and stamp "signature" onto the
+// RSA algorithm component when the certificate signed and did not encipher, and
+// "pke" otherwise -- BEFORE BOMRefHash digested the component. A bom-ref is a
+// hash of the component's own contents, so one RSA-2048 key had one ref when
+// found in a signing certificate and a different one when found in an
+// encipherment certificate, a CSR or a bare PUBLIC KEY block; Builder's
+// first-wins dedup then made which of the two survived depend on the order the
+// detections happened to arrive in.
+//
+// "pke" is the schema's own worked example for RSA (bom-1.6.schema.json:5079
+// names pke "public-key encryption schemes (pke, e.g. RSA)" and signature "e.g.
+// ECDSA"), and the specification's 1.7 certificate conformance fixture gives a
+// TLS leaf's rsaEncryption asset "pke" while carrying the signing fact on the
+// separate SHA512withRSA asset. That separate asset is why nothing is lost: this
+// package already emits crypto/algorithm/sha-256-rsa with primitive "signature"
+// for exactly the certificates whose KeyUsage the old branch was reading.
+//
+// The zero-usage row is not filler. It is the only row that reached the "else"
+// arm of the old branch without any keyUsage extension at all, so a
+// reintroduction that reads the extension only when present still fails here.
+func TestPublicKeyComponents_RSAAlgorithmIsAFunctionOfTheKeyNotTheCertificate(t *testing.T) {
 	t.Parallel()
 
-	cert := selfSignedRSACert(t, x509.KeyUsageKeyEncipherment)
-
-	compos, _, err := NewConverter().certHitToComponents(t.Context(), model.CertHit{Cert: cert})
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
-	var found bool
-	for _, compo := range compos {
-		if compo.CryptoProperties == nil ||
-			compo.CryptoProperties.AssetType != cdx.CryptoAssetTypeAlgorithm ||
-			!strings.HasPrefix(compo.Name, "RSA-") {
+	usages := []struct {
+		name  string
+		usage x509.KeyUsage
+	}{
+		{"no keyUsage extension", 0},
+		{"digitalSignature", x509.KeyUsageDigitalSignature},
+		{"keyEncipherment", x509.KeyUsageKeyEncipherment},
+		{"signing CA", x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign},
+	}
+
+	c := NewConverter()
+	var first cdx.Component
+	for i, u := range usages {
+		cert := rsaCertForKey(t, key, u.usage)
+		algo, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, cert)
+
+		require.NotNil(t, algo.CryptoProperties)
+		require.NotNil(t, algo.CryptoProperties.AlgorithmProperties)
+		require.Equal(t, cdx.CryptoPrimitivePKE,
+			algo.CryptoProperties.AlgorithmProperties.Primitive,
+			"%s: RSA is a public-key encryption scheme whatever this certificate "+
+				"permits its key to do", u.name)
+
+		if i == 0 {
+			first = algo
 			continue
 		}
-		require.NotNil(t, compo.CryptoProperties.AlgorithmProperties)
-		require.Equal(t, cdx.CryptoPrimitivePKE,
-			compo.CryptoProperties.AlgorithmProperties.Primitive,
-			"a keyEncipherment-only RSA key must be reported as pke, not signature")
-		found = true
+		require.Equal(t, first, algo,
+			"%s: one key must yield one algorithm asset, and a bom-ref is a hash "+
+				"of the component, so any KeyUsage-derived field here splits the "+
+				"asset in two", u.name)
 	}
-	require.True(t, found, "no RSA algorithm component emitted for the certificate")
+	require.NotEmpty(t, first.BOMRef, "the loop must have run")
+}
+
+// TestRSAAlgorithmAsset_IsOneAssetWhicheverProducerBuiltIt widens the statement
+// above from one producer to all four that can describe an RSA key.
+//
+// Two of them disagreed. publicKeyComponents derived the primitive from
+// KeyUsage (see the test above), and Converter.PrivateKey set no primitive at
+// all -- so the committed golden corpus carried the same RSA-2048 key twice,
+// as crypto/algorithm/rsa-2048@0e37c10e-... from the certificate and
+// @a11419cf-... from the private key in the very same scan, differing in
+// nothing but the presence of the field.
+//
+// Equality is asserted over the WHOLE component and not only over the ref. Two
+// components that agree on a content-hashed ref necessarily agree on everything
+// the hash covers, so a ref-only assertion is the weaker half of the same claim;
+// stating it over the component says which field moved when it fails.
+func TestRSAAlgorithmAsset_IsOneAssetWhicheverProducerBuiltIt(t *testing.T) {
+	t.Parallel()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	cert := rsaCertForKey(t, key,
+		x509.KeyUsageDigitalSignature|x509.KeyUsageCertSign|x509.KeyUsageCRLSign)
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: "csr.example"}}, key)
+	require.NoError(t, err)
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	require.NoError(t, err)
+
+	c := NewConverter()
+
+	fromCertificate, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, cert)
+
+	csrCompos, _ := c.csrToCDX(t.Context(), csr)
+	fromCSR := algorithmComponentOf(t, csrCompos)
+
+	fromBarePublicKey, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, nil)
+
+	fromPrivateKey, _ := c.PrivateKey(t.Context(), "fixture-id", key)
+
+	for name, got := range map[string]cdx.Component{
+		"certificate signing key": fromCSR,
+		"bare PUBLIC KEY block":   fromBarePublicKey,
+		"private key":             fromPrivateKey,
+	} {
+		require.Equal(t, fromCertificate, got,
+			"%s: the same RSA key must produce the same algorithm asset as the "+
+				"certificate path, or the document carries one asset under two "+
+				"refs and the Builder picks by arrival order", name)
+	}
+}
+
+// TestCertHitToComponents_KeyUsageMovesNoContentHashedRef states the constraint
+// that makes the certificate component the only legal home for the KeyUsage
+// fact this fix takes off the algorithm.
+//
+// Of the three refs a certificate detection mints, two are content hashes of
+// something KeyUsage does not belong to and one is a hash of the certificate's
+// own DER. The algorithm ref is a BOMRefHash over the marshalled component, so
+// anything KeyUsage-derived stamped there moves it -- that IS the defect. The
+// key ref is a digest of the marshalled SPKI, which KeyUsage is not part of, so
+// a KeyUsage-derived field on the key component would leave two DIFFERENT
+// components sharing one ref and let Builder's first-wins pick between them: the
+// defect moved rather than removed, and invisible to any test that compares refs
+// alone, which is why the key COMPONENTS are compared here and not just their
+// refs. The certificate ref is a pure function of cert.Raw, and the keyUsage
+// extension is inside cert.Raw, so a keyUsage-derived value there is
+// order-independent by construction -- the same argument
+// mergeCertificateSourceFormat already makes for base64_content and fingerprint.
+func TestCertHitToComponents_KeyUsageMovesNoContentHashedRef(t *testing.T) {
+	t.Parallel()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	signing := rsaCertForKey(t, key,
+		x509.KeyUsageDigitalSignature|x509.KeyUsageCertSign|x509.KeyUsageCRLSign)
+	encipherment := rsaCertForKey(t, key, x509.KeyUsageKeyEncipherment)
+
+	c := NewConverter()
+
+	pick := func(cert *x509.Certificate) (algo, keyCompo, certCompo cdx.Component) {
+		compos, _, err := c.certHitToComponents(t.Context(), model.CertHit{Cert: cert})
+		require.NoError(t, err)
+		for _, compo := range compos {
+			switch {
+			case strings.HasPrefix(compo.BOMRef, "crypto/algorithm/rsa-"):
+				algo = compo
+			case strings.HasPrefix(compo.BOMRef, "crypto/key/rsa-"):
+				keyCompo = compo
+			case strings.HasPrefix(compo.BOMRef, "crypto/certificate/"):
+				certCompo = compo
+			}
+		}
+		require.NotEmpty(t, algo.BOMRef)
+		require.NotEmpty(t, keyCompo.BOMRef)
+		require.NotEmpty(t, certCompo.BOMRef)
+		return
+	}
+
+	signAlgo, signKey, signCert := pick(signing)
+	encAlgo, encKey, encCert := pick(encipherment)
+
+	require.Equal(t, signAlgo, encAlgo,
+		"the algorithm ref is a hash of the algorithm component, so the two "+
+			"certificates must contribute the identical component")
+	require.Equal(t, signKey, encKey,
+		"the key ref is a digest of the SPKI alone, so two key components under "+
+			"that one ref must be identical -- otherwise which one the document "+
+			"carries is decided by arrival order")
+
+	require.NotEqual(t, signCert.BOMRef, encCert.BOMRef,
+		"two different certificates are two different assets")
+	for _, cert := range []*x509.Certificate{signing, encipherment} {
+		digest := sha256.Sum256(cert.Raw)
+		require.Contains(t,
+			[]string{signCert.BOMRef, encCert.BOMRef},
+			"crypto/certificate/"+cert.Subject.CommonName+"@sha256:"+hex.EncodeToString(digest[:]),
+			"a certificate ref is a pure function of its own DER, which is what "+
+				"makes a keyUsage-derived value on it order-independent")
+	}
+}
+
+// TestAlgorithmAsset_PQCKeyIsOneAssetFromACertificateAndFromAPublicKeyBlock is
+// green before this change and must stay green after it.
+//
+// The certificate path and the `PUBLIC KEY` path resolve the same registry
+// entry by the same OID, build the component with the same
+// componentWOBomRef, take the primitive from the same helper and hash with the
+// same algorithmName -- byte-identical, hence one ref. Unifying the primitive
+// rule across producers is exactly the kind of refactor that can update one of
+// two lockstep constructions and leave the other, and nothing else in the
+// package compares these two call sites.
+//
+// The ML-KEM row is the one that says the rule is the registry's and not a
+// hardcoded default: an encapsulation key reported as a signature scheme is the
+// defect algorithmPrimitive was written to close, and a "just always say pke for
+// anything non-signing" simplification of this fix fails here.
+func TestAlgorithmAsset_PQCKeyIsOneAssetFromACertificateAndFromAPublicKeyBlock(t *testing.T) {
+	t.Parallel()
+
+	for name, tt := range map[string]struct {
+		certFixture string
+		keyFixture  string
+		algo        string
+		primitive   cdx.CryptoPrimitive
+	}{
+		"ML-DSA-65": {
+			cdxtest.MLDSA65Certificate, cdxtest.MLDSA65PublicKey,
+			"ML-DSA-65", cdx.CryptoPrimitiveSignature,
+		},
+		"ML-KEM-768": {
+			cdxtest.MLKEM768Certificate, cdxtest.MLKEM768PublicKey,
+			"ML-KEM-768", cdx.CryptoPrimitiveKEM,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			c := NewConverter()
+
+			certPEM, err := cdxtest.TestData(tt.certFixture)
+			require.NoError(t, err)
+			certBlock, _ := pem.Decode(certPEM)
+			require.NotNil(t, certBlock)
+			cert, err := x509.ParseCertificate(certBlock.Bytes)
+			require.NoError(t, err)
+			fromCertificate, _ := c.publicKeyComponents(
+				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+
+			keyPEM, err := cdxtest.TestData(tt.keyFixture)
+			require.NoError(t, err)
+			keyBlock, _ := pem.Decode(keyPEM)
+			require.NotNil(t, keyBlock)
+			require.Equal(t, "PUBLIC KEY", keyBlock.Type)
+			_, fromPublicKeyBlock, err := c.unsupportedPKIX(t.Context(), keyBlock.Bytes)
+			require.NoError(t, err)
+
+			require.Equal(t, tt.algo, fromCertificate.Name)
+			require.Equal(t, tt.primitive,
+				fromCertificate.CryptoProperties.AlgorithmProperties.Primitive,
+				"the registry states this algorithm's primitive and nothing else may")
+			require.Equal(t, fromCertificate, fromPublicKeyBlock,
+				"one key seen twice, through two producers, is one asset")
+		})
+	}
+}
+
+// TestCertHitToComponents_RSAAlgorithmIsPKEWhateverTheKeyUsage covers the
+// classical half of the primitive-overwrite defect, over the whole
+// certHitToComponents path rather than over publicKeyComponents alone.
+//
+// certHitToComponents used to re-stamp "signature" onto every algorithm
+// component it had been handed, AFTER publicKeyComponents had hashed them, which
+// left a bom-ref describing contents the component no longer had. The
+// keyEncipherment row guards that regression and always did.
+//
+// Its stated RULE was wrong, and that is what the second row corrects: "an RSA
+// key whose KeyUsage is keyEncipherment only is classified as pke" implies the
+// classification depends on the KeyUsage. It does not. RSA is a public-key
+// encryption scheme, so both rows expect pke, and a re-stamp reintroduced only
+// for the signing case would now be caught here too.
+func TestCertHitToComponents_RSAAlgorithmIsPKEWhateverTheKeyUsage(t *testing.T) {
+	t.Parallel()
+
+	for name, usage := range map[string]x509.KeyUsage{
+		"keyEncipherment":  x509.KeyUsageKeyEncipherment,
+		"digitalSignature": x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			cert := selfSignedRSACert(t, usage)
+
+			compos, _, err := NewConverter().certHitToComponents(t.Context(), model.CertHit{Cert: cert})
+			require.NoError(t, err)
+
+			var found bool
+			for _, compo := range compos {
+				if compo.CryptoProperties == nil ||
+					compo.CryptoProperties.AssetType != cdx.CryptoAssetTypeAlgorithm ||
+					!strings.HasPrefix(compo.Name, "RSA-") {
+					continue
+				}
+				require.NotNil(t, compo.CryptoProperties.AlgorithmProperties)
+				require.Equal(t, cdx.CryptoPrimitivePKE,
+					compo.CryptoProperties.AlgorithmProperties.Primitive,
+					"an rsaEncryption key is a public-key encryption scheme; the "+
+						"signing fact rides on the separate sha-256-rsa asset")
+				found = true
+			}
+			require.True(t, found, "no RSA algorithm component emitted for the certificate")
+		})
+	}
 }
 
 // TestCertHitToComponents_BOMRefsMatchContents is the general form of the same

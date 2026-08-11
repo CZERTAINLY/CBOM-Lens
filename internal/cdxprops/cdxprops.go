@@ -6,10 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
-	"maps"
 	"os"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -323,33 +321,4 @@ func setPEMFormat(compo *cdx.Component) {
 		compo.CryptoProperties.RelatedCryptoMaterialProperties = &cdx.RelatedCryptoMaterialProperties{}
 	}
 	compo.CryptoProperties.RelatedCryptoMaterialProperties.Format = "PEM"
-}
-
-func addAlgorithmCrpyoFunctions(compo *cdx.Component, functions ...cdx.CryptoFunction) {
-	if compo == nil {
-		return
-	}
-	if compo.CryptoProperties == nil {
-		compo.CryptoProperties = &cdx.CryptoProperties{}
-	}
-	if compo.CryptoProperties.AlgorithmProperties == nil {
-		compo.CryptoProperties.AlgorithmProperties = &cdx.CryptoAlgorithmProperties{}
-	}
-
-	set := make(map[cdx.CryptoFunction]struct{})
-	for _, f := range *compo.CryptoProperties.AlgorithmProperties.CryptoFunctions {
-		set[f] = struct{}{}
-	}
-	for _, f := range functions {
-		set[f] = struct{}{}
-	}
-	funcs := slices.Collect(maps.Keys(set))
-	slices.SortFunc(funcs, func(a, b cdx.CryptoFunction) int {
-		return strings.Compare(string(a), string(b))
-	})
-	var p *[]cdx.CryptoFunction
-	if len(funcs) != 0 {
-		p = &funcs
-	}
-	compo.CryptoProperties.AlgorithmProperties.CryptoFunctions = p
 }

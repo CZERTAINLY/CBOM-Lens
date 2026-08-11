@@ -44,36 +44,39 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		}
 	}
 
-	var primitive = cdx.CryptoPrimitiveSignature
-	if info.primitive != "" {
-		// A registry entry knows its own primitive. This is the only way an
-		// ML-KEM key gets reported as a "kem" rather than a signature scheme:
-		// no KeyUsage inspection can derive that.
-		primitive = info.primitive
-	}
-
-	var keyUsage x509.KeyUsage
-	if cert != nil {
-		keyUsage = cert.KeyUsage
-	}
-
-	if strings.Contains(info.name, "RSA") {
-		if keyUsage != 0 &&
-			(keyUsage&x509.KeyUsageDigitalSignature+
-				keyUsage&x509.KeyUsageCRLSign+
-				keyUsage&x509.KeyUsageCertSign > 0) &&
-			(keyUsage&x509.KeyUsageKeyEncipherment == 0) {
-			primitive = cdx.CryptoPrimitiveSignature
-		} else {
-			primitive = cdx.CryptoPrimitivePKE
-		}
-	}
-
+	// The primitive comes from the algorithm and from nothing else. This block
+	// used to read cert.KeyUsage and, for any info whose name contained "RSA",
+	// stamp "signature" when the certificate signed without enciphering and
+	// "pke" otherwise -- and it did so BEFORE BOMRefHash below digested the
+	// component. A bom-ref is a hash of the component's own contents, so one
+	// RSA-2048 key was crypto/algorithm/rsa-2048@<digest A> when found in a
+	// signing certificate and @<digest B> when found in a CSR, a bare PUBLIC KEY
+	// block or an encipherment certificate; Builder dedups by ref and keeps the
+	// first, so which of the two the delivered document carried was decided by
+	// the order the scanners happened to report in.
+	//
+	// A cryptographic primitive is a property of the algorithm. Both schemas
+	// describe the enum with RSA as their own example of pke and ECDSA as their
+	// example of signature, and the specification's 1.7 certificate conformance
+	// fixture models a TLS leaf exactly this way: rsaEncryption asset with
+	// primitive pke, SHA512withRSA asset with primitive signature, two OIDs and
+	// two assets. This package already emits that second asset -- every RSA
+	// certificate here also produces crypto/algorithm/sha-256-rsa -- so "this
+	// key signs" was never lost by removing it from here; it was duplicated onto
+	// the wrong asset, and that duplicate is what made the asset's identity
+	// depend on where it was found.
+	//
+	// What the certificate does declare about its key now travels with the
+	// certificate: certComponent publishes the keyUsage extension as a key_usage
+	// property, on a component whose ref is a digest of cert.Raw, which the
+	// extension is part of.
+	//
+	// The strings.Contains(info.name, "RSA") test that gated all of this was a
+	// substring match against a name that can come from the PQC registry. No
+	// entry contains "RSA" today, but a composite like MLDSA44-RSA2048-PSS-SHA256
+	// would have had its primitive hijacked by a certificate's KeyUsage.
 	algo = info.componentWOBomRef(c.ilm)
-	setAlgorithmPrimitive(&algo, primitive)
-	if primitive == cdx.CryptoPrimitivePKE {
-		addAlgorithmCrpyoFunctions(&algo, cdx.CryptoFunctionSign)
-	}
+	setAlgorithmPrimitive(&algo, algorithmPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
 	pubKeyValue, pubKeyHash, err := c.hashPublicKey(pubKey)

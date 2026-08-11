@@ -111,7 +111,13 @@ func TestAlgorithmFamily17(t *testing.T) {
 		// TLS RSA facets share the name; primitive disambiguates
 		{"RSA-2048", cdx.CryptoPrimitiveKeyAgree, "RSAES-PKCS1"}, // kex facet
 		{"RSA-2048", cdx.CryptoPrimitiveSignature, ""},           // auth facet: PKCS1-vs-PSS unknowable
-		{"RSA-2048", "", ""}, // bare SPKI key
+		// The SPKI key facet: every rsaEncryption key this tool sees, from a
+		// certificate, a request, a bare PUBLIC KEY block or a private key. The
+		// rsaEncryption OID names no padding, so there is nothing to map to and
+		// the 1.7 golden's RSA-2048 asset carries no algorithmFamily -- which is
+		// why moving that asset's primitive from signature to pke adds no field.
+		{"RSA-2048", cdx.CryptoPrimitivePKE, ""},
+		{"RSA-2048", "", ""}, // no primitive stated at all
 		// deliberate omissions (closed enum / unknowable / not algorithms)
 		{"RSA", cdx.CryptoPrimitiveSignature, ""},
 		{"HQC-128", cdx.CryptoPrimitiveSignature, ""},

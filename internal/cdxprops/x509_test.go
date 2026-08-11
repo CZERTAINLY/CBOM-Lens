@@ -144,29 +144,31 @@ func TestCertHit_OneCertTwoSourcesShareARefAndDisagreeOnSourceFormat(t *testing.
 			"source_format is the only ILM certificate property that can")
 }
 
-// TestCertHit_TwoRSACertificatesShareASigAlgRefAndNameTwoRSA2048Algorithms is
-// the edge-shaped collision that makes the ORDER of the Builder's union -- not
-// only its contents -- observable in the delivered document.
+// TestCertHit_TwoRSACertificatesShareOneRSA2048Algorithm is the converter-level
+// statement of this fix, and it is the exact negation of what this test used to
+// assert.
 //
 // A signature algorithm's bom-ref is a pure function of the enum and the OID
 // (signatureAlgorithmComponents), so any two SHA256WithRSA certificates land on
 // one ref. What each of them names as that ref's public-key-algorithm target is
-// a hash of the algorithm COMPONENT, and publicKeyComponents stamps the
-// primitive onto that component before hashing it: RSA with digitalSignature
-// keyUsage is a signature scheme, RSA with keyEncipherment is pke. Two
-// components, one name, two digests -- so the union under the shared ref holds
-// two targets identical up to the "@".
+// a hash of the algorithm COMPONENT -- and publicKeyComponents used to stamp the
+// primitive onto that component, read off the certificate's KeyUsage, before
+// hashing it. RSA with digitalSignature became a signature scheme, RSA with
+// keyEncipherment became pke, and the two certificates named two different
+// crypto/algorithm/rsa-2048 assets. This test asserted that collision as
+// intended behaviour and documented it as such; it was the defect.
 //
-// That is what bom.Builder has to order for itself. safeRef, which mints the
-// refs the document carries, keeps everything before the "@" and replaces the
-// digest with a UUIDv5, so it preserves order for refs that differ before the
-// "@" and NOT for this pair: the sort mergeDependsOn applies to the RAW refs is
-// the only thing deciding how these two are emitted. See
-// TestBuilder_AppendDetections_DependsOnOrdersTargetsThatShareARefPrefix.
+// A primitive is a property of the algorithm. RSA is a public-key encryption
+// scheme -- the schema's own example for pke -- whatever a given certificate
+// permits its key to do, and the "this certificate is signed with RSA" fact is
+// already carried by the separate sha-256-rsa asset both certificates share. So
+// the two RSA-2048 assets are one asset, and this test says so.
 //
-// Nothing here is wrong on its own: this test asserts the collision, not a
-// defect.
-func TestCertHit_TwoRSACertificatesShareASigAlgRefAndNameTwoRSA2048Algorithms(t *testing.T) {
+// Both certificates keep DIFFERENT keys, deliberately. The algorithm asset must
+// be the same for two unrelated 2048-bit RSA keys, since the component states the
+// algorithm and its parameters and nothing about the key material; asserting it
+// over one shared key would be the weaker claim.
+func TestCertHit_TwoRSACertificatesShareOneRSA2048Algorithm(t *testing.T) {
 	t.Parallel()
 
 	signing, err := cdxtest.CertBuilder{}.
@@ -214,19 +216,14 @@ func TestCertHit_TwoRSACertificatesShareASigAlgRefAndNameTwoRSA2048Algorithms(t 
 	signingTarget := publicKeyAlgorithmTarget(t, *signingDeps[0].Dependencies)
 	enciphermentTarget := publicKeyAlgorithmTarget(t, *enciphermentDeps[0].Dependencies)
 
-	require.NotEqual(t, signingTarget, enciphermentTarget,
-		"the two certificates name different public-key-algorithm assets, "+
-			"because the primitive is hashed into the component's ref")
+	require.Equal(t, signingTarget, enciphermentTarget,
+		"one RSA-2048 algorithm is one asset: the certificate's KeyUsage is a "+
+			"fact about the certificate and must not reach the component whose "+
+			"ref is a hash of itself")
 
-	signingName, _, ok := strings.Cut(signingTarget, "@")
+	sharedName, _, ok := strings.Cut(signingTarget, "@")
 	require.True(t, ok)
-	enciphermentName, _, ok := strings.Cut(enciphermentTarget, "@")
-	require.True(t, ok)
-	require.Equal(t, signingName, enciphermentName,
-		"...and they are identical up to the \"@\", which is the whole point: "+
-			"safeRef preserves only that part, so nothing downstream of "+
-			"mergeDependsOn can order this pair")
-	require.Equal(t, "crypto/algorithm/rsa-2048", signingName)
+	require.Equal(t, "crypto/algorithm/rsa-2048", sharedName)
 }
 
 // publicKeyAlgorithmTarget picks the RSA target out of a signature algorithm's

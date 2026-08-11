@@ -263,12 +263,26 @@ func (c Converter) certComponent(_ context.Context, hit model.CertHit) cdx.Compo
 		},
 	}
 
+	// key_usage is NOT behind c.ilm, and the two properties below are, and the
+	// difference is not an oversight. ilm.CertificateProperties is enrichment
+	// this tool adds; the keyUsage extension is a field parsed out of a standard
+	// X.509 certificate, and -- decisively -- the vanilla document ALREADY
+	// carried it before this change, lossily, as the RSA algorithm's primitive.
+	// Gating it would make this fix delete information from every non-ILM
+	// consumer's output. pem_type, subject, issuer and revoked_count are
+	// un-namespaced and ungated for the same reason.
+	var props []cdx.Property
+	if usage := certificateKeyUsage(cert); usage != "" {
+		props = append(props, cdx.Property{Name: propKeyUsage, Value: usage})
+	}
 	if c.ilm {
-		props := ilm.CertificateProperties(
+		props = append(props, ilm.CertificateProperties(
 			hit.Source,
 			cert,
 			"sha256:"+fingerprints[0].Value,
-		)
+		)...)
+	}
+	if len(props) > 0 {
 		certComponent.Properties = &props
 	}
 
@@ -352,6 +366,75 @@ func nameOrFallback(name pkix.Name, fallback func() string) string {
 		return s
 	}
 	return fallback()
+}
+
+// propKeyUsage is the property name under which a certificate publishes its
+// RFC 5280 sec. 4.2.1.3 keyUsage extension.
+//
+// It is a component property and not certificateProperties.certificateExtensions
+// -- 1.7's purpose-built home for exactly this (bom-1.7.schema.json:5692-5736)
+// -- because 1.6's certificateProperties is additionalProperties:false with no
+// such field, and emit16.Emit copies every component through verbatim with no
+// per-component mapping, so a producer-set CertificateExtensions would make
+// every 1.6 document fail the validator AsJSON runs on each emit. Promoting it
+// means giving emit16 a clone-and-strip pass whose only user would be this one
+// field. The value below is formatted so that such a promotion can reuse it
+// verbatim as a commonExtensionValue.
+const propKeyUsage = "key_usage"
+
+// keyUsageBits is a slice and not a map, and its order is RFC 5280 sec.
+// 4.2.1.3's KeyUsage BIT STRING bit order, because that order IS the order
+// certificateKeyUsage emits. A map would make the emitted value depend on Go's
+// randomised iteration, so the same certificate would publish the same set of
+// bits in a different string on almost every run -- and the certificate
+// component's ref is a digest of cert.Raw, so nothing downstream would notice
+// the value churning under a stable ref.
+//
+// Bit 1 is spelled nonRepudiation, which is RFC 5280's own ASN.1 identifier for
+// it; Go names the constant KeyUsageContentCommitment after the newer spelling
+// the same RFC mentions in prose.
+var keyUsageBits = []struct {
+	bit  x509.KeyUsage
+	name string
+}{
+	{x509.KeyUsageDigitalSignature, "digitalSignature"},
+	{x509.KeyUsageContentCommitment, "nonRepudiation"},
+	{x509.KeyUsageKeyEncipherment, "keyEncipherment"},
+	{x509.KeyUsageDataEncipherment, "dataEncipherment"},
+	{x509.KeyUsageKeyAgreement, "keyAgreement"},
+	{x509.KeyUsageCertSign, "keyCertSign"},
+	{x509.KeyUsageCRLSign, "cRLSign"},
+	{x509.KeyUsageEncipherOnly, "encipherOnly"},
+	{x509.KeyUsageDecipherOnly, "decipherOnly"},
+}
+
+// certificateKeyUsage renders a certificate's keyUsage extension as the RFC 5280
+// identifiers of the bits it sets, comma-separated and in bit order, or "" when
+// the certificate sets none.
+//
+// This is where the fact the algorithm asset used to carry lives now. The
+// placement is what makes it safe: the certificate's bom-ref is a digest of
+// cert.Raw, the keyUsage extension is inside cert.Raw, so two components sharing
+// that ref carry the same extension and therefore the same value here. Order
+// independence is structural rather than merged, which is why the Builder needs
+// no rule for this property -- the same argument mergeCertificateSourceFormat
+// makes for base64_content and fingerprint.
+//
+// "" rather than an empty-valued property for KeyUsage == 0: RFC 5280 requires
+// at least one bit set when the extension is present, so zero means the
+// certificate makes no assertion, and a property with an empty value asserts
+// nothing while looking like an assertion.
+func certificateKeyUsage(cert *x509.Certificate) string {
+	if cert == nil || cert.KeyUsage == 0 {
+		return ""
+	}
+	var names []string
+	for _, ku := range keyUsageBits {
+		if cert.KeyUsage&ku.bit != 0 {
+			names = append(names, ku.name)
+		}
+	}
+	return strings.Join(names, ",")
 }
 
 // formatCertificateName creates a human-readable name for the certificate:

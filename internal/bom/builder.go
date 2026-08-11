@@ -607,13 +607,19 @@ func addEvidenceLocation(c *cdx.Component, locations ...string) {
 // are not always the same. safeRef keeps everything before the "@" and replaces
 // the digest with a UUIDv5 of the whole raw ref, so it is order-preserving only
 // for pairs that already differ before the "@". Two targets CAN share that
-// prefix and be different assets: publicKeyComponents stamps the primitive onto
-// the algorithm component before BOMRefHash hashes it, and RSA's primitive is
-// read off KeyUsage, so a signing and an encrypting RSA-2048 certificate signed
-// with the same algorithm put two crypto/algorithm/rsa-2048@<different digest>
-// targets under one signature-algorithm ref. Their UUIDs then sort in an order
-// unrelated to their digests, and the emitted array is not ascending on the
-// wire.
+// prefix and be different assets: cdxprops.parse_tls builds a TLS_RSA_WITH_*
+// key-exchange facet as crypto/algorithm/rsa-2048 with primitive key-agree and
+// functions [keyderive,keygen] (parse_tls.go:138), while a certificate's subject
+// key builds crypto/algorithm/rsa-2048 with primitive pke and the rsaEncryption
+// OID (algorithm.go:600) -- one name, two genuinely different assets, two
+// digests. Their UUIDs then sort in an order unrelated to their digests, and the
+// emitted array is not ascending on the wire.
+//
+// That pair is reachable but is NOT in the committed corpus, so the fixture in
+// builder_test.go is synthetic. The example this comment used to give -- a
+// signing and an encrypting RSA-2048 certificate naming two rsa-2048 assets --
+// was real when it was written and is now false: it described the KeyUsage-derived
+// primitive that #217 removed, and those two certificates now name one asset.
 //
 // That is accepted, because the requirement is determinism and not lexicographic
 // wire order: the raw refs are a pure function of the detections, so the emitted
@@ -824,10 +830,22 @@ func certificateSourceFormats(c *cdx.Component) []string {
 //
 // It reads the incoming component's PROPERTY rather than detection.Source
 // because that field is the SCANNER's label and not the producer's fact (see
-// appendDetection's drop warning). Reading the property also makes the whole
-// merge a no-op when --ilm is off, since certComponent then never assigns
-// Properties at all, so vanilla CycloneDX output stays byte-identical without
-// giving the Builder an ilm flag it does not have.
+// appendDetection's drop warning). Reading the property is also what keeps the
+// whole merge a no-op when --ilm is off, so vanilla CycloneDX output stays
+// byte-identical without giving the Builder an ilm flag it does not have.
+//
+// That used to hold for a simpler reason than the one that holds now:
+// certComponent assigned Properties only under --ilm, so a vanilla certificate
+// had none to read and the nil check in certificateSourceFormats ended it. The
+// assumption died with #217, which moved the certificate's keyUsage off the RSA
+// algorithm asset and onto an UNGATED key_usage property -- the committed
+// non-ILM golden carries one at corpus-1.6.json:524-529. What is load-bearing
+// now is that certificateSourceFormats selects by the ILM property NAME: a
+// key_usage property is invisible to it, incomingValues comes back empty, and
+// this function returns before touching anything. A second ungated property is
+// free for the same reason, and a merge that unioned properties generically
+// would not be -- which is the other half of why this one is scoped to a single
+// name.
 //
 // The merge is scoped to this ONE property name. A generic property-set union
 // would look tidier and would also re-sort base64_content and fingerprint --
@@ -861,11 +879,22 @@ func certificateSourceFormats(c *cdx.Component) []string {
 // creation, which is what #213 actually was.
 //
 // The rebuilt list is assigned as a NEW pointer and is never appended through
-// the existing one. ilm.CertificateProperties hands out a slice with capacity 20
-// and length 3, which the caller's model.Detection still holds, so appending in
-// place would write into the caller's detection; allocating fresh means this
-// merge -- unlike mergeRelatedCryptoMaterialFormat, which writes through shared
-// nested pointers -- does not mutate the incoming Detection at all.
+// the existing one. cloneOnStore deep-copies Evidence and CryptoProperties and
+// stops there, so stored.Properties is the very pointer the caller's
+// model.Detection holds; appending through it writes into the caller's
+// detection whenever that slice has spare capacity, and does it silently.
+// Allocating fresh means this merge -- unlike mergeRelatedCryptoMaterialFormat,
+// which writes through shared nested pointers -- does not mutate the incoming
+// Detection at all.
+//
+// This was argued from a capacity until #217: ilm.CertificateProperties hands
+// out a slice of length 3 and capacity 20, and certComponent assigned that slice
+// to Properties directly, so an in-place append had 17 free slots to scribble
+// into. The provenance is stale -- certComponent now BUILDS Properties by
+// appending, key_usage first and the ILM run after, so ilm's array is copied and
+// never adopted -- but the conclusion is not, because it never rested on the
+// capacity. The Builder does not own this array whatever its capacity turns out
+// to be.
 func mergeCertificateSourceFormat(ctx context.Context, stored, incoming *cdx.Component) {
 	if stored == nil || incoming == nil {
 		return

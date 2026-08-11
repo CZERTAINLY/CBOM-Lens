@@ -741,7 +741,7 @@ func TestPQCPipeline_PKIXBitLengthMismatchYieldsAlgorithmNotKey(t *testing.T) {
 // invisible to every assertion that only counts. That reordering passed the
 // entire package before this test existed; each case below fails against it.
 //
-// The primitive is asserted per algorithm because registryPrimitive falls back
+// The primitive is asserted per algorithm because algorithmPrimitive falls back
 // to signature: an ML-KEM encapsulation key taking that fallback is reported as
 // something that signs, which is the defect the fallback was added to stop.
 func TestPQCPipeline_PKIXRejectedBodyStillYieldsAUsableAlgorithm(t *testing.T) {
