@@ -3,6 +3,7 @@ package cdxprops
 import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"slices"
 	"strings"
 	"testing"
 
@@ -222,6 +223,60 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		fullPK := synthPKCS8(t, mlKEM768OID)
 		_, _, err = c.unsupportedPKCS8PrivateKey(t.Context(), fullPK[:len(fullPK)/2])
 		require.ErrorContains(t, err, "parsing PKCS#8 via ASN.1")
+	})
+
+	t.Run("trailing data after the SPKI is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		// Truncation above is caught by asn1.Unmarshal itself; a tail is not.
+		// The SubjectPublicKeyInfo decodes cleanly and Unmarshal simply hands
+		// back the bytes it did not consume, so without a check on those the
+		// junk rides along into the ref and into the published value. Its
+		// sibling has rejected exactly this since the same defect was fixed on
+		// the PKCS#8 path.
+		withTrailer := append(synthPKIX(t, mlKEM768OID), 0xde, 0xad, 0xbe, 0xef)
+
+		_, _, err := c.unsupportedPKIX(withTrailer)
+		require.ErrorContains(t, err, "parsing PKIX via ASN.1")
+		require.ErrorContains(t, err, "trailing data")
+	})
+
+	t.Run("a tail of any size is rejected, on both key paths", func(t *testing.T) {
+		t.Parallel()
+
+		// The sibling above fixes the tail at four bytes, and every
+		// trailing-data test in the repository does the same, so a threshold
+		// anywhere in 1..4 -- len(rest) >= 4, len(rest) > 3, "tolerate a
+		// little padding" -- keeps them all green while putting the defect
+		// back: a guard that admits n bytes admits 2^(8n) distinct assets for
+		// one key, and the admitted bytes are still base64'd verbatim into the
+		// public key's value. One byte is enough, so one byte is tested.
+		//
+		// The last tail is well-formed DER rather than junk. Two keys
+		// concatenated is how a tail gets there in the first place, so the rule
+		// has to be "the DER ends where the structure ends" and not "the
+		// leftovers do not look like DER".
+		//
+		// Both paths are driven because they carry the same guard written twice
+		// and nothing else would notice one of them drifting: removing either
+		// outright is caught, but weakening either the same way is not.
+		spki := synthPKIX(t, mlKEM768OID)
+		pkcs8 := synthPKCS8(t, mlKEM768OID)
+
+		for _, tt := range []struct {
+			name string
+			tail []byte
+		}{
+			{"a single padding byte", []byte{0x00}},
+			{"three bytes", []byte{0xde, 0xad, 0xbe}},
+			{"a whole second DER structure", spki},
+		} {
+			_, _, err := c.unsupportedPKIX(slices.Concat(spki, tt.tail))
+			require.ErrorContains(t, err, "trailing data", "PKIX: %s", tt.name)
+
+			_, _, err = c.unsupportedPKCS8PrivateKey(t.Context(), slices.Concat(pkcs8, tt.tail))
+			require.ErrorContains(t, err, "trailing data", "PKCS#8: %s", tt.name)
+		}
 	})
 
 	t.Run("empty input is rejected", func(t *testing.T) {

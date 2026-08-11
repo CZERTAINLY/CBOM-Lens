@@ -474,9 +474,25 @@ func registryPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
 
 func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err error) {
 	var pubKey pkixStruct
-	_, err = asn1.Unmarshal(der, &pubKey)
-	if err != nil {
-		err = fmt.Errorf("parsing PKIX via ASN.1: %w", err)
+	rest, uerr := asn1.Unmarshal(der, &pubKey)
+	if uerr != nil {
+		err = fmt.Errorf("parsing PKIX via ASN.1: %w", uerr)
+		return
+	}
+	// asn1.Unmarshal returns what it did not consume, and discarding that
+	// accepted anything appended after the SubjectPublicKeyInfo. Since the ref
+	// below is a digest of the whole block, one key plus n different tails is n
+	// distinct public-key assets all claiming to be the same key -- unbounded,
+	// and indistinguishable in the document from n real keys. The tail is
+	// published too: hashRawPublicKey base64s the whole der into
+	// relatedCryptoMaterialProperties.value, so the garbage goes out verbatim as
+	// the key's value. x509.ParsePKIXPublicKey rejects trailing data for the
+	// same reason -- which is what routes such a block here in the first place,
+	// this being the fallback for keys the stdlib refuses -- and
+	// unsupportedPKCS8PrivateKey enforces the identical rule, so the two paths
+	// cannot drift.
+	if len(rest) > 0 {
+		err = fmt.Errorf("parsing PKIX via ASN.1: %d bytes of trailing data", len(rest))
 		return
 	}
 	info, ok := unsupportedAlgorithms[pubKey.Algorithm.Algorithm.String()]

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -305,6 +306,169 @@ func TestPEMBundle_StandaloneDSAPublicKeyDoesNotPanic(t *testing.T) {
 		require.NotEmpty(t, compo.BOMRef, "component with no bom-ref")
 		require.NotNil(t, compo.CryptoProperties, "%s has nil CryptoProperties", compo.Name)
 	}
+}
+
+// TestPEMBundle_PKIXPublicKeyWithTrailingDataYieldsNothing walks the whole
+// pipeline a `PUBLIC KEY` block takes when the stdlib refuses it, because the
+// two halves of the defect only meet there.
+//
+// x509.ParsePKIXPublicKey rejects a SubjectPublicKeyInfo with anything appended
+// to it, so the scanner files the block under ParseErrors and analyzeParseError
+// hands it to unsupportedPKIX -- the fallback that exists for keys Go cannot
+// parse, and which is therefore reached by every key Go rejects, including the
+// ones it rejects for being malformed. Whatever it accepts is published: the
+// bom-ref digests the block it was given, so one key plus n tails is n assets
+// that a reader cannot tell from n keys, and the tail itself is base64'd
+// verbatim into relatedCryptoMaterialProperties.value.
+//
+// The fixture is a real ML-DSA-65 key so the OID lookup succeeds and the only
+// thing standing between the input and a component is the trailing-data guard.
+func TestPEMBundle_PKIXPublicKeyWithTrailingDataYieldsNothing(t *testing.T) {
+	t.Parallel()
+
+	data, err := cdxtest.TestData(cdxtest.MLDSA65PublicKey)
+	require.NoError(t, err)
+	block, _ := pem.Decode(data)
+	require.NotNil(t, block)
+	require.Equal(t, "PUBLIC KEY", block.Type)
+
+	withTrailer := pem.EncodeToMemory(&pem.Block{
+		Type:  block.Type,
+		Bytes: append(slices.Clone(block.Bytes), 0xde, 0xad, 0xbe, 0xef),
+	})
+
+	bundle, err := pemscan.Scanner{}.Scan(t.Context(), withTrailer, cdxtest.MLDSA65PublicKey)
+	require.NoError(t, err)
+	// The block has to reach the fallback path, or this test proves nothing
+	// about it: a bundle whose public key parsed normally never calls
+	// analyzeParseError at all.
+	require.Empty(t, bundle.PublicKeys, "the stdlib must refuse the tail")
+	require.NotEmpty(t, bundle.ParseErrors, "the block must reach analyzeParseError")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+	require.Empty(t, d.Components,
+		"a public key with bytes appended to it must yield no asset at all")
+}
+
+// TestPEMBundle_OneKeyWithTwoTailsIsOneAsset states the invariant the
+// single-tail test above cannot.
+//
+// "A block with a tail yields nothing" and "one key cannot become n assets" are
+// different claims, and only the second one is the defect. A guard that rejects
+// the four-byte tail every other test uses but admits a shorter one satisfies
+// the first claim and violates the second: len(rest) >= 4 leaves the whole
+// suite green while a single appended 0x00 still mints a second ML-DSA-65
+// public key, with a ref no reader can tell from a real second key's. So the
+// file here holds ONE key three times -- untouched, plus one byte, plus two
+// other bytes -- and the count is what is asserted.
+//
+// It doubles as the only test where a good block shares a file with bad ones.
+// restOfPEMBundleToCDX collects each block's error and continues, and if it ever
+// stopped at the first one, a single malformed key would take every later key in
+// the file down with it.
+func TestPEMBundle_OneKeyWithTwoTailsIsOneAsset(t *testing.T) {
+	t.Parallel()
+
+	data, err := cdxtest.TestData(cdxtest.MLDSA65PublicKey)
+	require.NoError(t, err)
+	block, _ := pem.Decode(data)
+	require.NotNil(t, block)
+
+	tailed := func(tail ...byte) []byte {
+		return pem.EncodeToMemory(&pem.Block{
+			Type:  block.Type,
+			Bytes: slices.Concat(block.Bytes, tail),
+		})
+	}
+
+	var raw bytes.Buffer
+	raw.Write(tailed())           // the key exactly as it is on disk
+	raw.Write(tailed(0x00))       // the same key, one padding byte appended
+	raw.Write(tailed(0xde, 0xad)) // the same key, two other bytes appended
+
+	bundle, err := pemscan.Scanner{}.Scan(t.Context(), raw.Bytes(), "/test/one-key-three-blocks.pem")
+	require.NoError(t, err)
+	// Go cannot parse an ML-DSA SubjectPublicKeyInfo at all, so all three
+	// blocks -- the intact one included -- take the fallback path. If any of
+	// them parsed normally it would never reach the guard and this would prove
+	// nothing about it.
+	require.Empty(t, bundle.PublicKeys)
+	require.Len(t, bundle.ParseErrors, 3,
+		"every block must reach analyzeParseError, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+
+	var keys []cdx.Component
+	for _, compo := range d.Components {
+		if strings.HasPrefix(compo.BOMRef, "crypto/key/") {
+			keys = append(keys, compo)
+		}
+	}
+	require.Len(t, keys, 1,
+		"one key with two different tails appended is one asset, not three")
+	// Which one survived, and what it published. hashRawPublicKey base64s the
+	// DER it is handed straight into the value, so a guard that let a tail
+	// through would ship the appended bytes verbatim as the key's value --
+	// asserting the exact encoding of the intact block is what rules that out.
+	require.Equal(t, base64.StdEncoding.EncodeToString(block.Bytes),
+		keys[0].CryptoProperties.RelatedCryptoMaterialProperties.Value,
+		"the published value must be the key's own DER, with nothing appended")
+}
+
+// TestPEMBundle_RejectedPublicKeyBlockIsLoggedAtWarn pins the other half of the
+// rejection: that it is a rejection and not a disappearance.
+//
+// PEMBundle has no error return, so this Warn is the only thing an operator
+// ever sees about a `PUBLIC KEY` block the converter refused. "No components"
+// is satisfied equally by a loud refusal and by a silent one, so every
+// trailing-data test above stays green if analyzeParseError's PUBLIC KEY branch
+// swallows the error, or if this line is demoted to Debug -- which in a tool
+// whose default output is not verbose is silence. The document would then say
+// "no key here" about a file the operator believes holds one, with nothing
+// anywhere to contradict it, which is the failure mode #213 shipped.
+//
+// The PRIVATE KEY branch of the same switch is pinned by
+// TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock; this is the public half,
+// and nothing covered it.
+//
+// Not parallel: it swaps the process-wide slog default. See the note on
+// TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock.
+func TestPEMBundle_RejectedPublicKeyBlockIsLoggedAtWarn(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	data, err := cdxtest.TestData(cdxtest.MLDSA65PublicKey)
+	require.NoError(t, err)
+	block, _ := pem.Decode(data)
+	require.NotNil(t, block)
+
+	withTrailer := pem.EncodeToMemory(&pem.Block{
+		Type:  block.Type,
+		Bytes: slices.Concat(block.Bytes, []byte{0xde, 0xad, 0xbe, 0xef}),
+	})
+
+	bundle, err := pemscan.Scanner{}.Scan(t.Context(), withTrailer, "/test/tailed-public-key.pem")
+	require.NoError(t, err)
+	require.Len(t, bundle.ParseErrors, 1,
+		"the block must reach analyzeParseError, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+	require.Empty(t, d.Components)
+
+	logged := logBuf.String()
+	require.Contains(t, logged, "level=WARN",
+		"a key dropped below the default log level is a silently dropped key")
+	require.Contains(t, logged, "analyzing bundle returned an error")
+	require.Contains(t, logged, "pem block 0 (PUBLIC KEY)",
+		"the operator has to know which block was refused")
+	require.Contains(t, logged, "trailing data",
+		"and why -- a tail is an operator-fixable input problem, unlike an OID "+
+			"the registry does not carry")
 }
 
 // csrCRLBundle builds the smallest bundle that carries one CSR and one CRL,
