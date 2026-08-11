@@ -436,11 +436,12 @@ func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, 
 		//
 		// The empty-BOMRef sentinel restOfPEMBundleToCDX uses above expresses the
 		// same decision and is deliberately left alone. publicKeyComponents has
-		// three production callers -- that loop, Converter.PEMBundle's keypair
-		// loop, and certHitToComponents -- and each reads .BOMRef off its result
+		// four production callers -- that loop, Converter.PEMBundle's keypair
+		// loop, certHitToComponents, and requestedKeyComponents on the
+		// certificate-request path -- and each reads .BOMRef off its result
 		// through a field selector, which Go applies to a pointer just as happily
 		// as to a value, so the same conversion there would compile silently at
-		// all three. PEMBundle does that read through strings.Cut before it guards
+		// all four. PEMBundle does that read through strings.Cut before it guards
 		// on anything, so it would trade an inert sentinel for a nil dereference.
 		//
 		// unsupportedPKIX still hands its key back as a value, and that is not
