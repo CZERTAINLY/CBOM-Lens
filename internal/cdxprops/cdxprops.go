@@ -200,7 +200,7 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		compos = append(compos, pubKeyAlgo, pubKeyCompo, privKeyAlgo, privKeyCompo)
 	}
 
-	bundleCompos, err := c.restOfPEMBundleToCDX(ctx, bundle)
+	bundleCompos, bundleDeps, err := c.restOfPEMBundleToCDX(ctx, bundle)
 	if err != nil {
 		// This log is the error's only destination: PEMBundle has no error
 		// return and the caller gets a Detection either way. It used to name
@@ -221,6 +221,11 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		slog.WarnContext(ctx, "analyzing bundle returned an error", "error", err)
 	}
 	compos = append(compos, bundleCompos...)
+	// Merged the same way the certificate loop above merges CertHit's edges: a
+	// dependency the converter built but the Detection does not carry never
+	// reaches the Builder, so the component pair would be emitted with nothing
+	// between them.
+	deps = append(deps, bundleDeps...)
 
 	for i := range compos {
 		setPEMFormat(&compos[i])

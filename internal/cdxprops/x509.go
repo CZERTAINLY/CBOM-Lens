@@ -62,8 +62,20 @@ type pkcs8Struct struct {
 // sigAlgOID returns oid of a signature algorithm for x509 Certificate
 // or empty string if it fails
 func sigAlgOID(cert *x509.Certificate) string {
+	return sigAlgOIDFromRaw(cert.Raw)
+}
+
+// sigAlgOIDFromRaw returns the signature algorithm OID declared in the DER of a
+// signed PKIX structure, or "" when the bytes do not have that shape.
+//
+// It takes the raw DER rather than a certificate because a revocation list
+// needs the same answer and is not a certificate. RFC 5280 gives
+// CertificateList the same top-level SEQUENCE as Certificate -- the signed
+// body, then the signatureAlgorithm, then the signature -- which is exactly
+// what certOuterStruct describes, so one parse serves both.
+func sigAlgOIDFromRaw(raw []byte) string {
 	var outer certOuterStruct
-	if _, err := asn1.Unmarshal(cert.Raw, &outer); err != nil {
+	if _, err := asn1.Unmarshal(raw, &outer); err != nil {
 		return ""
 	}
 	return outer.SigAlg.Algorithm.String()
@@ -78,8 +90,16 @@ func spkiOID(cert *x509.Certificate) string {
 }
 
 func readSignatureAlgorithmRef(ctx context.Context, cert *x509.Certificate, oidFallback string) cdx.BOMReference {
+	return readSignatureAlgorithmRefFor(ctx, cert.SignatureAlgorithm, oidFallback)
+}
+
+// readSignatureAlgorithmRefFor is readSignatureAlgorithmRef over the one field
+// it ever read. x509.RevocationList carries a SignatureAlgorithm of the same
+// type and no certificate, so the lookup is reachable for a CRL only once the
+// parameter is the enum rather than the structure that happens to hold it.
+func readSignatureAlgorithmRefFor(ctx context.Context, sigAlg x509.SignatureAlgorithm, oidFallback string) cdx.BOMReference {
 	// Prefer Go’s typed enum first (covers all classic algs cleanly).
-	if ref, ok := sigAlgRef[cert.SignatureAlgorithm]; ok {
+	if ref, ok := sigAlgRef[sigAlg]; ok {
 		return ref
 	}
 
@@ -202,10 +222,28 @@ func (c Converter) certComponent(_ context.Context, hit model.CertHit) cdx.Compo
 }
 
 func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model.CertHit) (sigAlgCompo cdx.Component, hashAlgCompo *cdx.Component) {
-	sigAlg := hit.Cert.SignatureAlgorithm
+	return c.signatureAlgorithmComponents(ctx, hit.Cert.SignatureAlgorithm, hit.Cert.Raw)
+}
+
+// signatureAlgorithmComponents describes the algorithm a signed PKIX structure
+// was signed with: the algorithm asset, and the hash it decomposes into. The
+// hash is nil only when nothing names one -- every algorithm Go's enum knows
+// has one, Ed25519 included, since RFC 8032 builds it on SHA-512 and
+// getAlgorithmProperties maps it that way. A nil therefore means an
+// UnknownSignatureAlgorithm whose OID either misses the registry or hits an
+// entry that carries no hash: ML-DSA and the stateful hash-based schemes, but
+// not SLH-DSA, whose entries map to SHA-256 or SHAKE-256.
+//
+// It takes the algorithm enum and the DER rather than a certificate because
+// those two values are all the certificate ever supplied, and a CRL carries
+// both. Before the split, a scanned .crl reached the document naming its issuer
+// and its revocation count and saying nothing at all about the cryptography in
+// it -- the signature algorithm was parsed by Go, sat in the struct, and was
+// dropped.
+func (c Converter) signatureAlgorithmComponents(ctx context.Context, sigAlg x509.SignatureAlgorithm, raw []byte) (sigAlgCompo cdx.Component, hashAlgCompo *cdx.Component) {
 	algName := sigAlg.String()
-	oid := sigAlgOID(hit.Cert)
-	bomRef := readSignatureAlgorithmRef(ctx, hit.Cert, oid)
+	oid := sigAlgOIDFromRaw(raw)
+	bomRef := readSignatureAlgorithmRefFor(ctx, sigAlg, oid)
 	bomName, _, _ := strings.Cut(string(bomRef), "@")
 	if oid == "" {
 		oid = "unknown"

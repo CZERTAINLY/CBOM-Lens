@@ -205,6 +205,9 @@
         "occurrences": [
           {
             "location": "/fixtures/ec-p256-cert.pem"
+          },
+          {
+            "location": "/fixtures/pki.pem"
           }
         ]
       },
@@ -344,6 +347,9 @@
         "occurrences": [
           {
             "location": "/fixtures/ec-p256-cert.pem"
+          },
+          {
+            "location": "/fixtures/pki.pem"
           }
         ]
       },
@@ -401,6 +407,9 @@
         "occurrences": [
           {
             "location": "/fixtures/ec-p256-cert.pem"
+          },
+          {
+            "location": "/fixtures/pki.pem"
           },
           {
             "location": "/fixtures/rsa-leaf-cert.pem"
@@ -600,6 +609,7 @@
         "assetType": "related-crypto-material",
         "relatedCryptoMaterialProperties": {
           "type": "other",
+          "algorithmRef": "crypto/algorithm/sha-256-ecdsa@cc3b5016-e3d3-5617-a8c9-a136bbac834f",
           "format": "PEM"
         }
       }
@@ -651,6 +661,29 @@
           "algorithmRef": "crypto/algorithm/ecdsa-p-256@4ef9627d-b288-58e5-883e-d5276e5649c9",
           "value": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcgPPofKgoL+YrY8Dvo9blGv/WSUcFFGYlrUvgSwbIoEdB+0mFw6361gt8iXHGeI3xt/4G3O0ODOLQV50/S95sw==",
           "size": 256
+        },
+        "oid": "1.2.840.10045.3.1.7"
+      }
+    },
+    {
+      "bom-ref": "crypto/key/ecdsa-p-256@a79b2e41-3ac9-520d-b696-bc0f078b4a63",
+      "type": "cryptographic-asset",
+      "name": "ECDSA-P-256",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "/fixtures/pki.pem"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "public-key",
+          "algorithmRef": "crypto/algorithm/ecdsa-p-256@4ef9627d-b288-58e5-883e-d5276e5649c9",
+          "value": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqweqDkgcjtyTmq6lPrpOWRUIJyW4cUTxFyr+LMTt54XFq0qDvdGUd1EIPJjJkkveTujL9AFhORzGjx8dirTFZg==",
+          "size": 256,
+          "format": "PEM"
         },
         "oid": "1.2.840.10045.3.1.7"
       }
@@ -827,6 +860,12 @@
       "dependsOn": [
         "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0",
         "crypto/algorithm/sha-256@a8503480-feab-51bb-9368-6eb238279847"
+      ]
+    },
+    {
+      "ref": "crypto/csr/csr.fixture.test@213145e5-a9d4-5a7c-9b90-c41d60455fc2",
+      "dependsOn": [
+        "crypto/key/ecdsa-p-256@a79b2e41-3ac9-520d-b696-bc0f078b4a63"
       ]
     }
   ],

@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
@@ -37,14 +38,22 @@ const pemBundleLocation = "/test/bundle.pem"
 // comprehensivePEMBundle builds a bundle exercising every branch of
 // Converter.PEMBundle: a certificate, two private keys, a CSR, a standalone
 // public key, a CRL, and raw blocks that only analyzeParseError can make sense
-// of (two ML-DSA-65 keys and two garbage blocks). It yields 21 components:
-// 10 algorithm, 10 related-crypto-material and 1 certificate. No protocol asset
+// of (two ML-DSA-65 keys and two garbage blocks). It yields 25 components:
+// 13 algorithm, 11 related-crypto-material and 1 certificate. No protocol asset
 // -- PEMBundle cannot produce one. More than one test wants this bundle, which
 // is why it is a helper.
 //
+// That is the count BEFORE the Builder dedupes by bom-ref; only 18 of the 25
+// are distinct, because the bundle deliberately holds the CSR's key twice (once
+// as a private key, once as the request's subject) and both ML-DSA blocks name
+// the same algorithm.
+//
 // The count was 20 until the post-quantum PRIVATE KEY block started
-// contributing key material as well as an algorithm. The two garbage blocks
-// still error out and contribute nothing.
+// contributing key material as well as an algorithm, and 21 until the CSR and
+// the CRL started reporting their own cryptography: the request now contributes
+// its requested key and that key's algorithm, and the list contributes the
+// algorithm it was signed with and the hash that decomposes into. The two
+// garbage blocks still error out and contribute nothing.
 func comprehensivePEMBundle(t *testing.T) model.PEMBundle {
 	t.Helper()
 
@@ -158,7 +167,7 @@ func TestConverter_PEM(t *testing.T) {
 
 	components := detection.Components
 	// Verify we got all expected components
-	require.Len(t, components, 21)
+	require.Len(t, components, 25)
 
 	for idx, c := range components {
 		t.Logf("%d: name=%s, description=%s", idx, c.Name, c.Description)
@@ -707,6 +716,327 @@ func TestPEMBundle_CSRAndCRLReachTheBOM(t *testing.T) {
 	}
 }
 
+// materialAlgorithmRefs returns the algorithm refs a component's key material
+// points at, in whichever way the emitted document expresses them: 1.6 writes
+// relatedCryptoMaterialProperties.algorithmRef, and 1.7 deprecates that field
+// in favour of relatedCryptographicAssets entries typed "algorithm". A test
+// that read only one of the two would silently prove nothing in the other
+// version.
+func materialAlgorithmRefs(compo cdx.Component) []string {
+	if compo.CryptoProperties == nil || compo.CryptoProperties.RelatedCryptoMaterialProperties == nil {
+		return nil
+	}
+	rcmp := compo.CryptoProperties.RelatedCryptoMaterialProperties
+	var refs []string
+	if rcmp.AlgorithmRef != "" {
+		refs = append(refs, string(rcmp.AlgorithmRef))
+	}
+	if rcmp.RelatedCryptographicAssets == nil {
+		return refs
+	}
+	for _, rca := range *rcmp.RelatedCryptographicAssets {
+		if rca.Type == "algorithm" {
+			refs = append(refs, rca.Ref)
+		}
+	}
+	return refs
+}
+
+// dependsOn returns what the emitted document says ref depends on.
+func dependsOn(doc cdx.BOM, ref string) []string {
+	if doc.Dependencies == nil {
+		return nil
+	}
+	for _, dep := range *doc.Dependencies {
+		if dep.Ref != ref || dep.Dependencies == nil {
+			continue
+		}
+		return *dep.Dependencies
+	}
+	return nil
+}
+
+// componentsByRef indexes an emitted document by bom-ref.
+func componentsByRef(doc cdx.BOM) map[string]cdx.Component {
+	byRef := map[string]cdx.Component{}
+	if doc.Components == nil {
+		return byRef
+	}
+	for _, compo := range *doc.Components {
+		byRef[compo.BOMRef] = compo
+	}
+	return byRef
+}
+
+// TestPEMBundle_CSRPublicKeyReachesTheBOM covers the whole point of scanning a
+// certificate request: the key someone is asking to have certified.
+//
+// x509.ParseCertificateRequest hands over PublicKey and PublicKeyAlgorithm, and
+// csrToCDX read neither. So a .csr contributed one asset carrying a subject
+// string and a revocation-less "other" material type -- a CBOM entry that names
+// a PKI artefact and says nothing about the cryptography in it, which is the
+// one thing a CBOM exists to record. An inventory built from such a scan cannot
+// answer "which requests carry a key we must migrate", the question a request
+// is the earliest possible place to answer.
+//
+// It asserts on the EMITTED DOCUMENT because that is where a component with no
+// ref, or an edge to a component that was dropped, actually disappears; and in
+// both spec versions, because 1.7 maps material-to-algorithm edges through a
+// different field than 1.6.
+func TestPEMBundle_CSRPublicKeyReachesTheBOM(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			key, err := cdxtest.GenECPrivateKey(elliptic.P256())
+			require.NoError(t, err)
+			csr, _, err := cdxtest.GenCSR(key)
+			require.NoError(t, err)
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+				Location:            "/test/request.pem",
+				CertificateRequests: []*x509.CertificateRequest{csr},
+			})
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, version, *d)
+			byRef := componentsByRef(doc)
+
+			var csrRef string
+			var keyCompo cdx.Component
+			for ref, compo := range byRef {
+				switch {
+				case strings.HasPrefix(ref, "crypto/csr/"):
+					csrRef = ref
+				case strings.HasPrefix(ref, "crypto/key/"):
+					keyCompo = compo
+				}
+			}
+			require.NotEmpty(t, csrRef,
+				"no CSR component, got %v", slices.Sorted(maps.Keys(byRef)))
+			require.NotEmpty(t, keyCompo.BOMRef,
+				"the requested public key never reached the document, got %v",
+				slices.Sorted(maps.Keys(byRef)))
+
+			rcmp := keyCompo.CryptoProperties.RelatedCryptoMaterialProperties
+			require.NotNil(t, rcmp)
+			require.Equal(t, cdx.RelatedCryptoMaterialTypePublicKey, rcmp.Type)
+			require.NotEmpty(t, rcmp.Value,
+				"the key asset must carry the SPKI it was identified by")
+
+			// The key's algorithm must be a real, resolvable asset -- a ref to a
+			// component the Builder dropped is worse than no ref at all.
+			algRefs := materialAlgorithmRefs(keyCompo)
+			require.Len(t, algRefs, 1, "the requested key must name exactly one algorithm")
+			algCompo, ok := byRef[algRefs[0]]
+			require.True(t, ok, "the key's algorithm ref %q resolves to nothing", algRefs[0])
+			require.Equal(t, cdx.CryptoAssetTypeAlgorithm, algCompo.CryptoProperties.AssetType)
+			// The curve is in the name, so this fails if the algorithm were
+			// derived from anything but the key actually in the request.
+			require.Equal(t, "ECDSA-P-256", algCompo.Name,
+				"the algorithm must be the one the request actually asks for")
+
+			require.Contains(t, dependsOn(doc, csrRef), keyCompo.BOMRef,
+				"the request must depend on the key it requests certification for")
+		})
+	}
+}
+
+// TestPEMBundle_CRLSignatureAlgorithmReachesTheBOM is the CSR test's twin for
+// the other artefact crlToCDX described without describing its cryptography.
+//
+// x509.ParseRevocationList fills in SignatureAlgorithm and crlToCDX never read
+// it, so a scanned .crl reported an issuer, two timestamps and a count. The
+// signature algorithm is the only cryptographic claim a revocation list makes,
+// and it is precisely the claim a migration inventory needs: a CRL still signed
+// with SHA-1 or RSA-1024 is an operational finding, and this tool reported the
+// file without reporting that.
+func TestPEMBundle_CRLSignatureAlgorithmReachesTheBOM(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			// An EC issuer, so the list is signed with something other than the
+			// RSA default every other fixture in this file uses: a component
+			// naming the algorithm the CRL was really signed with cannot be
+			// confused with one naming a hardcoded favourite.
+			ca, err := cdxtest.CertBuilder{}.
+				WithIsCA(true).
+				WithSignatureAlgorithm(x509.ECDSAWithSHA256).
+				WithKeyUsage(x509.KeyUsageCRLSign | x509.KeyUsageCertSign).
+				Generate()
+			require.NoError(t, err)
+			signer, ok := ca.Key.(crypto.Signer)
+			require.True(t, ok)
+			crl, _, err := cdxtest.GenCRL(ca.Cert, signer)
+			require.NoError(t, err)
+			require.Equal(t, x509.ECDSAWithSHA256, crl.SignatureAlgorithm,
+				"the fixture must be signed with the algorithm asserted below")
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+				Location: "/test/revocations.pem",
+				CRLs:     []*x509.RevocationList{crl},
+			})
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, version, *d)
+			byRef := componentsByRef(doc)
+
+			var crlCompo cdx.Component
+			for ref, compo := range byRef {
+				if strings.HasPrefix(ref, "crypto/crl/") {
+					crlCompo = compo
+				}
+			}
+			require.NotEmpty(t, crlCompo.BOMRef,
+				"no CRL component, got %v", slices.Sorted(maps.Keys(byRef)))
+
+			algRefs := materialAlgorithmRefs(crlCompo)
+			require.Len(t, algRefs, 1, "the list must name exactly one signature algorithm")
+			algCompo, ok := byRef[algRefs[0]]
+			require.True(t, ok, "the CRL's algorithm ref %q resolves to nothing", algRefs[0])
+			require.Equal(t, cdx.CryptoAssetTypeAlgorithm, algCompo.CryptoProperties.AssetType)
+			require.Equal(t, "ECDSA-SHA256", algCompo.Name,
+				"the algorithm named must be the one the list was actually signed with")
+
+			// A hash-then-sign scheme decomposes, exactly as it does for a
+			// certificate: the signature algorithm depends on its hash, and the
+			// hash is a component in its own right.
+			var hashRef string
+			for ref, compo := range byRef {
+				if compo.CryptoProperties != nil &&
+					compo.CryptoProperties.AlgorithmProperties != nil &&
+					compo.CryptoProperties.AlgorithmProperties.Primitive == cdx.CryptoPrimitiveHash {
+					hashRef = ref
+				}
+			}
+			require.NotEmpty(t, hashRef,
+				"SHA-384 is a component of the signature, got %v", slices.Sorted(maps.Keys(byRef)))
+			require.Contains(t, dependsOn(doc, algCompo.BOMRef), hashRef,
+				"the signature algorithm must depend on the hash it decomposes into")
+		})
+	}
+}
+
+// TestPEMBundle_CSRWithUnregisteredOIDStaysWellFormed covers the input that
+// makes reading the requested key dangerous.
+//
+// x509.ParseCertificateRequest does NOT fail on an SPKI algorithm it does not
+// recognise: it returns successfully with PublicKeyAlgorithm =
+// UnknownPublicKeyAlgorithm and PublicKey nil. publicKeyComponents then cannot
+// marshal the key, so it yields an algorithm and a ZERO key component -- and
+// appending that would give the Builder a component with no ref to drop, while
+// an unguarded dependency edge would point at a ref that exists nowhere in the
+// document. Every post-quantum request in the wild takes this path today, so it
+// is the common case for exactly the keys this tool exists to find.
+func TestPEMBundle_CSRWithUnregisteredOIDStaysWellFormed(t *testing.T) {
+	t.Parallel()
+
+	// 1.3.9999.6.1.1 is a real OID -- oqs-provider assigns it to
+	// SPHINCS+-Haraka-128f-robust -- and is not one Go or the registry knows,
+	// so this is a plausible request and not a synthetic impossibility.
+	csr := csrWithSPKIAlgorithm(t, asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1})
+	require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+		"the fixture must reach the unparseable-key path, or this proves nothing")
+	require.Nil(t, csr.PublicKey)
+
+	var d *model.Detection
+	require.NotPanics(t, func() {
+		d = cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+			Location:            "/test/pqc-request.pem",
+			CertificateRequests: []*x509.CertificateRequest{csr},
+		})
+	})
+	require.NotNil(t, d)
+
+	doc := emitDocument(t, "1.6", *d)
+	byRef := componentsByRef(doc)
+
+	for ref := range byRef {
+		require.False(t, strings.HasPrefix(ref, "crypto/key/"),
+			"a key that could not be identified must not be reported as an asset: %s", ref)
+	}
+	// The algorithm still survives: that the request references SOME algorithm
+	// is true whatever the SPKI turns out to hold, and dropping it too would
+	// lose the request's only cryptographic content.
+	var algorithms int
+	for _, compo := range byRef {
+		if compo.CryptoProperties != nil &&
+			compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeAlgorithm {
+			algorithms++
+		}
+	}
+	require.Equal(t, 1, algorithms, "got %v", slices.Sorted(maps.Keys(byRef)))
+
+	// No edge may name a component that is not in the document. The Builder
+	// drops such edges with a warning, so this is stated over the emitted
+	// dependencies rather than over the detection.
+	if doc.Dependencies != nil {
+		for _, dep := range *doc.Dependencies {
+			require.Contains(t, byRef, dep.Ref)
+			if dep.Dependencies == nil {
+				continue
+			}
+			for _, to := range *dep.Dependencies {
+				require.Contains(t, byRef, to, "dangling dependency edge %s -> %s", dep.Ref, to)
+			}
+		}
+	}
+}
+
+// csrWithSPKIAlgorithm builds the DER of a certificate request whose
+// subjectPublicKeyInfo carries algorithm, and parses it back.
+//
+// x509.CreateCertificateRequest cannot produce this: it only marshals keys Go
+// implements, which is the whole point -- the request under test is one Go
+// cannot make and can still parse. The signature is not a real one; nothing on
+// this path verifies it, and ParseCertificateRequest does not either.
+func csrWithSPKIAlgorithm(t *testing.T, algorithm asn1.ObjectIdentifier) *x509.CertificateRequest {
+	t.Helper()
+
+	type tbsCSR struct {
+		Version   int
+		Subject   asn1.RawValue
+		PublicKey struct {
+			Algorithm pkix.AlgorithmIdentifier
+			PublicKey asn1.BitString
+		}
+		Attributes []asn1.RawValue `asn1:"tag:0"`
+	}
+
+	var subject pkix.RDNSequence
+	subjectDER, err := asn1.Marshal(subject)
+	require.NoError(t, err)
+
+	tbs := tbsCSR{
+		Subject:    asn1.RawValue{FullBytes: subjectDER},
+		Attributes: []asn1.RawValue{},
+	}
+	tbs.PublicKey.Algorithm = pkix.AlgorithmIdentifier{Algorithm: algorithm}
+	tbs.PublicKey.PublicKey = asn1.BitString{Bytes: make([]byte, 32), BitLength: 32 * 8}
+	tbsDER, err := asn1.Marshal(tbs)
+	require.NoError(t, err)
+
+	der, err := asn1.Marshal(struct {
+		TBS       asn1.RawValue
+		SigAlg    pkix.AlgorithmIdentifier
+		Signature asn1.BitString
+	}{
+		TBS:       asn1.RawValue{FullBytes: tbsDER},
+		SigAlg:    pkix.AlgorithmIdentifier{Algorithm: algorithm},
+		Signature: asn1.BitString{Bytes: make([]byte, 8), BitLength: 8 * 8},
+	})
+	require.NoError(t, err)
+
+	csr, err := x509.ParseCertificateRequest(der)
+	require.NoError(t, err, "an unrecognised SPKI algorithm must still parse")
+	return csr
+}
+
 // TestPEMBundle_TwoCSRsSameSubjectStayDistinct is what fails if someone
 // replaces the DER digest with Converter.BOMRefHash.
 //
@@ -1012,4 +1342,536 @@ func TestPEMBundle_SameCRLTwoLocationsDedupes(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"/etc/pki/ca.crl", "/var/backup/ca.crl"}, locations,
 		"both paths the CRL was found at must survive as occurrences")
+}
+
+// keyComponents returns the emitted public-key material, indexed by bom-ref.
+func keyComponents(doc cdx.BOM) map[string]cdx.Component {
+	keys := map[string]cdx.Component{}
+	for ref, compo := range componentsByRef(doc) {
+		if strings.HasPrefix(ref, "crypto/key/") {
+			keys[ref] = compo
+		}
+	}
+	return keys
+}
+
+// csrRefs returns the bom-refs of the emitted certificate-request components.
+func csrRefs(doc cdx.BOM) []string {
+	var refs []string
+	for ref := range componentsByRef(doc) {
+		if strings.HasPrefix(ref, "crypto/csr/") {
+			refs = append(refs, ref)
+		}
+	}
+	slices.Sort(refs)
+	return refs
+}
+
+// spkiOfCSR is the base64 SPKI the emitted key component must carry for a
+// request: the DER of the very key that request asks to have certified.
+func spkiOfCSR(t *testing.T, csr *x509.CertificateRequest) string {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(csr.PublicKey)
+	require.NoError(t, err)
+	return base64.StdEncoding.EncodeToString(der)
+}
+
+// csrFor builds a request for key, with the given common name so that two
+// requests can be told apart by something other than their key.
+func csrFor(t *testing.T, commonName string, key crypto.PrivateKey) *x509.CertificateRequest {
+	t.Helper()
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{CommonName: commonName},
+	}, key)
+	require.NoError(t, err)
+	csr, err := x509.ParseCertificateRequest(der)
+	require.NoError(t, err)
+	return csr
+}
+
+// TestPEMBundle_CSRRequestedKeyByAlgorithm is the requested-key assertion over
+// the key types a scan actually meets, rather than over the one the fixtures
+// happen to use.
+//
+// Every fixture that exercises the CSR path -- comprehensivePEMBundle, the
+// corpus golden, and TestPEMBundle_CSRPublicKeyReachesTheBOM -- requests an EC
+// key. So "the requested key reaches the BOM" was pinned for exactly one key
+// family, and hardcoding x509.ECDSA in the call to publicKeyComponents left the
+// whole suite green. The finding this change answers was written about an
+// RSA-1024 request, and an RSA request is the one whose SIZE is the migration
+// signal: "RSA" alone says nothing, "RSA-1024" is the finding.
+//
+// The SPKI is compared against the request's own key rather than merely
+// required to be non-empty, which is what makes the row for one algorithm
+// unable to pass on another algorithm's key material.
+func TestPEMBundle_CSRRequestedKeyByAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	rsa1024, err := cdxtest.GenRSAPrivateKey(1024)
+	require.NoError(t, err)
+	rsa2048, err := cdxtest.GenRSAPrivateKey(2048)
+	require.NoError(t, err)
+	ecP256, err := cdxtest.GenECPrivateKey(elliptic.P256())
+	require.NoError(t, err)
+	ecP384, err := cdxtest.GenECPrivateKey(elliptic.P384())
+	require.NoError(t, err)
+	_, ed25519Key, err := cdxtest.GenEd25519Keys()
+	require.NoError(t, err)
+
+	for name, tt := range map[string]struct {
+		key     crypto.PrivateKey
+		keyName string
+		size    int
+		oid     string
+	}{
+		// The finding's own example. 80 bits of classical security, and the
+		// document has to say 1024 for anyone to know that.
+		"RSA-1024":    {key: rsa1024, keyName: "RSA-1024", size: 1024, oid: "1.2.840.113549.1.1.1"},
+		"RSA-2048":    {key: rsa2048, keyName: "RSA-2048", size: 2048, oid: "1.2.840.113549.1.1.1"},
+		"ECDSA-P-256": {key: ecP256, keyName: "ECDSA-P-256", size: 256, oid: "1.2.840.10045.3.1.7"},
+		"ECDSA-P-384": {key: ecP384, keyName: "ECDSA-P-384", size: 384, oid: "1.3.132.0.34"},
+		"Ed25519":     {key: ed25519Key, keyName: "Ed25519", size: 256, oid: "1.3.101.112"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			csr := csrFor(t, "request."+name, tt.key)
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+				Location:            "/test/" + name + ".csr",
+				CertificateRequests: []*x509.CertificateRequest{csr},
+			})
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, "1.6", *d)
+			byRef := componentsByRef(doc)
+			keys := keyComponents(doc)
+			require.Len(t, keys, 1,
+				"one request asks to certify exactly one key, got %v",
+				slices.Sorted(maps.Keys(byRef)))
+
+			keyRef := slices.Sorted(maps.Keys(keys))[0]
+			key := keys[keyRef]
+			require.Equal(t, tt.keyName, key.Name)
+
+			rcmp := key.CryptoProperties.RelatedCryptoMaterialProperties
+			require.NotNil(t, rcmp)
+			require.Equal(t, cdx.RelatedCryptoMaterialTypePublicKey, rcmp.Type)
+			require.Equal(t, spkiOfCSR(t, csr), rcmp.Value,
+				"the emitted key material must be this request's own SPKI")
+			require.NotNil(t, rcmp.Size,
+				"a key with no size cannot be triaged: %s", tt.keyName)
+			require.Equal(t, tt.size, *rcmp.Size)
+
+			algRefs := materialAlgorithmRefs(key)
+			require.Len(t, algRefs, 1)
+			algo, ok := byRef[algRefs[0]]
+			require.True(t, ok, "the key's algorithm ref %q resolves to nothing", algRefs[0])
+			require.Equal(t, cdx.CryptoAssetTypeAlgorithm, algo.CryptoProperties.AssetType)
+			require.Equal(t, tt.keyName, algo.Name,
+				"the algorithm must be derived from the key in the request")
+			require.Equal(t, tt.oid, algo.CryptoProperties.OID)
+
+			require.Equal(t, []string{keyRef}, dependsOn(doc, csrRefs(doc)[0]),
+				"the request must depend on exactly the key it requests")
+
+			// A request carries no private material and the converter is never
+			// handed any, so nothing on this path may publish a private key.
+			for ref, compo := range byRef {
+				require.False(t, strings.HasPrefix(ref, "crypto/private_key/"),
+					"a request published private key material: %s", ref)
+				if compo.CryptoProperties == nil ||
+					compo.CryptoProperties.RelatedCryptoMaterialProperties == nil {
+					continue
+				}
+				require.NotEqual(t, cdx.RelatedCryptoMaterialTypePrivateKey,
+					compo.CryptoProperties.RelatedCryptoMaterialProperties.Type, ref)
+				require.NotEqual(t, cdx.RelatedCryptoMaterialTypeSecretKey,
+					compo.CryptoProperties.RelatedCryptoMaterialProperties.Type, ref)
+			}
+		})
+	}
+}
+
+// TestPEMBundle_TwoCSRsRequestedKeysAreNotCrossWired covers what
+// TestPEMBundle_TwoCSRsSameSubjectStayDistinct cannot see.
+//
+// That test pins that two requests for one subject keep two bom-refs. It says
+// nothing about the keys, because when it was written the requests carried
+// none. Now each request also emits a key and an edge to it, and a loop that
+// built the components per request but wired every edge to the last key -- or
+// to the first -- would still leave two distinct request components and two
+// distinct key components. Every count in the document would be right and every
+// answer to "which key is this request asking us to certify" would be wrong.
+//
+// The two requests use different key families so that a swapped edge is visible
+// as a wrong ALGORITHM and not only as a wrong digest, and different subjects
+// because the subject is what names the request component -- it is how the test
+// says WHICH request an edge starts at. Distinctness under a shared subject is
+// TestPEMBundle_TwoCSRsSameSubjectStayDistinct's job and is not restated here.
+func TestPEMBundle_TwoCSRsRequestedKeysAreNotCrossWired(t *testing.T) {
+	t.Parallel()
+
+	ecKey, err := cdxtest.GenECPrivateKey(elliptic.P256())
+	require.NoError(t, err)
+	rsaKey, err := cdxtest.GenRSAPrivateKey(2048)
+	require.NoError(t, err)
+
+	requests := map[string]*x509.CertificateRequest{
+		"crypto/csr/ec.fixture.test@":  csrFor(t, "ec.fixture.test", ecKey),
+		"crypto/csr/rsa.fixture.test@": csrFor(t, "rsa.fixture.test", rsaKey),
+	}
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location: "/test/requests.pem",
+		CertificateRequests: []*x509.CertificateRequest{
+			requests["crypto/csr/ec.fixture.test@"],
+			requests["crypto/csr/rsa.fixture.test@"],
+		},
+	})
+	require.NotNil(t, d)
+
+	doc := emitDocument(t, "1.6", *d)
+	byRef := componentsByRef(doc)
+	require.Len(t, csrRefs(doc), 2)
+	require.Len(t, keyComponents(doc), 2,
+		"two requests for different keys must publish two keys, got %v",
+		slices.Sorted(maps.Keys(byRef)))
+
+	// Each request's edge must land on the key holding that request's own SPKI.
+	for prefix, csr := range requests {
+		var csrRef string
+		for _, ref := range csrRefs(doc) {
+			if strings.HasPrefix(ref, prefix) {
+				csrRef = ref
+			}
+		}
+		require.NotEmpty(t, csrRef, "no component for %s, got %v",
+			prefix, slices.Sorted(maps.Keys(byRef)))
+
+		targets := dependsOn(doc, csrRef)
+		require.Len(t, targets, 1, "%s", csrRef)
+		got, ok := byRef[targets[0]]
+		require.True(t, ok, "the request's edge target %q resolves to nothing", targets[0])
+		require.NotNil(t, got.CryptoProperties.RelatedCryptoMaterialProperties,
+			"%s depends on %s, which is not key material", csrRef, got.BOMRef)
+		require.Equal(t, spkiOfCSR(t, csr),
+			got.CryptoProperties.RelatedCryptoMaterialProperties.Value,
+			"%s is wired to the wrong key: it points at %s", csrRef, got.BOMRef)
+	}
+}
+
+// TestPEMBundle_TwoCSRsSharingAKeyShareOneKeyComponent is the other half of the
+// same question: a re-key request and a renewal request for the same key are
+// two requests over ONE key, and reporting that key twice would inflate the
+// inventory and split the migration work for it in two.
+//
+// The key component is content-addressed over the key, so the Builder's
+// first-wins dedup is what has to collapse them -- and both requests must still
+// end up pointing at the surviving ref rather than one of them pointing at a
+// ref that was dropped.
+func TestPEMBundle_TwoCSRsSharingAKeyShareOneKeyComponent(t *testing.T) {
+	t.Parallel()
+
+	key, err := cdxtest.GenECPrivateKey(elliptic.P256())
+	require.NoError(t, err)
+
+	// Distinct subjects, so the two requests cannot dedup as requests and the
+	// test is about the key alone.
+	first := csrFor(t, "renewal.fixture.test", key)
+	second := csrFor(t, "rekey.fixture.test", key)
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/requests.pem",
+		CertificateRequests: []*x509.CertificateRequest{first, second},
+	})
+	require.NotNil(t, d)
+
+	doc := emitDocument(t, "1.6", *d)
+	refs := csrRefs(doc)
+	require.Len(t, refs, 2, "the two requests must stay distinct")
+
+	keys := keyComponents(doc)
+	require.Len(t, keys, 1,
+		"one key requested by two requests must be one component, got %v",
+		slices.Sorted(maps.Keys(keys)))
+	keyRef := slices.Sorted(maps.Keys(keys))[0]
+
+	for _, ref := range refs {
+		require.Equal(t, []string{keyRef}, dependsOn(doc, ref),
+			"%s must point at the surviving key component", ref)
+	}
+}
+
+// crlSignedWith issues a self-signed CA with algo and returns a revocation list
+// that CA signed, so the list's signature algorithm is chosen rather than
+// inherited from whatever cdxtest happens to default to.
+func crlSignedWith(t *testing.T, algo x509.SignatureAlgorithm) *x509.RevocationList {
+	t.Helper()
+
+	ca, err := cdxtest.CertBuilder{}.
+		WithIsCA(true).
+		WithSignatureAlgorithm(algo).
+		WithKeyUsage(x509.KeyUsageCRLSign | x509.KeyUsageCertSign).
+		Generate()
+	require.NoError(t, err)
+	signer, ok := ca.Key.(crypto.Signer)
+	require.True(t, ok)
+
+	der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		Number:             big.NewInt(1),
+		ThisUpdate:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NextUpdate:         time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+		SignatureAlgorithm: algo,
+		RevokedCertificateEntries: []x509.RevocationListEntry{
+			{SerialNumber: big.NewInt(1), RevocationTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		},
+	}, ca.Cert, signer)
+	require.NoError(t, err)
+
+	crl, err := x509.ParseRevocationList(der)
+	require.NoError(t, err)
+	require.Equal(t, algo, crl.SignatureAlgorithm,
+		"the fixture must be signed with the algorithm under test")
+	return crl
+}
+
+// TestPEMBundle_CRLSignatureAlgorithmByIssuerKey is the CRL half of the same
+// coverage hole. Every CRL fixture in the tree is signed by whatever key its
+// issuing CA happened to get: the corpus golden and the dedicated CRL test use
+// ECDSA, comprehensivePEMBundle uses RSA and asserts only a component count.
+// Nothing pins that the algorithm a list reports is the algorithm it was
+// actually signed with, across more than one family.
+//
+// The Ed25519 row also pins the hash decomposition, which reads like the
+// exception and is not one: getAlgorithmProperties maps x509.PureEd25519 to
+// SHA-512 (RFC 8032 builds Ed25519 on SHA-512), so the second return is NOT nil
+// for Ed25519 and the list does emit an ed25519 -> SHA-512 edge. The nil branch
+// is reached only by a signature algorithm Go does not recognise -- see
+// TestPEMBundle_CRLWithUnrecognisedSignatureAlgorithm, which is what actually
+// covers it.
+func TestPEMBundle_CRLSignatureAlgorithmByIssuerKey(t *testing.T) {
+	t.Parallel()
+
+	for name, tt := range map[string]struct {
+		algo     x509.SignatureAlgorithm
+		algoName string
+		hashName string
+	}{
+		"RSA":     {algo: x509.SHA256WithRSA, algoName: "SHA256-RSA", hashName: "SHA-256"},
+		"ECDSA":   {algo: x509.ECDSAWithSHA384, algoName: "ECDSA-SHA384", hashName: "SHA-384"},
+		"Ed25519": {algo: x509.PureEd25519, algoName: "Ed25519", hashName: "SHA-512"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			crl := crlSignedWith(t, tt.algo)
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+				Location: "/test/" + name + ".crl",
+				CRLs:     []*x509.RevocationList{crl},
+			})
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, "1.6", *d)
+			byRef := componentsByRef(doc)
+
+			var crlCompo cdx.Component
+			for ref, compo := range byRef {
+				if strings.HasPrefix(ref, "crypto/crl/") {
+					crlCompo = compo
+				}
+			}
+			require.NotEmpty(t, crlCompo.BOMRef,
+				"no CRL component, got %v", slices.Sorted(maps.Keys(byRef)))
+
+			algRefs := materialAlgorithmRefs(crlCompo)
+			require.Len(t, algRefs, 1)
+			algo, ok := byRef[algRefs[0]]
+			require.True(t, ok, "the list's algorithm ref %q resolves to nothing", algRefs[0])
+			require.Equal(t, tt.algoName, algo.Name,
+				"the list must report the algorithm it was signed with")
+
+			var hashRef string
+			for ref, compo := range byRef {
+				if compo.CryptoProperties.AlgorithmProperties != nil &&
+					compo.CryptoProperties.AlgorithmProperties.Primitive == cdx.CryptoPrimitiveHash {
+					hashRef = ref
+					require.Equal(t, tt.hashName, compo.Name)
+				}
+			}
+			require.NotEmpty(t, hashRef,
+				"%s decomposes into %s, got %v", tt.algoName, tt.hashName,
+				slices.Sorted(maps.Keys(byRef)))
+			require.Contains(t, dependsOn(doc, algo.BOMRef), hashRef,
+				"the signature algorithm must depend on the hash it decomposes into")
+		})
+	}
+}
+
+// crlWithSubstitutedSignatureOID rewrites the ecdsa-with-SHA256 OID in a real
+// revocation list's DER with one nothing recognises, in both the places RFC
+// 5280 puts it: TBSCertList.signature and CertificateList.signatureAlgorithm.
+//
+// The replacement is the same length, so every enclosing ASN.1 length stays
+// correct and Go still parses the list -- with SignatureAlgorithm =
+// UnknownSignatureAlgorithm, which is the state under test. Nothing on the
+// converter's path verifies the signature, and neither does
+// ParseRevocationList, so the now-wrong signature bytes do not matter.
+//
+// Building the DER by hand was the alternative and is worse: ParseRevocationList
+// enforces rather more of RFC 5280 than ParseCertificateRequest does, so a
+// hand-built list would be testing the fixture.
+func crlWithSubstitutedSignatureOID(t *testing.T) *x509.RevocationList {
+	t.Helper()
+
+	signed := crlSignedWith(t, x509.ECDSAWithSHA256)
+
+	// 1.2.840.10045.4.3.2 (ecdsa-with-SHA256) -> 1.2.840.10045.4.3.99, which is
+	// unassigned: same arc, same encoded length, no meaning to Go or to the
+	// registry.
+	from := []byte{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02}
+	to := []byte{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x63}
+	require.Equal(t, 2, bytes.Count(signed.Raw, from),
+		"the OID must appear exactly twice, or the substitution is not the one described")
+	patched := bytes.ReplaceAll(signed.Raw, from, to)
+
+	crl, err := x509.ParseRevocationList(patched)
+	require.NoError(t, err, "an unrecognised signature OID must still parse")
+	require.Equal(t, x509.UnknownSignatureAlgorithm, crl.SignatureAlgorithm,
+		"the fixture must reach the unrecognised-algorithm path")
+	return crl
+}
+
+// TestPEMBundle_CRLWithUnrecognisedSignatureAlgorithm covers the CRL input that
+// makes reading the signature algorithm dangerous, and it is the only test in
+// the tree that reaches the nil-hash branch of crlToCDX.
+//
+// getAlgorithmProperties returns a hash name for every signature algorithm Go's
+// enum knows -- including Ed25519, which maps to SHA-512 -- so the branch that
+// guards against a nil second return is reachable ONLY through an algorithm the
+// enum does not cover. Dropping that guard leaves the whole suite green and
+// panics on the first such list a scan meets; post-quantum CRLs are exactly
+// that input, and they are the ones this tool exists to find.
+//
+// It also pins that the OID reaches the document from the list's own DER. The
+// enum lookup answers first for every recognised algorithm, so sigAlgOIDFromRaw
+// is unobservable on the CRL path until the enum misses.
+func TestPEMBundle_CRLWithUnrecognisedSignatureAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	crl := crlWithSubstitutedSignatureOID(t)
+
+	var d *model.Detection
+	require.NotPanics(t, func() {
+		d = cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+			Location: "/test/pqc.crl",
+			CRLs:     []*x509.RevocationList{crl},
+		})
+	})
+	require.NotNil(t, d)
+
+	doc := emitDocument(t, "1.6", *d)
+	byRef := componentsByRef(doc)
+
+	var crlCompo cdx.Component
+	for ref, compo := range byRef {
+		if strings.HasPrefix(ref, "crypto/crl/") {
+			crlCompo = compo
+		}
+	}
+	require.NotEmpty(t, crlCompo.BOMRef,
+		"no CRL component, got %v", slices.Sorted(maps.Keys(byRef)))
+
+	algRefs := materialAlgorithmRefs(crlCompo)
+	require.Len(t, algRefs, 1,
+		"a list whose algorithm cannot be named still names one asset")
+	algo, ok := byRef[algRefs[0]]
+	require.True(t, ok,
+		"the list's algorithm ref %q resolves to nothing -- a dangling ref is "+
+			"worse than an unnamed algorithm", algRefs[0])
+	require.Equal(t, "1.2.840.10045.4.3.99", algo.CryptoProperties.OID,
+		"the OID must be the one in the list's own DER, which is all that is "+
+			"left to identify the algorithm by once the enum has missed")
+
+	// No hash: this is the branch that exists so the nil second return is not
+	// dereferenced, and so no edge names a component that was never built.
+	for ref, compo := range byRef {
+		if compo.CryptoProperties.AlgorithmProperties == nil {
+			continue
+		}
+		require.NotEqual(t, cdx.CryptoPrimitiveHash,
+			compo.CryptoProperties.AlgorithmProperties.Primitive,
+			"an unrecognised signature algorithm decomposes into nothing: %s", ref)
+	}
+	require.Empty(t, dependsOn(doc, algo.BOMRef),
+		"an algorithm with no hash must not claim to depend on one")
+
+	requireNoDanglingEdges(t, doc)
+}
+
+// requireNoDanglingEdges states over an emitted document that every dependency
+// names components that are in it.
+func requireNoDanglingEdges(t *testing.T, doc cdx.BOM) {
+	t.Helper()
+
+	byRef := componentsByRef(doc)
+	if doc.Dependencies == nil {
+		return
+	}
+	for _, dep := range *doc.Dependencies {
+		require.Contains(t, byRef, dep.Ref)
+		if dep.Dependencies == nil {
+			continue
+		}
+		for _, to := range *dep.Dependencies {
+			require.Contains(t, byRef, to, "dangling dependency edge %s -> %s", dep.Ref, to)
+		}
+	}
+}
+
+// TestPEMBundle_CSRWithUnidentifiableKeyHandsTheBuilderNothingToDrop states the
+// guard in csrToCDX where the guard lives, which is the only place it is
+// observable.
+//
+// TestPEMBundle_CSRWithUnregisteredOIDStaysWellFormed asserts on the EMITTED
+// document, and the Builder cleans up after the converter: it drops a component
+// with no bom-ref, and it drops an edge whose target has no component, warning
+// on both. So removing the guard entirely -- appending the zero Component and
+// its dangling edge unconditionally -- leaves that test, the goldens and the
+// referential-integrity check all green. The only visible consequence is two
+// WARN lines per unparseable request, in a log nobody reads, saying the tool
+// threw an asset away.
+//
+// Stating it on the DETECTION is what makes the guard's removal fail: the
+// detection is the converter's output, before the Builder's clean-up.
+func TestPEMBundle_CSRWithUnidentifiableKeyHandsTheBuilderNothingToDrop(t *testing.T) {
+	t.Parallel()
+
+	csr := csrWithSPKIAlgorithm(t, asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1})
+	require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+		"the fixture must reach the unparseable-key path, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/pqc-request.pem",
+		CertificateRequests: []*x509.CertificateRequest{csr},
+	})
+	require.NotNil(t, d)
+
+	refs := map[string]struct{}{}
+	for _, compo := range d.Components {
+		require.NotEmpty(t, compo.BOMRef,
+			"the converter built a component the Builder can only drop: %+v", compo)
+		refs[compo.BOMRef] = struct{}{}
+	}
+	require.NotEmpty(t, refs)
+
+	for _, dep := range d.Dependencies {
+		require.Contains(t, refs, dep.Ref,
+			"an edge starts at a component this detection does not carry")
+		require.NotNil(t, dep.Dependencies)
+		for _, to := range *dep.Dependencies {
+			require.Contains(t, refs, to,
+				"the converter built the edge %s -> %s, and nothing it emitted "+
+					"has that ref", dep.Ref, to)
+		}
+	}
 }

@@ -24,13 +24,16 @@ import (
 //
 // PEMBundle takes the certificates and the keypairs, and calls this for the
 // rest; the name says which half is which.
-func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle) ([]cdx.Component, error) {
+func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle) ([]cdx.Component, []cdx.Dependency, error) {
 	components := make([]cdx.Component, 0)
+	var deps []cdx.Dependency
 	var errs []error
 
 	// Convert certificate requests
 	for _, csr := range bundle.CertificateRequests {
-		components = append(components, c.csrToCDX(csr))
+		csrCompos, csrDeps := c.csrToCDX(ctx, csr)
+		components = append(components, csrCompos...)
+		deps = append(deps, csrDeps...)
 	}
 
 	// Convert public keys
@@ -54,7 +57,9 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 
 	// Convert CRLs
 	for _, crl := range bundle.CRLs {
-		components = append(components, c.crlToCDX(crl))
+		crlCompos, crlDeps := c.crlToCDX(ctx, crl)
+		components = append(components, crlCompos...)
+		deps = append(deps, crlDeps...)
 	}
 
 	// try to parse unrecognized parts of a PEM
@@ -76,10 +81,20 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 		components = append(components, compos...)
 	}
 
-	return components, errors.Join(errs...)
+	return components, deps, errors.Join(errs...)
 }
 
-// csrToCDX converts a certificate signing request into a component.
+// csrToCDX converts a certificate signing request into the request component,
+// the algorithm of the key it asks to have certified, and -- when that key can
+// be identified -- the key material itself, plus the edge from the request to
+// it.
+//
+// The key is the whole reason a request exists, and this used to drop it: Go
+// hands over PublicKey and PublicKeyAlgorithm and neither was read, so a
+// scanned .csr contributed one asset naming a subject and no cryptography at
+// all. An inventory built from that cannot answer "which requests are asking
+// us to certify a key we are about to have to migrate" -- the question a
+// pending request is the earliest possible place to answer.
 //
 // The bom-ref is content-addressed over the request's own DER, mirroring
 // crypto/certificate/<name>@<hash(cert.Raw)>. Without a bom-ref at all
@@ -88,11 +103,21 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // csrSubjectName fallback.
 //
 // It deliberately does NOT use Converter.BOMRefHash. That hashes the
-// component's JSON, and this component carries the subject but nothing of the
-// key, so two requests for the same subject with different keys would hash to
-// one ref and the Builder's first-wins dedup would silently discard the
-// second. The DER covers the key.
-func (c Converter) csrToCDX(csr *x509.CertificateRequest) cdx.Component {
+// component's JSON, and nothing in this component distinguishes one requested
+// key from another -- the key is a SEPARATE component, not a field here -- so
+// two requests for the same subject with different keys would hash to one ref
+// and the Builder's first-wins dedup would silently discard the second. The
+// DER covers the key. TestPEMBundle_TwoCSRsSameSubjectStayDistinct pins it.
+//
+// The key component is conditional because x509.ParseCertificateRequest does
+// NOT fail on an SPKI algorithm it does not recognise: it returns successfully
+// with PublicKeyAlgorithm=UnknownPublicKeyAlgorithm and a nil PublicKey, which
+// is what every post-quantum request in the wild currently produces.
+// publicKeyComponents then yields the algorithm and a zero Component, and
+// appending that would hand the Builder a refless component to drop while the
+// dependency edge below pointed at a ref present nowhere in the document. Same
+// guard, same reason, as the standalone public keys in restOfPEMBundleToCDX.
+func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) ([]cdx.Component, []cdx.Dependency) {
 	name := csrSubjectName(csr)
 	compo := cdx.Component{
 		Type:   cdx.ComponentTypeCryptographicAsset,
@@ -109,10 +134,39 @@ func (c Converter) csrToCDX(csr *x509.CertificateRequest) cdx.Component {
 			{Name: "subject", Value: csr.Subject.String()},
 		},
 	}
-	return compo
+
+	// The key-to-algorithm edge is not built here: publicKeyComponents already
+	// writes it as relatedCryptoMaterialProperties.algorithmRef, and
+	// Builder.model turns that into a relationship generically. Adding a second
+	// one would emit the same edge twice.
+	algo, key := c.publicKeyComponents(ctx, csr.PublicKeyAlgorithm, csr.PublicKey, nil)
+	if key.BOMRef == "" {
+		return []cdx.Component{compo, algo}, nil
+	}
+	return []cdx.Component{compo, algo, key},
+		[]cdx.Dependency{{
+			Ref:          compo.BOMRef,
+			Dependencies: &[]string{key.BOMRef},
+		}}
 }
 
-// crlToCDX converts a certificate revocation list into a component.
+// crlToCDX converts a certificate revocation list into the list component, the
+// algorithm it was signed with, and -- for a hash-then-sign scheme -- the hash
+// that algorithm decomposes into, plus the edge between those two.
+//
+// The signature algorithm is the only cryptographic claim a revocation list
+// makes, and it was parsed by Go, left sitting in the struct, and dropped: a
+// scanned .crl reported an issuer, two timestamps and a count of revocations.
+// A list still signed with SHA-1 is an operational finding, and the tool named
+// the file without naming that.
+//
+// The algorithm is reached through relatedCryptoMaterialProperties.algorithmRef
+// rather than a dependency edge, which is how every other piece of key material
+// in this package names its algorithm; the schema calls the field "the bom-ref
+// to the algorithm used to generate the related cryptographic material", and
+// the signature is what generated this list. Builder.model turns it into a
+// relationship generically, and the 1.7 emitter maps it onto
+// relatedCryptographicAssets, where 1.6's algorithmRef is deprecated.
 //
 // The bom-ref is content-addressed over the list's own DER, mirroring
 // crypto/certificate/<name>@<hash(cert.Raw)>. Without a bom-ref at all
@@ -137,7 +191,7 @@ func (c Converter) csrToCDX(csr *x509.CertificateRequest) cdx.Component {
 // discriminator between them, so leaving it off here was not asymmetry by
 // design, it silently made every CRL indistinguishable from a CSR to anything
 // reading properties instead of guessing from the Name string.
-func (c Converter) crlToCDX(crl *x509.RevocationList) cdx.Component {
+func (c Converter) crlToCDX(ctx context.Context, crl *x509.RevocationList) ([]cdx.Component, []cdx.Dependency) {
 	name := crlIssuerName(crl)
 	props := []cdx.Property{
 		{Name: "pem_type", Value: "CRL"},
@@ -151,6 +205,13 @@ func (c Converter) crlToCDX(crl *x509.RevocationList) cdx.Component {
 	}
 	props = append(props, cdx.Property{Name: "revoked_count", Value: fmt.Sprintf("%d", len(crl.RevokedCertificateEntries))})
 
+	// x509.RevocationList carries the signature algorithm and the DER, which is
+	// everything the certificate path ever read, so the two cannot describe the
+	// same algorithm differently. RFC 5280's CertificateList has the same
+	// top-level ASN.1 shape as Certificate, so the OID is read from crl.Raw the
+	// same way.
+	sigAlgCompo, hashAlgCompo := c.signatureAlgorithmComponents(ctx, crl.SignatureAlgorithm, crl.Raw)
+
 	compo := cdx.Component{
 		Type:   cdx.ComponentTypeCryptographicAsset,
 		Name:   "CRL: " + name,
@@ -158,12 +219,31 @@ func (c Converter) crlToCDX(crl *x509.RevocationList) cdx.Component {
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
 			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
-				Type: cdx.RelatedCryptoMaterialTypeOther,
+				Type:         cdx.RelatedCryptoMaterialTypeOther,
+				AlgorithmRef: cdx.BOMReference(sigAlgCompo.BOMRef),
 			},
 		},
 		Properties: &props,
 	}
-	return compo
+
+	// signatureAlgorithmComponents returns a nil second value only when nothing
+	// names a hash for the algorithm, which is narrower than "the scheme signs
+	// the message directly": every algorithm Go's enum knows decomposes into
+	// one, Ed25519 included, because RFC 8032 builds it on SHA-512 and
+	// getAlgorithmProperties says so. The nil is reached through
+	// UnknownSignatureAlgorithm, whose OID either misses the registry or hits an
+	// entry that maps to no hash of its own -- ML-DSA, HSS/LMS, XMSS; SLH-DSA's
+	// entries do map to SHA-256 or SHAKE-256. Dereferencing it unconditionally
+	// is the crash; emitting an edge to a component that was never built is the
+	// dangling ref.
+	if hashAlgCompo == nil {
+		return []cdx.Component{compo, sigAlgCompo}, nil
+	}
+	return []cdx.Component{compo, sigAlgCompo, *hashAlgCompo},
+		[]cdx.Dependency{{
+			Ref:          sigAlgCompo.BOMRef,
+			Dependencies: &[]string{hashAlgCompo.BOMRef},
+		}}
 }
 
 // csrSubjectName names a certificate request for its bom-ref and Name, the way
