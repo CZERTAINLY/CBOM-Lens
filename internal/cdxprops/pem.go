@@ -430,8 +430,8 @@ func rejectPrivateKeyBody(info algorithmInfo, body []byte) string {
 	}
 
 	if len(body) == expanded ||
-		derOctetStringOf(body, expanded) ||
-		(seed > 0 && derTaggedSeedOf(body, seed)) ||
+		derOctetStringOf(body, expanded, "") ||
+		(seed > 0 && derOctetStringOf(body, seed, "tag:0")) ||
 		(seed > 0 && derSeedAndExpandedOf(body, seed, expanded)) {
 		return ""
 	}
@@ -442,21 +442,18 @@ func rejectPrivateKeyBody(info algorithmInfo, body []byte) string {
 	return fmt.Sprintf("not a %d-byte key", expanded)
 }
 
-// derOctetStringOf reports whether body is exactly one OCTET STRING carrying
+// derOctetStringOf reports whether body is exactly one OCTET STRING -- or,
+// with params "tag:0", one implicitly-tagged `[0] OCTET STRING` -- carrying
 // want bytes. The trailing-byte check is what makes this a shape test rather
 // than a prefix test: raw noise whose first bytes happen to read as a valid
-// OCTET STRING header does not end where the header says it does.
-func derOctetStringOf(body []byte, want int) bool {
+// header does not end where the header says it does.
+//
+// params is passed straight to asn1.UnmarshalWithParams; "" reproduces plain
+// asn1.Unmarshal. "tag:0" is the seed alternative, `[0] OCTET STRING` of want
+// bytes -- 0x80 0x20 followed by 32 bytes for ML-DSA.
+func derOctetStringOf(body []byte, want int, params string) bool {
 	var content []byte
-	rest, err := asn1.Unmarshal(body, &content)
-	return err == nil && len(rest) == 0 && len(content) == want
-}
-
-// derTaggedSeedOf reports whether body is the seed alternative, `[0] OCTET
-// STRING` of want bytes -- 0x80 0x20 followed by 32 bytes for ML-DSA.
-func derTaggedSeedOf(body []byte, want int) bool {
-	var content []byte
-	rest, err := asn1.UnmarshalWithParams(body, &content, "tag:0")
+	rest, err := asn1.UnmarshalWithParams(body, &content, params)
 	return err == nil && len(rest) == 0 && len(content) == want
 }
 
