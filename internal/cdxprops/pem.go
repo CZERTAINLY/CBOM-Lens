@@ -209,9 +209,19 @@ func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, 
 		}
 		return []cdx.Component{key, algo}, nil
 	case "PUBLIC KEY":
-		key, algo, err := c.unsupportedPKIX(block.Bytes)
+		key, algo, err := c.unsupportedPKIX(ctx, block.Bytes)
 		if err != nil {
 			return nil, errors.Join(origErr, err)
+		}
+		// unsupportedPKIX yields the algorithm alone when the PKIX body is not
+		// exactly the size the registry states for this algorithm's public
+		// key. The zero Component must not be appended: it has neither ref nor
+		// crypto properties, so the Builder would drop it with a warning and
+		// setPEMFormat would walk it for nothing. Same guard, same reason, as
+		// the PRIVATE KEY branch above and the zero public-key component in
+		// restOfPEMBundleToCDX.
+		if key.BOMRef == "" {
+			return []cdx.Component{algo}, nil
 		}
 		return []cdx.Component{key, algo}, nil
 	}
@@ -472,7 +482,20 @@ func registryPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
 	return cdx.CryptoPrimitiveSignature
 }
 
-func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err error) {
+// unsupportedPKIX handles a `PUBLIC KEY` PEM block Go's stdlib cannot parse,
+// returning the key material component and the algorithm component that
+// describes it.
+//
+// The two claims it can make are not equally supported by the input, for the
+// same reason unsupportedPKCS8PrivateKey's are not (see that function's
+// comment): the OID establishes that the algorithm is REFERENCED here, which is
+// true whatever the bytes after it turn out to be, but that a KEY exists is a
+// claim about the body. Validating only the wrapper let a SEQUENCE carrying the
+// ML-DSA-65 OID and four bytes of garbage assert a full public key, silently --
+// the guard that closed exactly this on the private half was never written for
+// this one, so the same four bytes were refused under a PKCS#8 wrapper and
+// accepted under a SubjectPublicKeyInfo.
+func (c Converter) unsupportedPKIX(ctx context.Context, der []byte) (key, algo cdx.Component, err error) {
 	var pubKey pkixStruct
 	rest, uerr := asn1.Unmarshal(der, &pubKey)
 	if uerr != nil {
@@ -507,6 +530,19 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
+	// Check the LENGTH, and check it exactly. Unlike the private half there is
+	// no CHOICE to enumerate: RFC 9881 sec. 4, and the SLH-DSA and ML-KEM
+	// equivalents, put the encoded public key directly in the BIT STRING, so
+	// one algorithm has exactly one legal body length rather than several.
+	if reason := rejectPublicKeyBody(info, pubKey.PublicKey); reason != "" {
+		slog.WarnContext(ctx, "not reporting a public key: the PKIX body is not this algorithm's public key",
+			"algorithm", info.name,
+			"oid", info.oid,
+			"body_bytes", len(pubKey.PublicKey.Bytes),
+			"reason", reason)
+		return
+	}
+
 	pubKeyValue, pubKeyHash := c.hashRawPublicKey(der)
 	// public key properties
 	var bomRef = fmt.Sprintf(
@@ -537,6 +573,75 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 	}
 
 	return
+}
+
+// registryPublicKeyBodySize returns the size in BYTES that a
+// SubjectPublicKeyInfo's publicKey BIT STRING holds for this algorithm -- the
+// encapsulation key for a KEM, the public key for a signature scheme --
+// mirroring registryKeyBodySizes on the private half. It is 0 when the registry
+// states none.
+//
+// A KEM's public half is its encapsulation key and a signature scheme's is its
+// public key, carried by different registry shapes (kemInfo vs pqcInfo), so
+// reading only pubKeySize would silently return 0 -- no check at all -- for
+// every ML-KEM parameter set.
+//
+// These are byte counts from FIPS 203/204/205. They are NOT the schema's
+// relatedCryptoMaterialProperties.size, which is in bits, and they are not
+// algorithmInfo.keySize either: that field is in bits and is 0 on every
+// registry entry, so measuring the body against it would be no check at all.
+func registryPublicKeyBodySize(info algorithmInfo) int {
+	switch sizes := info.pqc.(type) {
+	case kemInfo:
+		return sizes.encapKeySize
+	case pqcInfo:
+		return sizes.pubKeySize
+	}
+	return 0
+}
+
+// rejectPublicKeyBody returns why pubKey cannot be info's public key, or ""
+// when it is.
+//
+// A PKCS#8 privateKey admits several legal lengths because RFC 9881 sec. 6
+// makes it a CHOICE of seed, expandedKey, or both, which is why
+// rejectPrivateKeyBody enumerates encodings and needs derOctetStringOf and its
+// siblings to tell them apart. A SubjectPublicKeyInfo has no such CHOICE: RFC
+// 9881 sec. 4, and the SLH-DSA and ML-KEM equivalents, put the encoded key
+// directly in the BIT STRING, so there is exactly one legal length per
+// algorithm and nothing wrapping it to inspect. That is why this side has no
+// shape helpers -- there is no shape, only a length.
+//
+// The comparison is an EXACT match rather than a floor. A floor at the registry
+// size would still pass a body one byte short of a real key, and the four-byte
+// 0xdeadbeef this check exists to catch is a floor's blind spot at every
+// threshold below the real size. Too long is refused for the same reason too
+// short is: with the key encoded directly there is nothing to pad it with, so
+// an extra byte means these are not that key's bytes.
+//
+// asn1.BitString.Bytes excludes the leading unused-bits octet, so it is
+// directly comparable to the registry's byte counts: the ML-DSA-65 fixture's
+// BIT STRING is 1953 bytes on the wire and 1952 here.
+//
+// An empty body is refused whatever the algorithm, for the same reason
+// rejectPrivateKeyBody refuses one: no encoding of any key is zero bytes, so
+// that much can be ruled out without knowing the algorithm, including for the
+// three entries the registry states no size for (XMSS, XMSS-MT, HSS-LMS: RFC
+// 9802 puts the parameters in the key value, not in the OID).
+func rejectPublicKeyBody(info algorithmInfo, pubKey asn1.BitString) string {
+	if len(pubKey.Bytes) == 0 {
+		return "empty body"
+	}
+
+	want := registryPublicKeyBodySize(info)
+	if want == 0 {
+		return ""
+	}
+
+	if len(pubKey.Bytes) != want {
+		return fmt.Sprintf("not a %d-byte public key", want)
+	}
+	return ""
 }
 
 func (c Converter) hashRawPublicKey(der []byte) (value, hash string) {

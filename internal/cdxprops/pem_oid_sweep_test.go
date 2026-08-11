@@ -14,10 +14,15 @@ import (
 // This file gets every registry OID through the real production parse path
 // without a single byte of fixture key material.
 //
-// unsupportedPKIX and unsupportedPKCS8PrivateKey only decode the
-// AlgorithmIdentifier -- neither touches the key bits -- so a synthetic
-// asn1.Marshal of a SubjectPublicKeyInfo or PrivateKeyInfo carrying the OID
-// plus a placeholder key exercises exactly the same code as a real key would.
+// unsupportedPKIX and unsupportedPKCS8PrivateKey never interpret the key bits
+// as key material -- they decode the AlgorithmIdentifier and measure the body
+// -- so a synthetic asn1.Marshal of a SubjectPublicKeyInfo or PrivateKeyInfo
+// carrying the OID plus a body of the size the registry states exercises
+// exactly the same code as a real key would. The size is not a detail: both
+// functions refuse to report a key from a body that cannot be one, so synthPKIX
+// and synthPKCS8 size their bodies from the registry rather than filling in a
+// placeholder, which would put every OID here on the rejection path.
+//
 // That is what makes per-parameter-set fixtures unnecessary: 21 OIDs covered,
 // no 21 files, and the day someone adds a registry entry the sweep covers it
 // automatically because it iterates wantRegistry.
@@ -51,7 +56,7 @@ func TestOIDSweep_PKIXPublicKey(t *testing.T) {
 			t.Parallel()
 
 			c := NewConverter()
-			key, algo, err := c.unsupportedPKIX(synthPKIX(t, oidOf(t, dotted)))
+			key, algo, err := c.unsupportedPKIX(t.Context(), synthPKIX(t, oidOf(t, dotted)))
 			require.NoError(t, err, "OID %s must be recognised", dotted)
 
 			require.Equal(t, want.name, algo.Name)
@@ -187,7 +192,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		// honest miss rather than a confident mislabel.
 		unknown := asn1.ObjectIdentifier{1, 3, 9999, 6, 1, 1}
 
-		_, _, err := c.unsupportedPKIX(synthPKIX(t, unknown))
+		_, _, err := c.unsupportedPKIX(t.Context(), synthPKIX(t, unknown))
 		require.ErrorContains(t, err, "unsupported fallback oid")
 		require.ErrorContains(t, err, "1.3.9999.6.1.1")
 
@@ -217,7 +222,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		full := synthPKIX(t, mlKEM768OID)
 		truncated := full[:len(full)/2]
 
-		_, _, err := c.unsupportedPKIX(truncated)
+		_, _, err := c.unsupportedPKIX(t.Context(), truncated)
 		require.ErrorContains(t, err, "parsing PKIX via ASN.1")
 
 		fullPK := synthPKCS8(t, mlKEM768OID)
@@ -282,7 +287,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 	t.Run("empty input is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, err := c.unsupportedPKIX(nil)
+		_, _, err := c.unsupportedPKIX(t.Context(), nil)
 		require.Error(t, err)
 
 		_, _, err = c.unsupportedPKCS8PrivateKey(t.Context(), nil)
@@ -296,7 +301,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		der, err := asn1.Marshal(pkix.AlgorithmIdentifier{Algorithm: mlKEM768OID})
 		require.NoError(t, err)
 
-		_, _, err = c.unsupportedPKIX(der)
+		_, _, err = c.unsupportedPKIX(t.Context(), der)
 		require.Error(t, err, "a bare AlgorithmIdentifier must not parse as SPKI")
 	})
 }
