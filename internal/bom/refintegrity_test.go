@@ -276,17 +276,45 @@ func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]strin
 	}
 }
 
-// tlsProtoPath locates the TLS protocol component holding all dangling sites
-// pinned by testdata/golden/corpus-1.6.json.
+// tlsProtocolPath locates the TLS protocol component holding all dangling
+// sites pinned by testdata/golden/corpus-1.6.json, and returns the path to
+// its protocolProperties field.
 //
-// The index is positional: assets sort by ref, so anything added to the corpus
-// that sorts before crypto/protocol/tls shifts it. It was 24 until the CSR and
-// CRL entries landed -- crypto/crl/... and crypto/csr/... sort between
-// crypto/certificate/... and crypto/key/... -- and it will move again the next
-// time. If TestBOMReferentialIntegrity_1_6 fails, check this index before
-// reading the failure's advice about the allowlist: the message is written for
-// a genuine rewriter bug and misdirects when the corpus has merely grown.
-const tlsProtoPath = "components[26].cryptoProperties.protocolProperties"
+// This used to be a hand-maintained positional index into bom.Components:
+// assets sort by ref, so anything added to the corpus that sorts before
+// crypto/protocol/tls shifted it. It was 24 until the CSR and CRL entries
+// landed -- crypto/crl/... and crypto/csr/... sort between
+// crypto/certificate/... and crypto/key/... -- and the same drift was bound
+// to repeat with every future addition. Locating the component by its own
+// identifying properties instead -- asset type "protocol" plus a
+// "crypto/protocol/tls@" bom-ref prefix -- removes the dependency on sibling
+// component ordering entirely.
+func tlsProtocolPath(t *testing.T, bom *cdx.BOM) string {
+	t.Helper()
+
+	const bomRefPrefix = "crypto/protocol/tls@"
+	idx := -1
+	if bom.Components != nil {
+		for i, c := range *bom.Components {
+			if c.CryptoProperties == nil || c.CryptoProperties.AssetType != cdx.CryptoAssetTypeProtocol {
+				continue
+			}
+			if !strings.HasPrefix(c.BOMRef, bomRefPrefix) {
+				continue
+			}
+			if idx != -1 {
+				t.Fatalf("multiple TLS protocol components found in bom: components[%d] and components[%d] both have "+
+					"asset type %q and bom-ref prefix %q", idx, i, cdx.CryptoAssetTypeProtocol, bomRefPrefix)
+			}
+			idx = i
+		}
+	}
+	if idx == -1 {
+		t.Fatalf("no TLS protocol component found in bom: expected exactly one component with "+
+			"asset type %q and bom-ref prefix %q", cdx.CryptoAssetTypeProtocol, bomRefPrefix)
+	}
+	return fmt.Sprintf("components[%d].cryptoProperties.protocolProperties", idx)
+}
 
 // knownDanglingRefs16 pins every dangling occurrence (ref -> exact sites) in
 // testdata/golden/corpus-1.6.json. Root cause: replaceBOMReferences in
@@ -297,32 +325,101 @@ const tlsProtoPath = "components[26].cryptoProperties.protocolProperties"
 //
 // Do NOT add entries here: a new dangling ref — or a new site reusing one of
 // these values — means a rewriter/emitter bug.
-var knownDanglingRefs16 = map[string][]string{
-	"crypto/algorithm/SHA256@sha256:692805caccd5d10a24c5f2607f1b2f92365d45637bbffb19327571938ff523f1": {
-		tlsProtoPath + ".cipherSuites[0].algorithms[1]",
-		tlsProtoPath + ".cipherSuites[2].algorithms[1]",
-	},
-	"crypto/algorithm/SHA384@sha256:a8e74cac63b436f2f31be1f23f252e84d4f5549731e6a71907ecc9dbaa37335c": {
-		tlsProtoPath + ".cipherSuites[1].algorithms[1]",
-	},
-	"crypto/algorithm/aes-128-gcm@sha256:eba74aba1360630b92c4fa07d5920b01dca555dae748eb1a4671b76f61763dee": {
-		tlsProtoPath + ".cipherSuites[0].algorithms[0]",
-	},
-	"crypto/algorithm/aes-256-gcm@sha256:fae137f8ede9ab0261320d5b0beb9495a96cccdbb0a2c9927069a97a5c5c47a1": {
-		tlsProtoPath + ".cipherSuites[1].algorithms[0]",
-	},
-	"crypto/algorithm/chacha20-poly1305@sha256:0412f91c044da1c8efc045a41876c2b7fe44c30aff1bd9023b0493c9f8d46181": {
-		tlsProtoPath + ".cipherSuites[2].algorithms[0]",
-	},
-	"crypto/certificate/www.ssllabs.com@sha256:9c4ae7bf5170ee7598b8de289e1be7fe54c254d440c24a587958000c2e1a82bb": {
-		tlsProtoPath + ".cryptoRefArray[0]",
-	},
+func knownDanglingRefs16(t *testing.T, bom *cdx.BOM) map[string][]string {
+	t.Helper()
+	tlsProtoPath := tlsProtocolPath(t, bom)
+	return map[string][]string{
+		"crypto/algorithm/SHA256@sha256:692805caccd5d10a24c5f2607f1b2f92365d45637bbffb19327571938ff523f1": {
+			tlsProtoPath + ".cipherSuites[0].algorithms[1]",
+			tlsProtoPath + ".cipherSuites[2].algorithms[1]",
+		},
+		"crypto/algorithm/SHA384@sha256:a8e74cac63b436f2f31be1f23f252e84d4f5549731e6a71907ecc9dbaa37335c": {
+			tlsProtoPath + ".cipherSuites[1].algorithms[1]",
+		},
+		"crypto/algorithm/aes-128-gcm@sha256:eba74aba1360630b92c4fa07d5920b01dca555dae748eb1a4671b76f61763dee": {
+			tlsProtoPath + ".cipherSuites[0].algorithms[0]",
+		},
+		"crypto/algorithm/aes-256-gcm@sha256:fae137f8ede9ab0261320d5b0beb9495a96cccdbb0a2c9927069a97a5c5c47a1": {
+			tlsProtoPath + ".cipherSuites[1].algorithms[0]",
+		},
+		"crypto/algorithm/chacha20-poly1305@sha256:0412f91c044da1c8efc045a41876c2b7fe44c30aff1bd9023b0493c9f8d46181": {
+			tlsProtoPath + ".cipherSuites[2].algorithms[0]",
+		},
+		"crypto/certificate/www.ssllabs.com@sha256:9c4ae7bf5170ee7598b8de289e1be7fe54c254d440c24a587958000c2e1a82bb": {
+			tlsProtoPath + ".cryptoRefArray[0]",
+		},
+	}
 }
 
 func TestBOMReferentialIntegrity_1_6(t *testing.T) {
 	ctx := t.Context()
 	bom := goldenBuilder(t).AppendDetections(ctx, fixtureDetections(t)...).BOM(ctx)
-	assertRefIntegrity(t, &bom, knownDanglingRefs16)
+	assertRefIntegrity(t, &bom, knownDanglingRefs16(t, &bom))
+}
+
+// TestTLSProtocolPath_SurvivesCorpusGrowth reproduces the exact regression
+// tlsProtocolPath replaced a hardcoded index to prevent: a new corpus fixture
+// whose bom-ref sorts before "crypto/protocol/tls@" (as crypto/crl/... and
+// crypto/csr/... did, shifting the TLS component from index 24 to 26) used
+// to silently repoint the old hardcoded tlsProtoPath constant at whatever
+// component happened to land at that index.
+//
+// It builds two synthetic BOMs -- "before" and "after" a growth event -- and
+// shows tlsProtocolPath tracks the protocol component's real position in
+// both, while a stale index carried over from "before" (mimicking the old
+// approach) resolves to the wrong component in "after".
+func TestTLSProtocolPath_SurvivesCorpusGrowth(t *testing.T) {
+	protoComponent := cdx.Component{
+		BOMRef: "crypto/protocol/tls@1",
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType: cdx.CryptoAssetTypeProtocol,
+		},
+	}
+	certComponent := func(ref string) cdx.Component {
+		return cdx.Component{
+			BOMRef: ref,
+			CryptoProperties: &cdx.CryptoProperties{
+				AssetType: cdx.CryptoAssetTypeCertificate,
+			},
+		}
+	}
+
+	// "Before growth": the TLS protocol component sits at index 2. A
+	// maintainer using the old approach would have hardcoded that index.
+	before := cdx.BOM{Components: &[]cdx.Component{
+		certComponent("crypto/certificate/a@1"),
+		certComponent("crypto/certificate/b@1"),
+		protoComponent,
+	}}
+	const oldHardcodedIndex = 2
+
+	gotBefore := tlsProtocolPath(t, &before)
+	require.Equal(t, fmt.Sprintf("components[%d].cryptoProperties.protocolProperties", oldHardcodedIndex), gotBefore)
+
+	// "After growth": a new fixture (e.g. a CRL or CSR entry) sorts before
+	// crypto/protocol/tls@, shifting the protocol component's index without
+	// changing anything about the protocol component itself.
+	after := cdx.BOM{Components: &[]cdx.Component{
+		certComponent("crypto/certificate/a@1"),
+		certComponent("crypto/crl/new@1"), // newly added; sorts before crypto/protocol/tls@
+		certComponent("crypto/certificate/b@1"),
+		protoComponent,
+	}}
+	const wantIndex = 3
+
+	gotAfter := tlsProtocolPath(t, &after)
+	require.Equal(t, fmt.Sprintf("components[%d].cryptoProperties.protocolProperties", wantIndex), gotAfter,
+		"tlsProtocolPath must track the protocol component even after corpus growth shifts its index")
+
+	// Contrast: applying the stale hardcoded index from "before" to "after"
+	// resolves to the wrong component entirely -- this is exactly how the
+	// old positional-index approach broke under corpus growth.
+	oldResolved := (*after.Components)[oldHardcodedIndex]
+	require.NotEqual(t, protoComponent.BOMRef, oldResolved.BOMRef,
+		"sanity check: the stale hardcoded index must no longer point at the TLS protocol component")
+	require.Equal(t, "crypto/certificate/b@1", oldResolved.BOMRef,
+		"with the old hardcoded-index approach, this corpus growth would have silently repointed "+
+			"tlsProtoPath at %q instead of the TLS protocol component", oldResolved.BOMRef)
 }
 
 // refFieldInventory walks the exported struct-type graph reachable from
