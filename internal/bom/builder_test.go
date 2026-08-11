@@ -266,6 +266,444 @@ func TestBuilder_AppendDetections(t *testing.T) {
 	})
 }
 
+// publicKeyDetection builds a detection carrying one public-key component under
+// sharedKeyRef, with the given relatedCryptoMaterialProperties.format.
+//
+// It rebuilds the component on every call on purpose. Two detections that shared
+// one *cdx.RelatedCryptoMaterialProperties would make the merge look correct
+// through aliasing alone -- which is exactly what the real converters do NOT do,
+// since each Converter call allocates its own struct.
+func publicKeyDetection(source, location, format string) model.Detection {
+	return model.Detection{
+		Source:   source,
+		Type:     model.DetectionTypeCertificate,
+		Location: location,
+		Components: []cdx.Component{
+			{
+				BOMRef: sharedKeyRef,
+				Name:   "RSA-2048",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+					RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+						Type:   cdx.RelatedCryptoMaterialTypePublicKey,
+						Format: format,
+					},
+				},
+			},
+		},
+	}
+}
+
+// sharedKeyRef is the bom-ref both detections below resolve to. Its shape is the
+// real one: crypto/key/<alg>@<digest of the marshalled SPKI>, which carries no
+// path, no source and no encoding, so one key reached two ways is one ref.
+const sharedKeyRef = "crypto/key/rsa-2048@sha256:deadbeef"
+
+// TestBuilder_AppendDetections_RelatedCryptoMaterialFormatOrderIndependent pins
+// the invariant that a component's emitted relatedCryptoMaterialProperties.
+// format is decided by the SET of detections resolving to its bom-ref and never
+// by the order appendDetection observes them in.
+//
+// The two detections below are the real pair -- one key found as a PEM file and
+// inside a PKCS#12 store -- and mergeRelatedCryptoMaterialFormat's doc comment
+// explains why they collide on one ref and why only one of them knows the
+// encoding. Under first-wins that made format appear and disappear between
+// otherwise identical runs of the same scan.
+func TestBuilder_AppendDetections_RelatedCryptoMaterialFormatOrderIndependent(t *testing.T) {
+	const (
+		pemLocation    = "/etc/ssl/certs/ca.pem"
+		pkcs12Location = "/etc/ssl/store.p12"
+	)
+
+	tests := []struct {
+		name       string
+		detections []model.Detection
+	}{
+		{
+			name: "PEM arrives first",
+			detections: []model.Detection{
+				publicKeyDetection("PEM", pemLocation, "PEM"),
+				publicKeyDetection("PKCS12", pkcs12Location, ""),
+			},
+		},
+		{
+			name: "non-PEM arrives first",
+			detections: []model.Detection{
+				publicKeyDetection("PKCS12", pkcs12Location, ""),
+				publicKeyDetection("PEM", pemLocation, "PEM"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(), tt.detections...)
+
+			require.Len(t, builder.components, 1,
+				"one key is one asset: both detections hash to the same bom-ref")
+			stored := builder.components[sharedKeyRef]
+			require.NotNil(t, stored)
+			require.NotNil(t, stored.CryptoProperties)
+			require.NotNil(t, stored.CryptoProperties.RelatedCryptoMaterialProperties)
+			require.Equal(t, "PEM", stored.CryptoProperties.RelatedCryptoMaterialProperties.Format,
+				"format must be a function of the detection set, not of arrival order")
+
+			// The merge must not cost what the branch already did.
+			require.NotNil(t, stored.Evidence)
+			require.NotNil(t, stored.Evidence.Occurrences)
+			require.Len(t, *stored.Evidence.Occurrences, 2,
+				"both locations must still reach evidence.occurrences")
+		})
+	}
+}
+
+// TestAppendDetection_FormatReachesStoredWithoutMaterialProperties covers the
+// case the stored component has no relatedCryptoMaterialProperties to merge
+// into. Returning early there would drop a format the incoming detection knows,
+// reinstating the order dependence for that pair; allocating unconditionally
+// would be #213. See mergeRelatedCryptoMaterialFormat for why the gate is the
+// asset type.
+func TestAppendDetection_FormatReachesStoredWithoutMaterialProperties(t *testing.T) {
+	tests := []struct {
+		name       string
+		stored     cdx.Component
+		wantFormat string
+		wantProps  bool
+	}{
+		{
+			name: "material asset gains the struct",
+			stored: cdx.Component{
+				BOMRef: sharedKeyRef,
+				Name:   "RSA-2048",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				},
+			},
+			wantFormat: "PEM",
+			wantProps:  true,
+		},
+		{
+			name: "algorithm asset does not (#213)",
+			stored: cdx.Component{
+				BOMRef: sharedKeyRef,
+				Name:   "RSA-2048",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeAlgorithm,
+				},
+			},
+			wantProps: false,
+		},
+		{
+			name: "component without cryptoProperties does not",
+			stored: cdx.Component{
+				BOMRef: sharedKeyRef,
+				Name:   "RSA-2048",
+				Type:   cdx.ComponentTypeLibrary,
+			},
+			wantProps: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			first := model.Detection{
+				Source:     "PKCS12",
+				Location:   "/etc/ssl/store.p12",
+				Components: []cdx.Component{tt.stored},
+			}
+
+			require.NotPanics(t, func() {
+				builder.AppendDetections(t.Context(), first,
+					publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"))
+			})
+
+			require.Len(t, builder.components, 1)
+			stored := builder.components[sharedKeyRef]
+			require.NotNil(t, stored)
+			if !tt.wantProps {
+				if stored.CryptoProperties != nil {
+					require.Nil(t, stored.CryptoProperties.RelatedCryptoMaterialProperties,
+						"relatedCryptoMaterialProperties describes a serialised object "+
+							"and must not be invented on a %s asset (#213)",
+						stored.CryptoProperties.AssetType)
+				}
+				return
+			}
+			require.NotNil(t, stored.CryptoProperties)
+			require.NotNil(t, stored.CryptoProperties.RelatedCryptoMaterialProperties)
+			require.Equal(t, tt.wantFormat,
+				stored.CryptoProperties.RelatedCryptoMaterialProperties.Format)
+		})
+	}
+}
+
+// TestAppendDetection_ConflictingFormatsResolveDeterministically covers two
+// differing non-empty formats on one ref: both orders must land on the same
+// value and both must report the disagreement. No producer can reach this today;
+// mergeRelatedCryptoMaterialFormat says why the tie-break exists anyway.
+func TestAppendDetection_ConflictingFormatsResolveDeterministically(t *testing.T) {
+	orders := [][2]string{{"DER", "PEM"}, {"PEM", "DER"}}
+
+	for _, order := range orders {
+		t.Run(order[0]+" then "+order[1], func(t *testing.T) {
+			var logBuf bytes.Buffer
+			restore := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			t.Cleanup(func() { slog.SetDefault(restore) })
+
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(),
+				publicKeyDetection("PKCS12", "/etc/ssl/store.p12", order[0]),
+				publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", order[1]))
+
+			stored := builder.components[sharedKeyRef]
+			require.NotNil(t, stored)
+			require.Equal(t, "DER", stored.CryptoProperties.RelatedCryptoMaterialProperties.Format,
+				"the tie-break must not depend on which detection arrived first")
+
+			logged := logBuf.String()
+			require.Contains(t, logged, "detections disagree on the format of one component")
+			require.Contains(t, logged, "ref="+sharedKeyRef)
+			require.Contains(t, logged, "kept=DER")
+			require.Contains(t, logged, "discarded=PEM")
+		})
+	}
+}
+
+// TestAppendDetection_AgreeingFormatsAreNotReportedAsDisagreement pins the
+// no-op arm, which the tie-break silently swallows: min("PEM","PEM") is "PEM",
+// so deleting `case format: return` leaves every emitted document byte-identical
+// and only the log changes. That log is the whole point -- "detections disagree
+// on the format of one component" is a claim that a producer is broken, and the
+// case it would fire on is the ordinary one: the same CA key shipped in two
+// .pem files under /etc/ssl/certs, where both detections come from PEMBundle
+// and both carry setPEMFormat's single constant. A warning on the common path
+// is a warning nobody reads.
+func TestAppendDetection_AgreeingFormatsAreNotReportedAsDisagreement(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+
+	builder.AppendDetections(t.Context(),
+		publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"),
+		publicKeyDetection("PEM", "/etc/ssl/certs/ca-bundle.pem", "PEM"))
+
+	stored := builder.components[sharedKeyRef]
+	require.NotNil(t, stored)
+	require.Equal(t, "PEM", stored.CryptoProperties.RelatedCryptoMaterialProperties.Format)
+
+	require.NotContains(t, logBuf.String(), "detections disagree",
+		"two detections carrying the same format agree; reporting them as a "+
+			"conflict would fire on every key found in two PEM files")
+}
+
+// TestBuilder_AppendDetections_FormatSurvivesEveryArrivalPermutation raises the
+// order-independence claim from a pair to a set. Its sibling proves the merge
+// survives ONE reordering, which a merge that simply preferred the later
+// detection would also pass; three arrivals with the format in the middle
+// distinguish first-wins, last-wins and set semantics, and only set semantics
+// gives the same answer for all six permutations.
+//
+// Three is not a contrived count: one host key routinely appears as
+// /etc/ssl/certs/ca.pem, inside a PKCS#12 store and inside a JKS truststore, and
+// only the first of those reaches setPEMFormat.
+func TestBuilder_AppendDetections_FormatSurvivesEveryArrivalPermutation(t *testing.T) {
+	arrivals := []model.Detection{
+		publicKeyDetection("PKCS12", "/etc/ssl/store.p12", ""),
+		publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"),
+		publicKeyDetection("JKS", "/etc/ssl/truststore.jks", ""),
+	}
+
+	// Written out rather than generated: the point of the test is that every
+	// arrangement is checked, and a permutation generator with an off-by-one
+	// would quietly check fewer.
+	permutations := [][3]int{
+		{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0},
+	}
+
+	for _, p := range permutations {
+		name := fmt.Sprintf("%d%d%d", p[0], p[1], p[2])
+		t.Run(name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			// Rebuilt per permutation: the merge writes through a pointer the
+			// caller's model.Detection still holds (see the last paragraph of
+			// mergeRelatedCryptoMaterialFormat), so reusing one arrivals slice
+			// across subtests would let permutation 012 seed 021.
+			ordered := make([]model.Detection, 0, len(p))
+			for _, i := range p {
+				d := arrivals[i]
+				ordered = append(ordered, publicKeyDetection(d.Source, d.Location,
+					d.Components[0].CryptoProperties.RelatedCryptoMaterialProperties.Format))
+			}
+			builder.AppendDetections(t.Context(), ordered...)
+
+			require.Len(t, builder.components, 1)
+			stored := builder.components[sharedKeyRef]
+			require.NotNil(t, stored)
+			require.NotNil(t, stored.CryptoProperties.RelatedCryptoMaterialProperties)
+			require.Equal(t, "PEM",
+				stored.CryptoProperties.RelatedCryptoMaterialProperties.Format,
+				"the one detection that knows the encoding must win from any position")
+
+			require.NotNil(t, stored.Evidence)
+			require.NotNil(t, stored.Evidence.Occurrences)
+			require.Equal(t, []cdx.EvidenceOccurrence{
+				{Location: "/etc/ssl/certs/ca.pem"},
+				{Location: "/etc/ssl/store.p12"},
+				{Location: "/etc/ssl/truststore.jks"},
+			}, *stored.Evidence.Occurrences,
+				"the merge runs before addEvidenceLocation and must not disturb it")
+		})
+	}
+}
+
+// TestBuilder_AppendDetections_EmittedDocumentIsOrderIndependent states the
+// invariant where the user meets it: the delivered JSON, not builder.components.
+// Comparing the whole encoded document catches a merge that fixes format while
+// perturbing something else -- evidence.occurrences order, a dropped field, an
+// extra property -- which an assertion on one field cannot.
+//
+// It goes through AsJSON rather than BOM so the reordered document is also put
+// through schema validation, and it fixes the clock and the serial because those
+// are the only two intentionally non-reproducible parts of the output
+// (TestBuilder_BOMDeterministic uses the same pair for the same reason).
+func TestBuilder_AppendDetections_EmittedDocumentIsOrderIndependent(t *testing.T) {
+	fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	render := func(t *testing.T, detections ...model.Detection) string {
+		t.Helper()
+
+		b, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		b = b.WithClock(func() time.Time { return fixed }).
+			WithSerial(func() string { return "urn:uuid:22222222-2222-2222-2222-222222222222" })
+		b.AppendDetections(t.Context(), detections...)
+
+		var buf bytes.Buffer
+		require.NoError(t, b.AsJSON(t.Context(), &buf))
+		return buf.String()
+	}
+
+	pemFirst := render(t,
+		publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"),
+		publicKeyDetection("PKCS12", "/etc/ssl/store.p12", ""))
+	storeFirst := render(t,
+		publicKeyDetection("PKCS12", "/etc/ssl/store.p12", ""),
+		publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"))
+
+	require.Equal(t, pemFirst, storeFirst,
+		"two scans that found the same key in the same two places must deliver "+
+			"byte-identical CBOMs regardless of which scanner reported first")
+	require.Contains(t, pemFirst, `"format": "PEM"`,
+		"a document with no format at all would satisfy the equality above "+
+			"while still having lost what the PEM detection knew")
+}
+
+// TestAppendDetection_FormatIsNeverInventedOnNonMaterialAssets widens the #213
+// gate past the one asset type its sibling checks. #213 was a blanket
+// format=PEM loop that made 20 of 32 assets in a real scan answer "yes" to "is
+// this key material?", and re-deriving the gate as an algorithm-only deny-list
+// -- the obvious simplification, since algorithm is the family that actually
+// collided -- would reintroduce it on certificates and protocols while leaving
+// the sibling green.
+//
+// The bare component pins the other half: cryptoProperties carries the
+// assetType, so inventing one here would assign an asset type no producer chose.
+// setPEMFormat refuses for the same reason.
+func TestAppendDetection_FormatIsNeverInventedOnNonMaterialAssets(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored cdx.Component
+	}{
+		{
+			name: "certificate",
+			stored: cdx.Component{
+				BOMRef: sharedKeyRef,
+				Name:   "example.com",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeCertificate,
+				},
+			},
+		},
+		{
+			name: "protocol",
+			stored: cdx.Component{
+				BOMRef: sharedKeyRef,
+				Name:   "TLSv1.3",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeProtocol,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(),
+				model.Detection{
+					Source:     "NMAP",
+					Location:   "tcp://localhost:443",
+					Components: []cdx.Component{tt.stored},
+				},
+				publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"))
+
+			stored := builder.components[sharedKeyRef]
+			require.NotNil(t, stored)
+			require.NotNil(t, stored.CryptoProperties)
+			require.Equal(t, tt.stored.CryptoProperties.AssetType,
+				stored.CryptoProperties.AssetType,
+				"the merge must not restate the asset type either")
+			require.Nil(t, stored.CryptoProperties.RelatedCryptoMaterialProperties,
+				"relatedCryptoMaterialProperties describes a serialised object and "+
+					"must not appear on a %s asset (#213)", tt.name)
+		})
+	}
+
+	t.Run("no cryptoProperties at all", func(t *testing.T) {
+		builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+
+		builder.AppendDetections(t.Context(),
+			model.Detection{
+				Source:   "LEAKS",
+				Location: "/srv/app/config.yaml",
+				Components: []cdx.Component{{
+					BOMRef: sharedKeyRef,
+					Name:   "RSA-2048",
+					Type:   cdx.ComponentTypeLibrary,
+				}},
+			},
+			publicKeyDetection("PEM", "/etc/ssl/certs/ca.pem", "PEM"))
+
+		stored := builder.components[sharedKeyRef]
+		require.NotNil(t, stored)
+		require.Nil(t, stored.CryptoProperties,
+			"cryptoProperties carries the assetType, so allocating one here "+
+				"would invent an asset type no producer chose")
+	})
+}
+
 func TestBuilder_BOM(t *testing.T) {
 	t.Run("basic BOM structure", func(t *testing.T) {
 		builder, err := NewBuilder(model.CBOM{Version: "1.6"})

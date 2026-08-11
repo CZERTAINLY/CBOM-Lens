@@ -275,6 +275,90 @@ func TestPEMBundle_BOMRefsMatchContents(t *testing.T) {
 			"nothing -- has the ref naming changed?")
 }
 
+// TestPEMBundle_OneKeyTwoSourcesShareARefAndDisagreeOnFormat documents the
+// precondition that makes format nondeterministic in a delivered BOM, and shows
+// it is STRUCTURAL rather than a race: the same certificate run through
+// Converter.PEMBundle and through Converter.CertHit yields two public-key
+// components with one identical bom-ref, and only the PEM one carries a format.
+//
+// The ref is a digest of the marshalled SPKI alone (publicKeyComponents /
+// hashPublicKey) -- no path, no source and no encoding enter it, which is
+// deliberate, because that is what lets one key found at three paths dedupe to
+// one asset. setPEMFormat, by contrast, runs only over what Converter.PEMBundle
+// collected.
+//
+// Nothing here is wrong on its own: this test asserts the collision, not a
+// defect. Reconciling it is bom.Builder.appendDetection's job, since that is the
+// only place both detections meet -- see mergeRelatedCryptoMaterialFormat and
+// TestBuilder_AppendDetections_RelatedCryptoMaterialFormatOrderIndependent.
+func TestPEMBundle_OneKeyTwoSourcesShareARefAndDisagreeOnFormat(t *testing.T) {
+	t.Parallel()
+
+	selfSigned, err := cdxtest.CertBuilder{}.
+		WithSignatureAlgorithm(x509.SHA256WithRSA).
+		Generate()
+	require.NoError(t, err)
+
+	c := cdxprops.NewConverter()
+
+	pemDetection := c.PEMBundle(t.Context(), model.PEMBundle{
+		Location: pemBundleLocation,
+		Certificates: []model.CertHit{
+			{Cert: selfSigned.Cert, Source: "PEM", Location: pemBundleLocation},
+		},
+	})
+	require.NotNil(t, pemDetection)
+
+	// The same certificate as it arrives from a PKCS#12 store: same bytes, same
+	// key, a source setPEMFormat never runs for.
+	storeDetection := c.CertHit(t.Context(), model.CertHit{
+		Cert:     selfSigned.Cert,
+		Source:   "PKCS12",
+		Location: "/etc/ssl/store.p12",
+	})
+	require.NotNil(t, storeDetection)
+
+	pemKey := publicKeyComponent(t, pemDetection.Components)
+	storeKey := publicKeyComponent(t, storeDetection.Components)
+
+	// Checked before the equality: two refless components are also "equal", and
+	// publicKeyComponents does return a component with no ref for a key it
+	// cannot identify, so without this the collision could be asserted by a
+	// path where no collision exists. Same guard, same reason, as
+	// TestPEMBundle_BOMRefsMatchContents' checked counter.
+	require.NotEmpty(t, pemKey.BOMRef)
+	require.Equal(t, pemKey.BOMRef, storeKey.BOMRef,
+		"one key is one bom-ref regardless of where it was found; that is what "+
+			"makes the two detections collide in the Builder")
+
+	require.Equal(t, "PEM", pemKey.CryptoProperties.RelatedCryptoMaterialProperties.Format,
+		"the PEM path knows the encoding")
+	require.Empty(t, storeKey.CryptoProperties.RelatedCryptoMaterialProperties.Format,
+		"the PKCS12 path does not, so the two components differ in exactly one "+
+			"field while sharing a ref")
+}
+
+// publicKeyComponent returns the single public-key component among compos,
+// failing if there is not exactly one. The two detections above carry an
+// algorithm and a certificate too, and the assertion is only about the key.
+func publicKeyComponent(t *testing.T, compos []cdx.Component) cdx.Component {
+	t.Helper()
+
+	var found []cdx.Component
+	for _, compo := range compos {
+		if compo.CryptoProperties == nil {
+			continue
+		}
+		rcmp := compo.CryptoProperties.RelatedCryptoMaterialProperties
+		if rcmp == nil || rcmp.Type != cdx.RelatedCryptoMaterialTypePublicKey {
+			continue
+		}
+		found = append(found, compo)
+	}
+	require.Len(t, found, 1, "expected exactly one public-key component")
+	return found[0]
+}
+
 // TestPEMBundle_StandaloneDSAPublicKeyDoesNotPanic covers the crash that
 // shipped undetected because nothing fed a *dsa.PublicKey through
 // bundle.PublicKeys.

@@ -158,6 +158,11 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 		}
 		stored, ok := b.components[compo.BOMRef]
 		if ok {
+			// First-wins keeps the stored component and discards the rest of
+			// the second one, so anything the second detection knows and the
+			// first does not has to be merged here explicitly, exactly as
+			// evidence.occurrences already is.
+			mergeRelatedCryptoMaterialFormat(ctx, stored, &compo)
 			addEvidenceLocation(stored, detection.Location)
 			continue
 		}
@@ -425,6 +430,80 @@ func addEvidenceLocation(c *cdx.Component, locations ...string) {
 	}
 
 	c.Evidence.Occurrences = &occurences
+}
+
+// mergeRelatedCryptoMaterialFormat folds an incoming component's
+// relatedCryptoMaterialProperties.format into the one already stored under the
+// same bom-ref, so the emitted value is decided by the SET of detections that
+// resolve to that ref and never by the order they arrive in.
+//
+// Only the Builder can decide this. setPEMFormat stamps format=PEM over what
+// Converter.PEMBundle collected; the same key reached through Converter.CertHit
+// (DER, PKCS7-DER, PKCS12, JKS, nmap TLS) carries none, and a public key's
+// bom-ref is a pure digest of its marshalled SPKI (cdxprops.hashPublicKey), so
+// neither producer can see that the other ran. Scanning fans out over goroutines
+// (internal/parallel) onto one channel (cmd/cbom-lens/lens.go), so under
+// first-wins a key present both as /etc/ssl/certs/ca.pem and inside
+// /etc/ssl/store.p12 gained or lost format between identical runs. Putting the
+// format in the hash instead was rejected: that gives one asset N refs, the
+// defect #217 exists to remove.
+//
+// A non-empty format therefore always survives, and two DIFFERING non-empty
+// values -- unreachable while setPEMFormat is the only writer of the field --
+// resolve to the lexicographically smaller. The tie-break exists to be TOTAL and
+// order-independent, so a second writer cannot quietly reinstate the
+// nondeterminism this removes; a disagreement is logged because it means two
+// detections described one asset differently.
+//
+// The struct is allocated on stored when missing, but only for a
+// related-crypto-material asset, mirroring setPEMFormat's gate: inventing
+// relatedCryptoMaterialProperties on an algorithm or a certificate is #213, and
+// a whole cryptoProperties would fabricate an assetType no producer chose. No
+// current producer leaves it nil on material, so that arm guards the next one.
+//
+// Both writes land on stored.CryptoProperties, a pointer the caller's
+// model.Detection still holds -- appendDetection stores a shallow copy of the
+// component -- so merging mutates the caller's detection, the same in-place
+// mutation of shared nested pointers cryptoRels records for model(). No caller
+// reuses a drained Detection, and a deep copy would be Builder-wide hardening.
+func mergeRelatedCryptoMaterialFormat(ctx context.Context, stored, incoming *cdx.Component) {
+	if stored == nil || incoming == nil {
+		return
+	}
+	if incoming.CryptoProperties == nil || incoming.CryptoProperties.RelatedCryptoMaterialProperties == nil {
+		return
+	}
+	format := incoming.CryptoProperties.RelatedCryptoMaterialProperties.Format
+	if format == "" {
+		return
+	}
+	if stored.CryptoProperties == nil {
+		return
+	}
+
+	props := stored.CryptoProperties.RelatedCryptoMaterialProperties
+	if props == nil {
+		if stored.CryptoProperties.AssetType != cdx.CryptoAssetTypeRelatedCryptoMaterial {
+			return
+		}
+		props = &cdx.RelatedCryptoMaterialProperties{}
+		stored.CryptoProperties.RelatedCryptoMaterialProperties = props
+	}
+
+	switch props.Format {
+	case format:
+		return
+	case "":
+		props.Format = format
+		return
+	}
+
+	kept, discarded := min(props.Format, format), max(props.Format, format)
+	slog.WarnContext(ctx, "detections disagree on the format of one component",
+		"ref", stored.BOMRef,
+		"kept", kept,
+		"discarded", discarded)
+	props.Format = kept
 }
 
 func bomStatistics(counter *stats.Stats) []cdx.Property {
