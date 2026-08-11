@@ -13,6 +13,7 @@ import (
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
 	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 	"github.com/OmniTrustILM/cbom-lens/internal/stats"
@@ -2254,4 +2255,1129 @@ func TestAppendDetection_CloneLeavesTransformSlicesAsTheyCame(t *testing.T) {
 			require.NotContains(t, string(raw), tt.fragment)
 		})
 	}
+}
+
+// sharedCertRef is the bom-ref every certificate detection below resolves to.
+// Its shape is the real one -- crypto/certificate/<name>@<digest of cert.Raw>,
+// built by cdxprops.certComponent -- and it carries no path, no port and no
+// source, which is deliberate: that is what lets one certificate found on disk
+// and served on a socket dedupe to one asset.
+const sharedCertRef = "crypto/certificate/www.example.com@sha256:deadbeef"
+
+// The two ILM certificate properties that CANNOT differ between two components
+// sharing sharedCertRef. base64_content is base64(cert.Raw) and fingerprint is
+// sha256(cert.Raw), while the ref itself is name@sha256(cert.Raw), so two
+// components stored under one ref carry the same cert.Raw modulo a SHA-256
+// collision. They are held constant here for the same reason the merge does not
+// touch them: source_format is the only one of the three that can disagree.
+const (
+	sharedCertBase64      = "MIIBkzCCATmgAwIBAgIUZGVhZGJlZWY="
+	sharedCertFingerprint = "sha256:deadbeef"
+)
+
+// ilmCertificateProperties reproduces ilm.CertificateProperties' output for a
+// certificate observed in source: source_format first, then base64_content,
+// then fingerprint.
+//
+// It allocates a fresh slice on every call on purpose. Two detections sharing
+// one backing array would make the merge look correct through aliasing alone --
+// which is exactly what the real producer does NOT do, since every
+// Converter.CertHit call runs ilm.CertificateProperties again and gets its own
+// slice.
+//
+// The capacity is the producer's, not the literal's. ilm.CertificateProperties
+// builds its result as make([]cdx.Property, 0, 20) and appends three entries, so
+// the real slice has seventeen spare cells behind its length -- room an in-place
+// append would quietly write into WITHOUT reallocating, which is the only shape
+// in which that bug is observable. A composite literal is len 3 cap 3, where any
+// append reallocates and the caller's slice survives by accident;
+// TestAppendDetection_CertificateSourceFormatMergeDoesNotMutateTheDetections
+// inspects the spare tail and would prove nothing against it.
+func ilmCertificateProperties(source string) []cdx.Property {
+	props := make([]cdx.Property, 0, 20)
+	return append(props,
+		cdx.Property{Name: ilm.CertificateSourceFormat, Value: source},
+		cdx.Property{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		cdx.Property{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	)
+}
+
+// certificateDetection builds a detection carrying one certificate component
+// under sharedCertRef, stamped with the ILM property block --ilm turns on.
+func certificateDetection(source, location string) model.Detection {
+	props := ilmCertificateProperties(source)
+	return certificateDetectionWithProperties(source, location, &props)
+}
+
+// certificateDetectionWithProperties is certificateDetection with the property
+// block chosen by the caller. A nil props is the --ilm-off shape, where
+// certComponent never assigns Properties at all.
+func certificateDetectionWithProperties(source, location string, props *[]cdx.Property) model.Detection {
+	return model.Detection{
+		Source:   source,
+		Type:     model.DetectionTypeCertificate,
+		Location: location,
+		Components: []cdx.Component{
+			{
+				BOMRef:     sharedCertRef,
+				Name:       "www.example.com",
+				Type:       cdx.ComponentTypeCryptographicAsset,
+				Properties: props,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeCertificate,
+				},
+			},
+		},
+	}
+}
+
+// storedCertificate returns the one component the Builder holds under
+// sharedCertRef, asserting on the way that the detections really did collide --
+// without that, a merge assertion could be satisfied by a Builder holding two
+// separate assets.
+func storedCertificate(t *testing.T, b *Builder) *cdx.Component {
+	t.Helper()
+
+	require.Len(t, b.components, 1,
+		"one certificate is one asset: every detection here hashes to the same bom-ref")
+	stored := b.components[sharedCertRef]
+	require.NotNil(t, stored)
+	return stored
+}
+
+// storedCertificateProperties returns the stored component's WHOLE property
+// list, or nil when it has none. Whole rather than filtered to source_format:
+// the assertions below pin the untouched neighbours and their order too, and a
+// filtered view would hide a merge that re-sorted base64_content.
+func storedCertificateProperties(t *testing.T, b *Builder) []cdx.Property {
+	t.Helper()
+
+	stored := storedCertificate(t, b)
+	if stored.Properties == nil {
+		return nil
+	}
+	return *stored.Properties
+}
+
+// TestBuilder_AppendDetections_CertificateSourceFormatOrderIndependent pins the
+// invariant that a certificate's emitted ilm:component:certificate:source_format
+// properties are decided by the SET of detections resolving to its bom-ref and
+// never by the order appendDetection observes them in.
+//
+// The pair below is the ordinary deployment, not a corner case: the server
+// certificate sits in /etc/ssl/certs as PEM and is also served on 443, where the
+// nmap scanner reports it as NMAP. Both facts are true, so unlike
+// mergeRelatedCryptoMaterialFormat the merge keeps BOTH -- see
+// mergeCertificateSourceFormat for why provenance unions where an object's
+// encoding tie-breaks.
+func TestBuilder_AppendDetections_CertificateSourceFormatOrderIndependent(t *testing.T) {
+	const (
+		diskLocation = "/etc/ssl/certs/server.pem"
+		wireLocation = "23.88.35.44:443"
+	)
+
+	want := []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "NMAP"},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}
+
+	tests := []struct {
+		name       string
+		detections []model.Detection
+	}{
+		{
+			name: "disk arrives first",
+			detections: []model.Detection{
+				certificateDetection("PEM", diskLocation),
+				certificateDetection("NMAP", wireLocation),
+			},
+		},
+		{
+			name: "wire arrives first",
+			detections: []model.Detection{
+				certificateDetection("NMAP", wireLocation),
+				certificateDetection("PEM", diskLocation),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(), tt.detections...)
+
+			require.Equal(t, want, storedCertificateProperties(t, builder),
+				"both observed source formats must survive, sorted, and the two "+
+					"properties that cannot disagree must be left exactly as they were")
+
+			// The merge must not cost what the branch already did.
+			stored := storedCertificate(t, builder)
+			require.NotNil(t, stored.Evidence)
+			require.NotNil(t, stored.Evidence.Occurrences)
+			require.Equal(t, []cdx.EvidenceOccurrence{
+				{Location: diskLocation},
+				{Location: wireLocation},
+			}, *stored.Evidence.Occurrences,
+				"both locations must still reach evidence.occurrences")
+		})
+	}
+}
+
+// TestBuilder_AppendDetections_CertificateSourceFormatSurvivesEveryArrivalPermutation
+// raises the order-independence claim from a pair to a set. A pair cannot
+// distinguish set semantics from last-wins -- both give "the other one" when the
+// order flips -- but three distinct sources in every position can: only a set
+// union yields the identical list for all six permutations.
+//
+// Three is not a contrived count. One certificate routinely sits in
+// /etc/ssl/certs as PEM, inside a PKCS#12 bundle shipped to the same host, and
+// is served on 443 where nmap reports it; the three detections reach the Builder
+// from three scanners over one channel, in whatever order they finish.
+func TestBuilder_AppendDetections_CertificateSourceFormatSurvivesEveryArrivalPermutation(t *testing.T) {
+	arrivals := []model.Detection{
+		certificateDetection("PEM", "/etc/ssl/certs/server.pem"),
+		certificateDetection("PKCS12", "/etc/ssl/store.p12"),
+		certificateDetection("NMAP", "23.88.35.44:443"),
+	}
+
+	// Written out rather than generated: the point of the test is that every
+	// arrangement is checked, and a permutation generator with an off-by-one
+	// would quietly check fewer.
+	permutations := [][3]int{
+		{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0},
+	}
+
+	want := []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "NMAP"},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateSourceFormat, Value: "PKCS12"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}
+
+	for _, p := range permutations {
+		name := fmt.Sprintf("%d%d%d", p[0], p[1], p[2])
+		t.Run(name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			// Rebuilt per permutation for the same reason
+			// ilmCertificateProperties allocates per call: reusing one arrivals
+			// slice across subtests would let permutation 012 seed 021.
+			ordered := make([]model.Detection, 0, len(p))
+			for _, i := range p {
+				d := arrivals[i]
+				ordered = append(ordered, certificateDetection(d.Source, d.Location))
+			}
+			builder.AppendDetections(t.Context(), ordered...)
+
+			require.Equal(t, want, storedCertificateProperties(t, builder),
+				"the emitted source formats must be the sorted union of what the "+
+					"detection set observed, identical from any arrival order")
+
+			stored := storedCertificate(t, builder)
+			require.NotNil(t, stored.Evidence)
+			require.NotNil(t, stored.Evidence.Occurrences)
+			require.Equal(t, []cdx.EvidenceOccurrence{
+				{Location: "/etc/ssl/certs/server.pem"},
+				{Location: "/etc/ssl/store.p12"},
+				{Location: "23.88.35.44:443"},
+			}, *stored.Evidence.Occurrences,
+				"the merge runs before addEvidenceLocation and must not disturb it")
+		})
+	}
+}
+
+// renderCertificateBOM encodes a Builder fed with detections through AsJSON, so
+// the assertion lands on the delivered document rather than on builder.
+// components. It goes through AsJSON rather than BOM so the merged document is
+// also put through schema validation -- repeated property names are legal in
+// both schemas ("Duplicate names are allowed, each potentially having a
+// different value") and this is what proves it -- and it fixes the clock and the
+// serial because those are the only two intentionally non-reproducible parts of
+// the output.
+func renderCertificateBOM(t *testing.T, version string, detections ...model.Detection) string {
+	t.Helper()
+
+	fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	b, err := NewBuilder(model.CBOM{Version: version})
+	require.NoError(t, err)
+	b = b.WithClock(func() time.Time { return fixed }).
+		WithSerial(func() string { return "urn:uuid:33333333-3333-3333-3333-333333333333" })
+	b.AppendDetections(t.Context(), detections...)
+
+	var buf bytes.Buffer
+	require.NoError(t, b.AsJSON(t.Context(), &buf))
+	return buf.String()
+}
+
+// TestBuilder_AppendDetections_EmittedCertificateSourceFormatIsOrderIndependent
+// states the invariant where the user meets it: the delivered JSON. Comparing
+// whole documents catches a merge that fixes source_format while perturbing
+// something else -- occurrence order, a dropped field, a duplicated property --
+// which an assertion on one field cannot.
+//
+// Run for both spec versions because the merge happens once, in the Builder,
+// and each emitter then has to carry Properties through untouched: emit16 copies
+// the component wholesale, emit17 clones only cryptoProperties and mapComponent17
+// never reads Properties. A regression in either would show up here.
+func TestBuilder_AppendDetections_EmittedCertificateSourceFormatIsOrderIndependent(t *testing.T) {
+	arrivals := []model.Detection{
+		certificateDetection("PEM", "/etc/ssl/certs/server.pem"),
+		certificateDetection("PKCS12", "/etc/ssl/store.p12"),
+		certificateDetection("NMAP", "23.88.35.44:443"),
+	}
+	permutations := [][3]int{
+		{0, 1, 2}, {1, 2, 0}, {2, 1, 0},
+	}
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			var first string
+			for _, p := range permutations {
+				ordered := make([]model.Detection, 0, len(p))
+				for _, i := range p {
+					d := arrivals[i]
+					ordered = append(ordered, certificateDetection(d.Source, d.Location))
+				}
+				got := renderCertificateBOM(t, version, ordered...)
+
+				if first == "" {
+					first = got
+					continue
+				}
+				require.Equal(t, first, got,
+					"permutation %d%d%d delivered a different document: two scans "+
+						"that found the same certificate in the same three places "+
+						"must deliver byte-identical CBOMs", p[0], p[1], p[2])
+			}
+
+			// A document that lost all three source formats would satisfy the
+			// equality above while having discarded everything the scanners knew.
+			// Decoded rather than matched as text: the values are what is being
+			// asserted, and a substring built from the pretty-printer's current
+			// indentation would fail opaquely the day the encoder or the nesting
+			// depth changes.
+			require.Equal(t, []string{"NMAP", "PEM", "PKCS12"},
+				emittedSourceFormats(t, first),
+				"the emitted document must carry one source_format property per "+
+					"observed source, in ascending order")
+		})
+	}
+}
+
+// emittedSourceFormats decodes a rendered CBOM and returns the values of every
+// ilm:component:certificate:source_format property on its single certificate
+// component, in document order.
+func emittedSourceFormats(t *testing.T, doc string) []string {
+	t.Helper()
+
+	var bom cdx.BOM
+	require.NoError(t, json.Unmarshal([]byte(doc), &bom))
+	require.NotNil(t, bom.Components)
+	require.Len(t, *bom.Components, 1)
+
+	compo := (*bom.Components)[0]
+	require.NotNil(t, compo.Properties)
+
+	var out []string
+	for _, p := range *compo.Properties {
+		if p.Name == ilm.CertificateSourceFormat {
+			out = append(out, p.Value)
+		}
+	}
+	return out
+}
+
+// withoutEvidence re-encodes doc with every component's evidence removed, so two
+// documents can be compared on everything EXCEPT the occurrence list.
+func withoutEvidence(t *testing.T, doc string) string {
+	t.Helper()
+
+	var bom cdx.BOM
+	require.NoError(t, json.Unmarshal([]byte(doc), &bom))
+	require.NotNil(t, bom.Components)
+	for i := range *bom.Components {
+		(*bom.Components)[i].Evidence = nil
+	}
+	out, err := json.MarshalIndent(bom, "", "  ")
+	require.NoError(t, err)
+	return string(out)
+}
+
+// TestAppendDetection_IdenticalCertificateSourceFormatIsNotRepeated covers the
+// common case the union must NOT inflate: one CA certificate shipped in two
+// files under /etc/ssl/certs, both read by the PEM scanner, both reporting
+// source PEM. The set has one element, so the document must be the
+// single-detection document plus one occurrence -- nothing else.
+//
+// It also asserts silence at WARN. mergeRelatedCryptoMaterialFormat reports a
+// disagreement because two encodings of one key mean a producer is wrong; two
+// sources for one certificate mean the certificate is deployed twice, which is
+// not a defect and must never reach an operator's log.
+func TestAppendDetection_IdenticalCertificateSourceFormatIsNotRepeated(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	builder.AppendDetections(t.Context(),
+		certificateDetection("PEM", "/etc/ssl/certs/server.pem"),
+		certificateDetection("PEM", "/etc/ssl/certs/ca-bundle.pem"))
+
+	require.Equal(t, []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}, storedCertificateProperties(t, builder),
+		"one distinct source is one property: a union that appended unconditionally "+
+			"would emit source_format twice with the same value")
+
+	one := renderCertificateBOM(t, "1.6",
+		certificateDetection("PEM", "/etc/ssl/certs/server.pem"))
+	two := renderCertificateBOM(t, "1.6",
+		certificateDetection("PEM", "/etc/ssl/certs/server.pem"),
+		certificateDetection("PEM", "/etc/ssl/certs/ca-bundle.pem"))
+	require.Equal(t, withoutEvidence(t, one), withoutEvidence(t, two),
+		"finding the same certificate in the same format twice must change nothing "+
+			"but evidence.occurrences")
+
+	require.NotContains(t, logBuf.String(), "source format",
+		"a certificate deployed in two places is normal and must not be reported "+
+			"as a producer defect")
+	require.NotContains(t, logBuf.String(), "disagree")
+}
+
+// TestAppendDetection_CertificateSourceFormatIsNeverInventedOnOtherAssets is the
+// #213 gate one field over. source_format is an ILM CERTIFICATE property; a
+// merge that appended it to whatever component happened to be stored under the
+// ref would stamp certificate provenance onto an algorithm, and #213 is exactly
+// that mistake made once already.
+//
+// The bare component pins the other half: with no cryptoProperties there is no
+// asset type to check, so the merge has nothing that says this is a certificate
+// and must refuse.
+func TestAppendDetection_CertificateSourceFormatIsNeverInventedOnOtherAssets(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored cdx.Component
+	}{
+		{
+			name: "algorithm",
+			stored: cdx.Component{
+				BOMRef: sharedCertRef,
+				Name:   "www.example.com",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeAlgorithm,
+				},
+			},
+		},
+		{
+			name: "related-crypto-material",
+			stored: cdx.Component{
+				BOMRef: sharedCertRef,
+				Name:   "www.example.com",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+				},
+			},
+		},
+		{
+			name: "protocol",
+			stored: cdx.Component{
+				BOMRef: sharedCertRef,
+				Name:   "www.example.com",
+				Type:   cdx.ComponentTypeCryptographicAsset,
+				CryptoProperties: &cdx.CryptoProperties{
+					AssetType: cdx.CryptoAssetTypeProtocol,
+				},
+			},
+		},
+		{
+			name: "no cryptoProperties at all",
+			stored: cdx.Component{
+				BOMRef: sharedCertRef,
+				Name:   "www.example.com",
+				Type:   cdx.ComponentTypeLibrary,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(),
+				model.Detection{
+					Source:     "NMAP",
+					Location:   "23.88.35.44:443",
+					Components: []cdx.Component{tt.stored},
+				},
+				certificateDetection("PEM", "/etc/ssl/certs/server.pem"))
+
+			stored := storedCertificate(t, builder)
+			require.Nil(t, stored.Properties,
+				"%s is not a certificate, so it must not gain a certificate's "+
+					"provenance property (#213)", tt.name)
+			if tt.stored.CryptoProperties != nil {
+				require.Equal(t, tt.stored.CryptoProperties.AssetType,
+					stored.CryptoProperties.AssetType,
+					"the merge must not restate the asset type either")
+			} else {
+				require.Nil(t, stored.CryptoProperties,
+					"cryptoProperties carries the assetType, so allocating one here "+
+						"would invent an asset type no producer chose")
+			}
+		})
+	}
+
+	// The positive arm: a certificate stored by a producer that did not write
+	// the property at all still gains it, because the asset type says the
+	// property belongs. Returning early here would drop what the incoming
+	// detection knew, reinstating the order dependence for that pair.
+	positives := []struct {
+		name       string
+		storedProp *[]cdx.Property
+		want       []cdx.Property
+	}{
+		{
+			name:       "certificate with no properties at all",
+			storedProp: nil,
+			want: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+			},
+		},
+		{
+			name: "certificate with properties but no source_format",
+			storedProp: &[]cdx.Property{
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+			want: []cdx.Property{
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+			},
+		},
+	}
+
+	for _, tt := range positives {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(),
+				certificateDetectionWithProperties("NMAP", "23.88.35.44:443", tt.storedProp),
+				certificateDetection("PEM", "/etc/ssl/certs/server.pem"))
+
+			require.Equal(t, tt.want, storedCertificateProperties(t, builder),
+				"a certificate that had no source_format gains the run at the end, "+
+					"leaving the properties it did have where they were")
+		})
+	}
+}
+
+// TestAppendDetection_EmptyCertificateSourceFormat covers the value the union
+// must not treat as an observation. model.CertHit.Source is a plain string and
+// nothing forces a scanner to fill it, so ilm.CertificateProperties happily
+// writes source_format="". An empty string sorts before every real vocabulary
+// entry, so a union that admitted it would emit a valueless property first on
+// every certificate one scanner failed to label.
+func TestAppendDetection_EmptyCertificateSourceFormat(t *testing.T) {
+	tests := []struct {
+		name           string
+		storedSource   string
+		incomingSource string
+		want           []cdx.Property
+	}{
+		{
+			name:           "empty stored is replaced by a real value",
+			storedSource:   "",
+			incomingSource: "PEM",
+			want: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+		},
+		{
+			name:           "empty on both leaves the valueless property alone",
+			storedSource:   "",
+			incomingSource: "",
+			want: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: ""},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+		},
+		{
+			name:           "empty incoming does not erase a real stored value",
+			storedSource:   "PEM",
+			incomingSource: "",
+			want: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(),
+				certificateDetection(tt.storedSource, "/etc/ssl/certs/server.pem"),
+				certificateDetection(tt.incomingSource, "23.88.35.44:443"))
+
+			require.Equal(t, tt.want, storedCertificateProperties(t, builder))
+		})
+	}
+}
+
+// TestAppendDetection_CertificateSourceFormatMergeLeavesOtherPropertiesAlone
+// pins that first-wins still governs every property except the one name the
+// merge is scoped to. A generic property-set union would look like a tidier
+// implementation and would also re-sort base64_content, drop the stored one in
+// favour of the incoming one, and import whatever unrelated property a future
+// producer attaches.
+//
+// The stored block deliberately does NOT start with source_format: the run has
+// to land at the index of the FIRST source_format property, not at the head or
+// the tail, or a producer that ordered its properties differently would see them
+// shuffled.
+func TestAppendDetection_CertificateSourceFormatMergeLeavesOtherPropertiesAlone(t *testing.T) {
+	stored := []cdx.Property{
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}
+	incoming := []cdx.Property{
+		{Name: "ilm:component:certificate:unrelated", Value: "from the second detection"},
+		{Name: ilm.CertificateSourceFormat, Value: "PKCS12"},
+		{Name: ilm.CertificateBase64Content, Value: "a-different-base64-body"},
+		{Name: ilm.CertificateFingerprint, Value: "sha256:different"},
+	}
+
+	builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	builder.AppendDetections(t.Context(),
+		certificateDetectionWithProperties("PEM", "/etc/ssl/certs/server.pem", &stored),
+		certificateDetectionWithProperties("PKCS12", "/etc/ssl/store.p12", &incoming))
+
+	require.Equal(t, []cdx.Property{
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateSourceFormat, Value: "PKCS12"},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}, storedCertificateProperties(t, builder),
+		"only the source_format run may change: the stored base64_content and "+
+			"fingerprint keep their values and their positions, and the incoming "+
+			"detection's unrelated property is discarded like the rest of it")
+}
+
+// TestAppendDetection_CertificateSourceFormatMergeDoesNotMutateTheDetections
+// pins the reason mergeCertificateSourceFormat allocates a fresh list instead of
+// appending through the one it found. ilm.CertificateProperties hands out a
+// slice with capacity 20 and length 3, so appending in place would land inside
+// the backing array the caller's model.Detection still holds, and the stored
+// component is only a shallow copy of it (appendDetection stores &compo), so its
+// Properties pointer starts out aliasing the first detection's.
+//
+// Both detections must come out of AppendDetections exactly as they went in --
+// including the FIRST one, whose slice the merge is standing on.
+//
+// Comparing lengths alone would not see it. An in-place append writes PAST the
+// length into the producer's seventeen spare cells, leaving len and every indexed
+// element unchanged, so the caller's slice still compares equal while its
+// backing array now holds the merged run. The tail assertion is what catches
+// that: everything from len to cap must still be the zero Property.
+func TestAppendDetection_CertificateSourceFormatMergeDoesNotMutateTheDetections(t *testing.T) {
+	first := certificateDetection("PEM", "/etc/ssl/certs/server.pem")
+	second := certificateDetection("NMAP", "23.88.35.44:443")
+
+	builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	builder.AppendDetections(t.Context(), first, second)
+
+	require.Equal(t, ilmCertificateProperties("PEM"), *first.Components[0].Properties,
+		"the merged run must not be written into the first detection's slice")
+	require.Equal(t, ilmCertificateProperties("NMAP"), *second.Components[0].Properties,
+		"the incoming detection is only read")
+
+	for _, tc := range []struct {
+		name  string
+		props []cdx.Property
+	}{
+		{"stored", *first.Components[0].Properties},
+		{"incoming", *second.Components[0].Properties},
+	} {
+		spare := tc.props[:cap(tc.props)][len(tc.props):]
+		require.NotEmpty(t, spare,
+			"%s: the fixture must carry the producer's spare capacity, or an "+
+				"in-place append would reallocate and this test would prove nothing",
+			tc.name)
+		require.Equal(t, make([]cdx.Property, len(spare)), spare,
+			"%s: the merge wrote the run into the detection's spare capacity", tc.name)
+	}
+
+	// And the merge really did happen, so the assertions above are not passing
+	// because nothing ran.
+	require.Equal(t, []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "NMAP"},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}, storedCertificateProperties(t, builder))
+}
+
+// TestAppendDetection_CertificateSourceFormatAbsentWhenIlmIsOff guards the
+// vanilla-CycloneDX contract. --ilm off means certComponent never assigns
+// Properties, so the merge reads no source formats off the incoming component
+// and must be a total no-op: no allocation, no empty "properties": [] array, no
+// property name that exists only because ILM extensions were compiled in.
+//
+// This is also what keeps the golden corpus still: golden_test.go builds its
+// Converter without WithIlmExtensions, so every corpus merge takes this path.
+func TestAppendDetection_CertificateSourceFormatAbsentWhenIlmIsOff(t *testing.T) {
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: version})
+			require.NoError(t, err)
+
+			builder.AppendDetections(t.Context(),
+				certificateDetectionWithProperties("PEM", "/etc/ssl/certs/server.pem", nil),
+				certificateDetectionWithProperties("NMAP", "23.88.35.44:443", nil))
+
+			require.Nil(t, storedCertificate(t, builder).Properties,
+				"a merge that allocated here would put an empty properties array "+
+					"into every non-ILM document")
+
+			doc := renderCertificateBOM(t, version,
+				certificateDetectionWithProperties("PEM", "/etc/ssl/certs/server.pem", nil),
+				certificateDetectionWithProperties("NMAP", "23.88.35.44:443", nil))
+
+			var bom cdx.BOM
+			require.NoError(t, json.Unmarshal([]byte(doc), &bom))
+			require.NotNil(t, bom.Components)
+			require.Len(t, *bom.Components, 1)
+			require.Nil(t, (*bom.Components)[0].Properties,
+				"the certificate component must carry no properties at all")
+			require.NotContains(t, doc, ilm.CertificateSourceFormat,
+				"the ILM property name must not appear anywhere in a non-ILM document")
+		})
+	}
+}
+
+// TestAppendDetection_CertificateSourceFormatRunLandsAtTheFirstIndex pins WHICH
+// source_format property the merged run replaces, which its sibling above cannot:
+// every certificate the Builder itself produces carries the run contiguously, and
+// when a run is contiguous, rewriting it at its first entry and rewriting it at
+// its last entry produce the same list. Only a stored block whose source_format
+// properties are SEPARATED by another property tells the two apart.
+//
+// Repeated property names are explicitly legal in both schemas ("Duplicate names
+// are allowed, each potentially having a different value") and nothing obliges a
+// producer to keep them adjacent, so the shape below is a legal component, not a
+// corrupted one. mergeCertificateSourceFormat promises such a producer that its
+// ordering survives: the run lands where the FIRST source_format was and every
+// later one is dropped. Appending at the end instead -- or at the last index --
+// would move base64_content and fingerprint ahead of the provenance the producer
+// deliberately put between them, which is the property shuffling the merge
+// exists to avoid.
+func TestAppendDetection_CertificateSourceFormatRunLandsAtTheFirstIndex(t *testing.T) {
+	stored := []cdx.Property{
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+		{Name: ilm.CertificateSourceFormat, Value: "DER"},
+	}
+
+	builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	builder.AppendDetections(t.Context(),
+		certificateDetectionWithProperties("PEM", "/etc/ssl/certs/server.pem", &stored),
+		certificateDetection("PKCS12", "/etc/ssl/store.p12"))
+
+	require.Equal(t, []cdx.Property{
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateSourceFormat, Value: "DER"},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateSourceFormat, Value: "PKCS12"},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}, storedCertificateProperties(t, builder),
+		"the whole run replaces the FIRST source_format and the trailing one is "+
+			"dropped, so fingerprint keeps the position its producer gave it "+
+			"instead of being overtaken by the provenance run")
+}
+
+// TestAppendDetection_DetectionAddingNoNewSourceLeavesTheStoredRunAlone pins the
+// two early returns that make a detection observing nothing NEW a total no-op
+// rather than a rewrite: the merge is a union, and a union with nothing to add
+// must not touch the list at all.
+//
+// The two returns are not the same condition and neither implies the other.
+// The first fires when the incoming component carries no source_format at all
+// (cases 1 and 2 below), which is where an --ilm-off detection and an unlabelled
+// hit both land. The second, slices.Equal(merged, storedValues), fires only when
+// the stored run ALREADY reads as the sorted union in document order (case 3).
+//
+// That second condition is deliberately narrower than "the set did not change",
+// and the distinction is the whole reason its sibling
+// TestAppendDetection_CertificateSourceFormatRebuildNormalisesTheStoredRun
+// exists: a stored run that is out of order or repeats a value is NOT equal to
+// the sorted union even when the union adds nothing, so it is rebuilt and
+// normalised. Nothing here contradicts that -- cases 1 and 2 keep their
+// disordered runs because the incoming detection never reaches slices.Equal at
+// all, and case 3's run is already ascending.
+//
+// "Not touch" needs a stored list a rewrite would visibly disturb, because a
+// merge that simply re-derived the run would reproduce an already-sorted,
+// already-deduped, already-contiguous run byte for byte and look correct. The
+// blocks below are the ones that betray it: one orders its run descending, one
+// repeats a value, one puts base64_content between its two source formats. None
+// is a shape the Builder emits, and that is the point -- they are what another
+// producer's list can legally look like, since repeated property names are
+// explicitly allowed and nothing requires them to be adjacent.
+//
+// The last case is the one the pair test cannot reach: two detections that agree
+// on PEM against a stored component that already knows DER and PEM. The set does
+// not change and the stored run is already ascending, so slices.Equal holds and
+// nothing is rewritten -- and because that run is INTERLEAVED with the other
+// properties, a merge that rebuilt anyway would compact it and be caught.
+func TestAppendDetection_DetectionAddingNoNewSourceLeavesTheStoredRunAlone(t *testing.T) {
+	// The incoming block for the first two cases. detection.Source still says
+	// NMAP, but the component does not CARRY a source_format: the merge reads
+	// the producer's property and never the scanner's label, so this has to be
+	// the same no-op as a detection with no properties at all.
+	sourceless := []cdx.Property{
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}
+
+	tests := []struct {
+		name     string
+		stored   []cdx.Property
+		incoming []cdx.Property
+	}{
+		{
+			name: "no source_format on the detection: descending run is not re-sorted",
+			stored: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateSourceFormat, Value: "DER"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+			incoming: sourceless,
+		},
+		{
+			name: "no source_format on the detection: repeated value is not collapsed",
+			stored: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+			incoming: sourceless,
+		},
+		{
+			name: "source already recorded: interleaved run is not compacted",
+			stored: []cdx.Property{
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateSourceFormat, Value: "DER"},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+			},
+			incoming: ilmCertificateProperties("PEM"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := append([]cdx.Property(nil), tt.stored...)
+
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+			builder.AppendDetections(t.Context(),
+				certificateDetectionWithProperties("PEM", "/etc/ssl/certs/server.pem", &tt.stored),
+				certificateDetectionWithProperties("NMAP", "23.88.35.44:443", &tt.incoming))
+
+			require.Equal(t, want, storedCertificateProperties(t, builder),
+				"this detection never reaches the rebuild, so the stored list must "+
+					"come through byte for byte: not reordered, not deduped, not "+
+					"compacted")
+
+			// And the detection was really merged, so the no-op above is the
+			// merge declining to change anything rather than the two components
+			// never having collided.
+			stored := storedCertificate(t, builder)
+			require.NotNil(t, stored.Evidence)
+			require.NotNil(t, stored.Evidence.Occurrences)
+			require.Equal(t, []cdx.EvidenceOccurrence{
+				{Location: "/etc/ssl/certs/server.pem"},
+				{Location: "23.88.35.44:443"},
+			}, *stored.Evidence.Occurrences)
+		})
+	}
+}
+
+// TestAppendDetection_CertificateSourceFormatRebuildNormalisesTheStoredRun is the
+// other half of its sibling above, and states the bound on how far that no-op
+// reaches: the early return is slices.Equal(merged, storedValues), an
+// order-sensitive comparison against DOCUMENT order, not a test of set
+// membership. A stored run that is out of order or repeats a value is therefore
+// NOT equal to the sorted union even when the incoming detection adds nothing to
+// the set, so it is rebuilt -- and the rebuild always emits the run ascending and
+// deduped.
+//
+// Both cases below add nothing to the SET (stored already knows DER) while
+// differing from the sorted union as a SEQUENCE, which is exactly the gap
+// between the two notions. Without them slices.Equal is only ever exercised in
+// its already-canonical form, where the cheaper and WRONG
+// len(merged) == len(storedValues) is indistinguishable from it: against a
+// stored run of [PEM, PEM] with DER arriving, that comparison sees 2 == 2,
+// returns early and silently drops DER -- losing a source the scan really
+// observed, which is the defect this whole merge exists to prevent.
+func TestAppendDetection_CertificateSourceFormatRebuildNormalisesTheStoredRun(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored []cdx.Property
+		want   []cdx.Property
+	}{
+		{
+			name: "descending run is re-sorted",
+			stored: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateSourceFormat, Value: "DER"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+			want: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "DER"},
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+		},
+		{
+			// The case the length comparison cannot tell from the real one: the
+			// stored run and the sorted union are both two entries long, but the
+			// stored one says PEM twice and knows nothing of DER.
+			name: "repeated value is deduped and the new source still lands",
+			stored: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+			want: []cdx.Property{
+				{Name: ilm.CertificateSourceFormat, Value: "DER"},
+				{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+				{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+				{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+			require.NoError(t, err)
+			builder.AppendDetections(t.Context(),
+				certificateDetectionWithProperties("PEM", "/etc/ssl/certs/server.pem", &tt.stored),
+				certificateDetection("DER", "/etc/ssl/certs/server.der"))
+
+			require.Equal(t, tt.want, storedCertificateProperties(t, builder),
+				"a detection that reaches the rebuild gets the sorted, deduped "+
+					"union, and DER must survive it")
+		})
+	}
+}
+
+// TestAppendDetection_CertificateSourceFormatMatchesOneExactPropertyName pins
+// that the merge is keyed on ilm:component:certificate:source_format by exact,
+// case-sensitive, whole-string comparison. Property names are opaque strings in
+// both schemas, so a name that merely resembles this one is a DIFFERENT
+// property belonging to someone else.
+//
+// The two decoys are the two ways the comparison plausibly rots. A prefix match
+// on "ilm:component:certificate:" would swallow base64_content and fingerprint
+// as if they were provenance -- emitting a certificate's own bytes as a source
+// format. A case-insensitive match would read the differently-cased name as
+// ours, fold its value into the run, and then leave the original in place
+// because the rebuild loop still compares exactly, emitting the value twice.
+// Both decoys must come through untouched, in their original positions, and
+// neither may contribute a value to the run.
+func TestAppendDetection_CertificateSourceFormatMatchesOneExactPropertyName(t *testing.T) {
+	const (
+		differentCase = "ILM:Component:Certificate:Source_Format"
+		longerName    = ilm.CertificateSourceFormat + "_legacy"
+	)
+
+	stored := []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: differentCase, Value: "DER"},
+		{Name: longerName, Value: "JKS"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}
+
+	builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+	builder.AppendDetections(t.Context(),
+		certificateDetectionWithProperties("PEM", "/etc/ssl/certs/server.pem", &stored),
+		certificateDetection("PKCS12", "/etc/ssl/store.p12"))
+
+	require.Equal(t, []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateSourceFormat, Value: "PKCS12"},
+		{Name: differentCase, Value: "DER"},
+		{Name: longerName, Value: "JKS"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}, storedCertificateProperties(t, builder),
+		"only the exactly-named property is merged: DER and JKS belong to other "+
+			"properties and must neither join the run nor lose their places")
+}
+
+// TestAppendDetection_CertificateSourceFormatUnionIsLoggedAtDebugNotWarn pins
+// the severity of the one line the merge emits. Its sibling
+// TestAppendDetection_IdenticalCertificateSourceFormatIsNotRepeated asserts
+// silence at WARN, but it feeds ONE distinct source, where len(merged) is 1 and
+// no line is emitted at any level -- so it would still pass if the union logged
+// at WARN, ERROR or not at all. Only two distinct sources reach the log
+// statement.
+//
+// The severity is the assertion, not decoration. A certificate that sits in
+// /etc/ssl/certs and is also served on 443 is the ordinary deployment, not a
+// producer defect: mergeRelatedCryptoMaterialFormat warns because two encodings
+// of one key mean somebody is wrong, whereas two sources for one certificate
+// mean the certificate is deployed twice. Warning here would fire on almost
+// every real scan and train operators to ignore the one warning that matters.
+// The line still has to EXIST at DEBUG, because it is what explains a
+// certificate carrying two provenance values to whoever is reading the BOM.
+//
+// The third subtest pins the len(merged) > 1 guard on that line, which the two
+// above cannot see: they merge two sources, so the guard holds either way. A
+// merge that rebuilds a run of ONE -- an unlabelled hit later given a real
+// source -- still reaches the log statement, and unguarded it would announce
+// "certificate observed in more than one source format" with a single value
+// beside it, which is simply untrue.
+func TestAppendDetection_CertificateSourceFormatUnionIsLoggedAtDebugNotWarn(t *testing.T) {
+	capture := func(t *testing.T, level slog.Level, detections []model.Detection, want []cdx.Property) string {
+		t.Helper()
+
+		var logBuf bytes.Buffer
+		restore := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: level})))
+		t.Cleanup(func() { slog.SetDefault(restore) })
+
+		builder, err := NewBuilder(model.CBOM{Version: "1.6"})
+		require.NoError(t, err)
+		builder.AppendDetections(t.Context(), detections...)
+
+		// The merge really did run and rewrite the list, so an empty log below
+		// means the merge was silent and not that nothing happened.
+		require.Equal(t, want, storedCertificateProperties(t, builder))
+
+		return logBuf.String()
+	}
+
+	// Two distinct sources: the union really is plural.
+	twoSources := []model.Detection{
+		certificateDetection("PEM", "/etc/ssl/certs/server.pem"),
+		certificateDetection("NMAP", "23.88.35.44:443"),
+	}
+	wantTwo := []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "NMAP"},
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}
+
+	// One distinct source, but the rebuild still runs: the stored detection was
+	// never labelled (model.CertHit.Source empty, so source_format=""), and the
+	// second one supplies the real value. The empty string is not an observation,
+	// so the union has exactly one element -- and the log statement is reached.
+	oneSource := []model.Detection{
+		certificateDetection("", "/etc/ssl/certs/server.pem"),
+		certificateDetection("PEM", "23.88.35.44:443"),
+	}
+	wantOne := []cdx.Property{
+		{Name: ilm.CertificateSourceFormat, Value: "PEM"},
+		{Name: ilm.CertificateBase64Content, Value: sharedCertBase64},
+		{Name: ilm.CertificateFingerprint, Value: sharedCertFingerprint},
+	}
+
+	t.Run("silent at warn", func(t *testing.T) {
+		require.Empty(t, capture(t, slog.LevelWarn, twoSources, wantTwo),
+			"a certificate found on disk and on the wire is normal operations; "+
+				"reporting it at WARN would fire on the common path")
+	})
+
+	t.Run("explained at debug", func(t *testing.T) {
+		logged := capture(t, slog.LevelDebug, twoSources, wantTwo)
+		require.Contains(t, logged, "level=DEBUG")
+		require.Contains(t, logged, "certificate observed in more than one source format")
+		require.Contains(t, logged, "ref="+sharedCertRef)
+		require.Contains(t, logged, "source_formats=NMAP,PEM",
+			"the line names every source that was folded in, in the order emitted")
+	})
+
+	t.Run("a single source is not announced as more than one", func(t *testing.T) {
+		logged := capture(t, slog.LevelDebug, oneSource, wantOne)
+		require.NotContains(t, logged, "certificate observed in more than one source format",
+			"the merge rewrote the list but folded in exactly one source; saying "+
+				"it observed more than one would be a false statement in the log")
+		require.NotContains(t, logged, "source_formats=")
+	})
+}
+
+// TestMergeCertificateSourceFormat_NilComponentsAreIgnored pins the guard that
+// mirrors mergeRelatedCryptoMaterialFormat's. appendDetection cannot pass nil
+// today -- stored comes from a map hit and incoming is &compo -- so the guard
+// exists for the next caller, and a guard no test exercises is a guard the next
+// refactor deletes. Dropping it does not fail loudly either: a nil incoming
+// still returns early through certificateSourceFormats' own nil check, and a nil
+// stored survives that same check, so it runs on to panic on the first READ of
+// stored.Properties -- several statements after the point that actually went
+// wrong, and only once some detection carries a source_format at all, since an
+// --ilm-off run returns before ever reaching it.
+//
+// Called directly rather than through AppendDetections because there is no
+// detection shape that produces a nil component pointer.
+func TestMergeCertificateSourceFormat_NilComponentsAreIgnored(t *testing.T) {
+	props := ilmCertificateProperties("PEM")
+	compo := cdx.Component{
+		BOMRef:     sharedCertRef,
+		Name:       "www.example.com",
+		Type:       cdx.ComponentTypeCryptographicAsset,
+		Properties: &props,
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType: cdx.CryptoAssetTypeCertificate,
+		},
+	}
+
+	require.NotPanics(t, func() {
+		mergeCertificateSourceFormat(t.Context(), nil, &compo)
+	}, "a nil stored component has no property list to write the run into")
+	require.NotPanics(t, func() {
+		mergeCertificateSourceFormat(t.Context(), &compo, nil)
+	}, "a nil incoming component observed nothing")
+	require.NotPanics(t, func() {
+		mergeCertificateSourceFormat(t.Context(), nil, nil)
+	})
+
+	require.Equal(t, ilmCertificateProperties("PEM"), *compo.Properties,
+		"the component that was not nil must come back untouched")
 }

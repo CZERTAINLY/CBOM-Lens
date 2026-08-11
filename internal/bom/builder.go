@@ -15,6 +15,7 @@ import (
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/ilm"
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
 	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 	"github.com/OmniTrustILM/cbom-lens/internal/stats"
@@ -182,6 +183,7 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 			// first does not has to be merged here explicitly, exactly as
 			// evidence.occurrences already is.
 			mergeRelatedCryptoMaterialFormat(ctx, stored, &compo)
+			mergeCertificateSourceFormat(ctx, stored, &compo)
 			addEvidenceLocation(stored, detection.Location)
 			continue
 		}
@@ -630,6 +632,182 @@ func mergeRelatedCryptoMaterialFormat(ctx context.Context, stored, incoming *cdx
 		"kept", kept,
 		"discarded", discarded)
 	props.Format = kept
+}
+
+// certificateSourceFormats returns, in document order, the value of every
+// ilm:component:certificate:source_format property carried by c.
+//
+// An empty value is not an observation and is skipped. model.CertHit.Source is
+// a plain string and nothing obliges a scanner to fill it, so
+// ilm.CertificateProperties will happily write source_format=""; since "" sorts
+// before every entry of the real vocabulary, admitting it would put a valueless
+// property at the head of every certificate one scanner failed to label.
+func certificateSourceFormats(c *cdx.Component) []string {
+	if c == nil || c.Properties == nil {
+		return nil
+	}
+	var out []string
+	for _, p := range *c.Properties {
+		if p.Name == ilm.CertificateSourceFormat && p.Value != "" {
+			out = append(out, p.Value)
+		}
+	}
+	return out
+}
+
+// mergeCertificateSourceFormat folds an incoming component's
+// ilm:component:certificate:source_format properties into the ones already
+// stored under the same bom-ref, so the emitted values are decided by the SET of
+// detections that resolve to that ref and never by the order they arrive in.
+//
+// Only the Builder can decide this. ilm.CertificateProperties writes whatever
+// model.CertHit.Source it was handed -- PEM, DER, PKCS7-PEM, PKCS7-DER, PKCS12,
+// JKS, JCEKS, ZIP/<subsource>, NMAP -- while a certificate's bom-ref is
+// crypto/certificate/<name>@<digest of cert.Raw> (cdxprops.certComponent), a
+// pure function of the certificate's own bytes carrying nothing about where or
+// how it was found. That is deliberate: it is what lets one certificate found in
+// three places dedupe to one asset. Converter.CertHit runs once per hit and the
+// Converter is a value copied across the scanning goroutines, so no producer can
+// see that another source found the same certificate; scanning fans out over
+// goroutines (internal/parallel) onto one channel (cmd/cbom-lens/lens.go), so
+// under first-wins the emitted source_format was whichever detection happened to
+// finish first. Putting the source into the hash instead was rejected: that
+// gives one asset N refs, the defect #217 exists to remove.
+//
+// Unlike mergeRelatedCryptoMaterialFormat, this keeps EVERY distinct value
+// rather than tie-breaking, and never warns. format describes the OBJECT, so two
+// encodings of one key mean a producer is wrong; source_format describes
+// PROVENANCE, and a certificate really can sit in a .pem and inside a .p12 and
+// be served on 443 at the same time. Both claims are true, so discarding one
+// would lose a fact, and a warning would fire on the ordinary deployment rather
+// than on a defect. Repeated property names are explicitly legal in both
+// schemas: "Duplicate names are allowed, each potentially having a different
+// value", and neither puts uniqueItems on the properties array. The values are
+// sorted ascending and deduped by exact, case-sensitive, byte-wise comparison of
+// the property VALUE; the scanners emit fixed literals, and normalising them
+// would rewrite a producer's claim, which would be a second defect.
+//
+// It reads the incoming component's PROPERTY rather than detection.Source
+// because that field is the SCANNER's label and not the producer's fact (see
+// appendDetection's drop warning). Reading the property also makes the whole
+// merge a no-op when --ilm is off, since certComponent then never assigns
+// Properties at all, so vanilla CycloneDX output stays byte-identical without
+// giving the Builder an ilm flag it does not have.
+//
+// The merge is scoped to this ONE property name. A generic property-set union
+// would look tidier and would also re-sort base64_content and fingerprint --
+// which cannot disagree anyway: base64_content is base64(cert.Raw) and
+// fingerprint is sha256(cert.Raw) while the ref is name@sha256(cert.Raw), so two
+// components under one ref carry the same cert.Raw modulo a SHA-256 collision.
+// source_format is the only ILM certificate property that can differ, and
+// everything else stays first-wins.
+//
+// A detection that adds nothing to the set is a no-op, but the test for that is
+// slices.Equal against the stored values IN DOCUMENT ORDER, which is stricter
+// than set equality on purpose. A stored run that is already the sorted union
+// survives untouched; one that is out of order or repeats a value is rebuilt and
+// comes out ascending and deduped. Comparing merely lengths would let [PEM, PEM]
+// swallow an arriving DER -- the two are both two entries long -- and dropping an
+// observed source is the defect this exists to prevent. Comparing sets would keep
+// every source but leave a disordered or repeating stored run un-normalised, so
+// the emitted order would again depend on which detection arrived first. Only the
+// source_format run is ever rewritten; the surrounding properties keep their
+// values and their relative order either way.
+//
+// When stored carries no source_format at all the run is appended only to a
+// certificate asset, mirroring mergeRelatedCryptoMaterialFormat's gate:
+// stamping a certificate's provenance onto an algorithm or key material is #213
+// one field over, and a component with no cryptoProperties has no asset type to
+// vouch for it. Like that sibling's, the gate sits in the arm that would INVENT
+// the field and not at the top of the function, so a component that somehow
+// already carried the property would have a value folded into its existing run
+// without a type check. Nothing reaches that: cdxprops.certComponent is the only
+// writer of this name and always sets assetType=certificate. The gate guards
+// creation, which is what #213 actually was.
+//
+// The rebuilt list is assigned as a NEW pointer and is never appended through
+// the existing one. ilm.CertificateProperties hands out a slice with capacity 20
+// and length 3, which the caller's model.Detection still holds, so appending in
+// place would write into the caller's detection; allocating fresh means this
+// merge -- unlike mergeRelatedCryptoMaterialFormat, which writes through shared
+// nested pointers -- does not mutate the incoming Detection at all.
+func mergeCertificateSourceFormat(ctx context.Context, stored, incoming *cdx.Component) {
+	if stored == nil || incoming == nil {
+		return
+	}
+
+	incomingValues := certificateSourceFormats(incoming)
+	if len(incomingValues) == 0 {
+		return
+	}
+	storedValues := certificateSourceFormats(stored)
+
+	observed := make(map[string]struct{}, len(storedValues)+len(incomingValues))
+	for _, v := range storedValues {
+		observed[v] = struct{}{}
+	}
+	for _, v := range incomingValues {
+		observed[v] = struct{}{}
+	}
+	merged := slices.Sorted(maps.Keys(observed))
+
+	// The same certificate found in the same format twice -- one CA shipped in
+	// two files under /etc/ssl/certs -- changes nothing but evidence.occurrences.
+	// Compared as a SEQUENCE, not as a set: a stored run that is out of order or
+	// repeats a value differs from the sorted union and is rebuilt, and a length
+	// test in its place would let [PEM, PEM] swallow an arriving DER.
+	if slices.Equal(merged, storedValues) {
+		return
+	}
+
+	var props []cdx.Property
+	if stored.Properties != nil {
+		props = *stored.Properties
+	}
+
+	appendRun := func(dst []cdx.Property) []cdx.Property {
+		for _, v := range merged {
+			dst = append(dst, cdx.Property{Name: ilm.CertificateSourceFormat, Value: v})
+		}
+		return dst
+	}
+
+	// The whole run lands at the position of the FIRST source_format property and
+	// any later one is dropped, so a producer that put other properties before
+	// its provenance does not find them shuffled. The run itself is always
+	// emitted ascending, replacing whatever order the stored one happened to be
+	// in; it is the OTHER properties whose order is preserved.
+	out := make([]cdx.Property, 0, len(props)+len(merged))
+	var placed bool
+	for _, p := range props {
+		if p.Name != ilm.CertificateSourceFormat {
+			out = append(out, p)
+			continue
+		}
+		if placed {
+			continue
+		}
+		out = appendRun(out)
+		placed = true
+	}
+	if !placed {
+		if stored.CryptoProperties == nil ||
+			stored.CryptoProperties.AssetType != cdx.CryptoAssetTypeCertificate {
+			return
+		}
+		out = appendRun(out)
+	}
+
+	stored.Properties = &out
+
+	// Debug, never Warn: a certificate deployed in more than one place is normal
+	// operations, not a producer defect, and a warning on the common path is a
+	// warning nobody reads.
+	if len(merged) > 1 {
+		slog.DebugContext(ctx, "certificate observed in more than one source format",
+			"ref", stored.BOMRef,
+			"source_formats", strings.Join(merged, ","))
+	}
 }
 
 func bomStatistics(counter *stats.Stats) []cdx.Property {
