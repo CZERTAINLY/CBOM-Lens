@@ -297,7 +297,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 		// the PKCS#8 path.
 		withTrailer := append(synthPKIX(t, mlKEM768OID), 0xde, 0xad, 0xbe, 0xef)
 
-		_, _, err := c.unsupportedPKIX(withTrailer)
+		_, _, err := c.unsupportedPKIX(t.Context(), withTrailer)
 		require.ErrorContains(t, err, "parsing PKIX via ASN.1")
 		require.ErrorContains(t, err, "trailing data")
 	})
@@ -332,7 +332,7 @@ func TestOIDSweep_Negatives(t *testing.T) {
 			{"three bytes", []byte{0xde, 0xad, 0xbe}},
 			{"a whole second DER structure", spki},
 		} {
-			_, _, err := c.unsupportedPKIX(slices.Concat(spki, tt.tail))
+			_, _, err := c.unsupportedPKIX(t.Context(), slices.Concat(spki, tt.tail))
 			require.ErrorContains(t, err, "trailing data", "PKIX: %s", tt.name)
 
 			_, _, err = c.unsupportedPKCS8PrivateKey(t.Context(), slices.Concat(pkcs8, tt.tail))
