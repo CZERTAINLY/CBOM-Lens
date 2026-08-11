@@ -1,6 +1,8 @@
 package cdxprops_test
 
 import (
+	"crypto/x509"
+	"strings"
 	"testing"
 
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
@@ -140,6 +142,107 @@ func TestCertHit_OneCertTwoSourcesShareARefAndDisagreeOnSourceFormat(t *testing.
 	require.Equal(t, fingerprint, cdxtest.GetProp(wireCert, ilm.CertificateFingerprint),
 		"fingerprint is sha256(cert.Raw), so it cannot differ either -- "+
 			"source_format is the only ILM certificate property that can")
+}
+
+// TestCertHit_TwoRSACertificatesShareASigAlgRefAndNameTwoRSA2048Algorithms is
+// the edge-shaped collision that makes the ORDER of the Builder's union -- not
+// only its contents -- observable in the delivered document.
+//
+// A signature algorithm's bom-ref is a pure function of the enum and the OID
+// (signatureAlgorithmComponents), so any two SHA256WithRSA certificates land on
+// one ref. What each of them names as that ref's public-key-algorithm target is
+// a hash of the algorithm COMPONENT, and publicKeyComponents stamps the
+// primitive onto that component before hashing it: RSA with digitalSignature
+// keyUsage is a signature scheme, RSA with keyEncipherment is pke. Two
+// components, one name, two digests -- so the union under the shared ref holds
+// two targets identical up to the "@".
+//
+// That is what bom.Builder has to order for itself. safeRef, which mints the
+// refs the document carries, keeps everything before the "@" and replaces the
+// digest with a UUIDv5, so it preserves order for refs that differ before the
+// "@" and NOT for this pair: the sort mergeDependsOn applies to the RAW refs is
+// the only thing deciding how these two are emitted. See
+// TestBuilder_AppendDetections_DependsOnOrdersTargetsThatShareARefPrefix.
+//
+// Nothing here is wrong on its own: this test asserts the collision, not a
+// defect.
+func TestCertHit_TwoRSACertificatesShareASigAlgRefAndNameTwoRSA2048Algorithms(t *testing.T) {
+	t.Parallel()
+
+	signing, err := cdxtest.CertBuilder{}.
+		WithSignatureAlgorithm(x509.SHA256WithRSA).
+		WithKeyUsage(x509.KeyUsageDigitalSignature).
+		Generate()
+	require.NoError(t, err)
+
+	encipherment, err := cdxtest.CertBuilder{}.
+		WithSignatureAlgorithm(x509.SHA256WithRSA).
+		WithKeyUsage(x509.KeyUsageKeyEncipherment).
+		Generate()
+	require.NoError(t, err)
+
+	c := cdxprops.NewConverter()
+
+	signingDetection := c.CertHit(t.Context(), model.CertHit{
+		Cert:     signing.Cert,
+		Source:   "PEM",
+		Location: "/etc/ssl/certs/rsa-signing.pem",
+	})
+	require.NotNil(t, signingDetection)
+
+	enciphermentDetection := c.CertHit(t.Context(), model.CertHit{
+		Cert:     encipherment.Cert,
+		Source:   "PEM",
+		Location: "/etc/ssl/certs/rsa-encipherment.pem",
+	})
+	require.NotNil(t, enciphermentDetection)
+
+	signingDeps := signingDetection.Dependencies
+	enciphermentDeps := enciphermentDetection.Dependencies
+	require.Len(t, signingDeps, 1, "the certificate names one signature algorithm")
+	require.Len(t, enciphermentDeps, 1, "so does the other")
+
+	// Checked before the equality: two empty refs are also "equal".
+	require.NotEmpty(t, signingDeps[0].Ref)
+	require.Equal(t, signingDeps[0].Ref, enciphermentDeps[0].Ref,
+		"one signature algorithm is one bom-ref regardless of what the subject "+
+			"key is used for; that is what makes the two detections collide in "+
+			"the Builder")
+
+	require.NotNil(t, signingDeps[0].Dependencies)
+	require.NotNil(t, enciphermentDeps[0].Dependencies)
+	signingTarget := publicKeyAlgorithmTarget(t, *signingDeps[0].Dependencies)
+	enciphermentTarget := publicKeyAlgorithmTarget(t, *enciphermentDeps[0].Dependencies)
+
+	require.NotEqual(t, signingTarget, enciphermentTarget,
+		"the two certificates name different public-key-algorithm assets, "+
+			"because the primitive is hashed into the component's ref")
+
+	signingName, _, ok := strings.Cut(signingTarget, "@")
+	require.True(t, ok)
+	enciphermentName, _, ok := strings.Cut(enciphermentTarget, "@")
+	require.True(t, ok)
+	require.Equal(t, signingName, enciphermentName,
+		"...and they are identical up to the \"@\", which is the whole point: "+
+			"safeRef preserves only that part, so nothing downstream of "+
+			"mergeDependsOn can order this pair")
+	require.Equal(t, "crypto/algorithm/rsa-2048", signingName)
+}
+
+// publicKeyAlgorithmTarget picks the RSA target out of a signature algorithm's
+// edge set, which certHitToComponents builds as {public-key algorithm, hash
+// algorithm}.
+func publicKeyAlgorithmTarget(t *testing.T, targets []string) string {
+	t.Helper()
+
+	var found []string
+	for _, target := range targets {
+		if strings.HasPrefix(target, "crypto/algorithm/rsa-") {
+			found = append(found, target)
+		}
+	}
+	require.Len(t, found, 1, "expected exactly one public-key-algorithm target in %v", targets)
+	return found[0]
 }
 
 // certificateComponent returns the single certificate component among compos,

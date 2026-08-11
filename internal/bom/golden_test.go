@@ -10,6 +10,7 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -301,6 +302,65 @@ func certFromNmapFixture(t *testing.T, host nmapv4.Host) *x509.Certificate {
 	}
 	t.Fatal("no ssl-cert PEM element found in nmap fixture")
 	return nil
+}
+
+// TestGolden_DependsOnIsIndependentOfDetectionOrder is the corpus-level
+// tripwire: the same representative scan, appended back to front, must deliver
+// the SAME dependency rows byte for byte, in both spec versions.
+//
+// The unit tests in builder_test.go build their own detections; this one runs
+// the real converters over the committed fixtures, which is where a collision
+// nobody modelled shows up. The corpus already contains one -- a certificate and
+// a CRL both signed ECDSA-SHA256, sharing crypto/algorithm/sha-256-ecdsa -- and
+// it survived first-wins only because the certificate happens to be appended
+// first and the CRL's edge set is a subset of it. Reversed, first-wins drops the
+// certificate's edge to its own public-key algorithm and this test fails, while
+// TestGolden_1_6 does not: a golden pins one arrival order, and the order is the
+// bug.
+//
+// Scoped to the dependency rows deliberately. The WHOLE document is NOT yet
+// order-independent: certificateExtension (1.6) / certificateFileExtension (1.7)
+// is filepath.Ext(hit.Location) on a component whose bom-ref is a digest of
+// cert.Raw alone, so the nmap and the PEM sighting of one certificate disagree
+// on it and the first appended wins -- reversing this corpus flips it from
+// ".pem" to ".44:443". That is the same defect this change fixed for dependsOn,
+// one field over, and out of scope here. Widening this test to the whole
+// document is the right move once that is fixed; weakening it is not.
+func TestGolden_DependsOnIsIndependentOfDetectionOrder(t *testing.T) {
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			forward := fixtureDetections(t)
+			reversed := fixtureDetections(t)
+			slices.Reverse(reversed)
+
+			want := goldenDependencyRows(t, renderDependsOnBOM(t, version, forward...))
+			got := goldenDependencyRows(t, renderDependsOnBOM(t, version, reversed...))
+
+			// The corpus really does exercise the merge, so two empty renderings
+			// cannot pass this by agreeing about nothing.
+			require.NotEmpty(t, want)
+			require.Contains(t, want, `"dependsOn"`,
+				"the corpus must contain at least one dependency edge")
+
+			require.Equal(t, want, got,
+				"appending the same scan in the opposite order must deliver the "+
+					"same dependency rows byte for byte")
+		})
+	}
+}
+
+// goldenDependencyRows re-encodes just the dependencies array of doc, so that a
+// difference elsewhere in the document cannot be mistaken for a dependency one.
+func goldenDependencyRows(t *testing.T, doc string) string {
+	t.Helper()
+
+	var bom cdx.BOM
+	require.NoError(t, json.Unmarshal([]byte(doc), &bom))
+	require.NotNil(t, bom.Dependencies)
+
+	raw, err := json.MarshalIndent(bom.Dependencies, "", "  ")
+	require.NoError(t, err)
+	return string(raw)
 }
 
 func TestGolden_1_7(t *testing.T) {

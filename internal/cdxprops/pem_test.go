@@ -368,6 +368,88 @@ func publicKeyComponent(t *testing.T, compos []cdx.Component) cdx.Component {
 	return found[0]
 }
 
+// TestPEMBundle_CRLAndCertificateShareASignatureAlgorithmRefAndDisagreeOnItsEdges
+// is the edge-shaped twin of the test above: it documents the precondition that
+// made a certificate's dependsOn array nondeterministic, and shows it is
+// STRUCTURAL rather than a race.
+//
+// A signature algorithm's bom-ref is derived from the x509.SignatureAlgorithm
+// enum and the OID alone (signatureAlgorithmComponents), so one CA certificate
+// and a CRL that CA signed land on the same ref -- deliberately, since they
+// really are the same algorithm. What differs is what each producer can say
+// about it. certHitToComponents decomposes a certificate's signature into the
+// subject's public-key algorithm AND the hash, while crlToCDX names only the
+// hash, because a revocation list has no subject key to name. Two true claims
+// about one ref, made by two producers neither of which can see the other.
+//
+// Nothing here is wrong on its own: this test asserts the collision, not a
+// defect. Reconciling it is bom.Builder.appendDetection's job -- see
+// mergeDependsOn and
+// TestBuilder_AppendDetections_DependsOnSurvivesEveryArrivalPermutation.
+func TestPEMBundle_CRLAndCertificateShareASignatureAlgorithmRefAndDisagreeOnItsEdges(t *testing.T) {
+	t.Parallel()
+
+	ca, err := cdxtest.CertBuilder{}.
+		WithIsCA(true).
+		WithSignatureAlgorithm(x509.ECDSAWithSHA256).
+		WithKeyUsage(x509.KeyUsageCRLSign | x509.KeyUsageCertSign).
+		Generate()
+	require.NoError(t, err)
+	signer, ok := ca.Key.(crypto.Signer)
+	require.True(t, ok)
+
+	crl, _, err := cdxtest.GenCRL(ca.Cert, signer)
+	require.NoError(t, err)
+	require.Equal(t, ca.Cert.SignatureAlgorithm, crl.SignatureAlgorithm,
+		"the two fixtures must be signed with the same algorithm, or there is no "+
+			"collision to assert")
+
+	c := cdxprops.NewConverter()
+
+	certDetection := c.CertHit(t.Context(), model.CertHit{
+		Cert:     ca.Cert,
+		Source:   "PEM",
+		Location: "/etc/ssl/certs/ca.pem",
+	})
+	require.NotNil(t, certDetection)
+
+	crlDetection := c.PEMBundle(t.Context(), model.PEMBundle{
+		Location: "/etc/ssl/crl/revocations.pem",
+		CRLs:     []*x509.RevocationList{crl},
+	})
+	require.NotNil(t, crlDetection)
+
+	certDeps := certDetection.Dependencies
+	crlDeps := crlDetection.Dependencies
+	require.Len(t, certDeps, 1, "the certificate names one signature algorithm")
+	require.Len(t, crlDeps, 1, "so does the revocation list")
+
+	// Checked before the equality: two empty refs are also "equal", and both
+	// producers do return without a dependency entry for an algorithm that names
+	// no hash, so without this the collision could be asserted by a path where no
+	// collision exists.
+	require.NotEmpty(t, certDeps[0].Ref)
+	require.Equal(t, certDeps[0].Ref, crlDeps[0].Ref,
+		"one algorithm is one bom-ref regardless of what it signed; that is what "+
+			"makes the two detections collide in the Builder")
+
+	require.NotNil(t, certDeps[0].Dependencies)
+	require.NotNil(t, crlDeps[0].Dependencies)
+	require.NotEqual(t, *crlDeps[0].Dependencies, *certDeps[0].Dependencies,
+		"the two producers describe the same ref's edges differently, which is "+
+			"what a first-wins store had to choose between")
+
+	require.Len(t, *certDeps[0].Dependencies, 2,
+		"a certificate's signature decomposes into the subject's public-key "+
+			"algorithm and the hash")
+	require.Len(t, *crlDeps[0].Dependencies, 1,
+		"a revocation list has no subject key, so it names only the hash")
+	require.Subset(t, *certDeps[0].Dependencies, *crlDeps[0].Dependencies,
+		"the CRL's claim is a subset of the certificate's here, which is the only "+
+			"reason the golden corpus survived first-wins: the certificate is "+
+			"appended first and the CRL took nothing away")
+}
+
 // TestPEMBundle_StandaloneDSAPublicKeyDoesNotPanic covers the crash that
 // shipped undetected because nothing fed a *dsa.PublicKey through
 // bundle.PublicKeys.

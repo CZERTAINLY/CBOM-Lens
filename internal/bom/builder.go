@@ -100,10 +100,16 @@ func (b *Builder) WithSerial(f func() string) *Builder {
 }
 
 // AppendDetections folds each detection into the Builder: one component stored
-// per bom-ref, plus the detection's dependency edges (first ref wins). A repeat
+// per bom-ref, plus the detection's dependency edges, unioned per ref. A repeat
 // of a bom-ref does not replace the component already held -- what the second
 // detection knows and the first does not is merged into it explicitly, which
-// today means its evidence location and its related-crypto-material format.
+// today means its evidence location, its related-crypto-material format and its
+// certificate source_format. The dependency edges are the one thing that is not
+// first-wins at all: two detections naming one ref are describing one asset's
+// edges, and both are right, so mergeDependsOn unions them and sorts the result.
+// That sentence used to read "first ref wins", which cost a certificate its edge
+// to its own public-key algorithm whenever a CRL signed with the same algorithm
+// happened to be scanned first.
 //
 // A detection passed here comes back unchanged. The components are stored as
 // copies: cloneOnStore detaches the parts the Builder writes to -- evidence, and
@@ -118,6 +124,10 @@ func (b *Builder) WithSerial(f func() string) *Builder {
 // That is a statement about today's writers, not a promise about the type or an
 // exhaustive list; cloneOnStore says why the named omissions are safe and what a
 // new Builder write would have to add.
+//
+// The dependency edges are copied on the same terms: mergeDependsOn stores a
+// slice it allocated itself and never the *[]string the detection carried, so
+// the union cannot grow the caller's slice or write into its backing array.
 func (b *Builder) AppendDetections(ctx context.Context, detections ...model.Detection) *Builder {
 	for _, d := range detections {
 		b.appendDetection(ctx, d)
@@ -130,12 +140,7 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 		if dep.Ref == "" {
 			continue
 		}
-		_, ok := b.dependencies[dep.Ref]
-		if ok {
-			slog.DebugContext(ctx, "ignoring dependency: already stored", "ref", dep.Ref)
-			continue
-		}
-		b.dependencies[dep.Ref] = dep.Dependencies
+		b.mergeDependsOn(ctx, dep)
 	}
 
 	for _, compo := range detection.Components {
@@ -556,6 +561,136 @@ func addEvidenceLocation(c *cdx.Component, locations ...string) {
 	}
 
 	c.Evidence.Occurrences = &occurences
+}
+
+// mergeDependsOn folds one detection's dependency entry into the edges already
+// stored under the same bom-ref, so the emitted dependsOn array is decided by
+// the SET of detections naming that ref as a source and never by the order they
+// arrive in.
+//
+// Only the Builder can decide this. A signature algorithm's bom-ref is a pure
+// function of the x509.SignatureAlgorithm enum and the OID
+// (cdxprops.signatureAlgorithmComponents), so every ECDSA-SHA256 signature in a
+// scan -- on a certificate, on a CRL, on anything else PKIX signs -- lands on
+// ONE ref. That is deliberate, and it is the same property that lets one
+// certificate found at three paths dedupe to one asset. What it means here is
+// that two producers describe the edges of one asset and neither can see the
+// other: cdxprops.certHitToComponents claims {publicKeyAlg, hash} because a
+// certificate's signature algorithm decomposes into both, while cdxprops.crlToCDX
+// claims {hash} because a revocation list has no subject key to name. Scanning
+// fans out over goroutines (internal/parallel) onto one channel
+// (cmd/cbom-lens/lens.go), so which of them reached the Builder first was a coin
+// flip, and under first-wins the loser's edges were dropped with a Debug line.
+// The certificate lost the edge to its own public-key algorithm, and nothing
+// dangled or was flagged, because the components at both ends were still stored
+// by whichever detection carried them. The committed golden corpus contains that
+// exact pair -- one certificate and one CRL sharing crypto/algorithm/
+// sha-256-ecdsa -- and survived only by luck: the certificate is appended first
+// and the CRL's edge set is a subset of it.
+//
+// The union is the only defensible answer. dependsOn is a SET in CycloneDX, both
+// claims are true of the same asset, and dropping either loses a fact -- so
+// unlike mergeRelatedCryptoMaterialFormat there is nothing to tie-break and this
+// never warns. It is mergeCertificateSourceFormat's situation, one field over.
+//
+// The SORT is what makes the fix complete rather than half of one. Builder.model
+// flattens this map into one Relationship per edge and stable-sorts by From
+// ONLY, so within-From order is slice order, and regroupDependsOn -- shared by
+// emit16 and emit17 -- regroups consecutive same-From edges without deduping or
+// reordering. The order of this slice is therefore the byte order of the
+// delivered document, which two goldens pin. A union that appended in arrival
+// order would restore every edge and still emit a different byte sequence per
+// permutation: the same nondeterminism moved one field along, and invisible to
+// any test that compares dependsOn as a set.
+//
+// RAW refs are sorted, not the canonical ones model() mints, and the two orders
+// are not always the same. safeRef keeps everything before the "@" and replaces
+// the digest with a UUIDv5 of the whole raw ref, so it is order-preserving only
+// for pairs that already differ before the "@". Two targets CAN share that
+// prefix and be different assets: publicKeyComponents stamps the primitive onto
+// the algorithm component before BOMRefHash hashes it, and RSA's primitive is
+// read off KeyUsage, so a signing and an encrypting RSA-2048 certificate signed
+// with the same algorithm put two crypto/algorithm/rsa-2048@<different digest>
+// targets under one signature-algorithm ref. Their UUIDs then sort in an order
+// unrelated to their digests, and the emitted array is not ascending on the
+// wire.
+//
+// That is accepted, because the requirement is determinism and not lexicographic
+// wire order: the raw refs are a pure function of the detections, so the emitted
+// sequence is too, which is the whole property first-wins lacked. Sorting the
+// canonical refs instead would mean minting them here, before model() knows the
+// full component set -- trading a cosmetic gain for the ordering being computed
+// twice, in two places, from different inputs.
+//
+// The stored slice is always one this function allocated. Three ways to write
+// this are wrong and none fails loudly. Assigning dep.Dependencies adopts the
+// caller's pointer outright, so every later merge rewrites the caller's
+// detection. The other two only compound that one: given a stored slice this
+// function allocated, append(*stored, ...) through the held *[]string and
+// merged := append(*stored, ...) into a fresh pointer both damage the Builder's
+// OWN earlier slice -- reachable by the caller only once pointer adoption has
+// put the caller's array there, which is exactly the composite a refactor
+// reintroduces by halves. slices.Sorted allocates unconditionally, which is what
+// makes all three dead by construction and keeps AppendDetections' promise that
+// a detection handed to it comes back unchanged true for the dependency half --
+// today that promise rested on nothing, since first-wins simply never wrote.
+// This is what cloneOnStore does for components.
+//
+// A union that comes out empty creates no key at all, so a nil Dependencies and
+// an empty one converge. model() skips a nil entry silently but WARNS "dropping
+// dependency entry: ref has no component" for a non-nil empty one whose ref has
+// no component -- a warning about discarding zero edges.
+//
+// Targets are neither filtered for existence nor checked for self-reference. At
+// merge time "this target has no component" is not knowable: appendDetection
+// folds Dependencies in BEFORE the same detection's Components, and across
+// detections arrival order is arbitrary, so the component that resolves a target
+// is routinely in a detection not yet appended. Dropping an edge here would
+// delete a good one for being early. model() runs once over everything and is the
+// only place that can tell a dangling target from an early one.
+func (b *Builder) mergeDependsOn(ctx context.Context, dep cdx.Dependency) {
+	var stored []string
+	if p := b.dependencies[dep.Ref]; p != nil {
+		stored = *p
+	}
+
+	targets := make(map[string]struct{}, len(stored))
+	for _, to := range stored {
+		targets[to] = struct{}{}
+	}
+	before := len(targets)
+
+	if dep.Dependencies != nil {
+		for _, to := range *dep.Dependencies {
+			if to == "" {
+				continue
+			}
+			targets[to] = struct{}{}
+		}
+	}
+
+	merged := slices.Sorted(maps.Keys(targets))
+
+	// Compared as a SEQUENCE, not as a set, and not by length: a stored run that
+	// is out of order or repeats a target differs from the sorted union and is
+	// rebuilt, while a length test would let [sha-256, sha-256] swallow an
+	// arriving ecdsa-p-256. It also makes the whole call a no-op -- no
+	// allocation, no map write -- for the ordinary case of one certificate found
+	// in three files re-presenting the identical edge set three times.
+	if slices.Equal(merged, stored) {
+		return
+	}
+	b.dependencies[dep.Ref] = &merged
+
+	// Only when a SECOND contributor actually widened an existing set. Not on the
+	// first store, which is every edge in a normal scan, and not on a rebuild
+	// that merely re-sorted, which adds no fact.
+	if before > 0 && len(merged) > before {
+		slog.DebugContext(ctx, "one ref's dependency edges came from more than one detection",
+			"ref", dep.Ref,
+			"edges", strings.Join(merged, ","),
+			"added", len(merged)-before)
+	}
 }
 
 // mergeRelatedCryptoMaterialFormat folds an incoming component's
