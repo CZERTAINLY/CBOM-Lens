@@ -774,10 +774,11 @@ func (c Converter) unsupportedPKIX(ctx context.Context, der []byte) (key, algo c
 	setAlgorithmPrimitive(&algo, registryPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
 
-	// Check the LENGTH, and check it exactly. Unlike the private half there is
-	// no CHOICE to enumerate: RFC 9881 sec. 4, and the SLH-DSA and ML-KEM
-	// equivalents, put the encoded public key directly in the BIT STRING, so
-	// one algorithm has exactly one legal body length rather than several.
+	// Check the LENGTH, and check it exactly -- in bytes and in bits. Unlike
+	// the private half there is no CHOICE to enumerate: RFC 9881 sec. 4, and
+	// the SLH-DSA and ML-KEM equivalents, put the encoded public key directly
+	// in the BIT STRING, so one algorithm has exactly one legal body length
+	// rather than several.
 	if reason := rejectPublicKeyBody(info, pubKey.PublicKey); reason != "" {
 		slog.WarnContext(ctx, "not reporting a public key: the PKIX body is not this algorithm's public key",
 			"algorithm", info.name,
@@ -851,10 +852,11 @@ func registryPublicKeyBodySize(info algorithmInfo) int {
 // makes it a CHOICE of seed, expandedKey, or both, which is why
 // rejectPrivateKeyBody enumerates encodings and needs derOctetStringOf and its
 // siblings to tell them apart. A SubjectPublicKeyInfo has no such CHOICE: RFC
-// 9881 sec. 4, and the SLH-DSA and ML-KEM equivalents, put the encoded key
-// directly in the BIT STRING, so there is exactly one legal length per
-// algorithm and nothing wrapping it to inspect. That is why this side has no
-// shape helpers -- there is no shape, only a length.
+// 9881 sec. 4, and the SLH-DSA (RFC 9909 sec. 5) and ML-KEM (RFC 9935 sec. 4)
+// equivalents, put the encoded key directly in the BIT STRING, so there is
+// exactly one legal (byte length, bit length) pair per algorithm and nothing
+// wrapping it to inspect. That is why this side has no shape helpers -- there
+// is no shape, only a length.
 //
 // The comparison is an EXACT match rather than a floor. A floor at the registry
 // size would still pass a body one byte short of a real key, and the four-byte
@@ -866,6 +868,25 @@ func registryPublicKeyBodySize(info algorithmInfo) int {
 // asn1.BitString.Bytes excludes the leading unused-bits octet, so it is
 // directly comparable to the registry's byte counts: the ML-DSA-65 fixture's
 // BIT STRING is 1953 bytes on the wire and 1952 here.
+//
+// BitLength is not derived from Bytes, though, and checking the byte count is
+// not a substitute for checking it. encoding/asn1's decoder keeps the two
+// independent: it requires the unused bits a BIT STRING declares to actually
+// be zero, but never requires BitLength == len(Bytes)*8. A BIT STRING can
+// therefore decode with the registry's exact byte count and a BitLength a few
+// bits short of it -- 1 to 7, the range its one unused-bits octet can express
+// -- and a check that only reads len(Bytes) accepts it as a full key. RFC 9909
+// sec. 5 rules that out for a conformant encoder by stating the mapping
+// directly: "the most significant bit of the OCTET STRING value becomes the
+// most significant bit of the BIT STRING value ... the least significant bit
+// of the OCTET STRING becomes the least significant bit of the BIT STRING" --
+// a whole OCTET STRING mapped bit-for-bit leaves nothing unused. RFC 9881 sec.
+// 4 and RFC 9935 sec. 4 define the ML-DSA and ML-KEM public keys the same way,
+// as a fixed-size OCTET STRING placed in the BIT STRING with no wrapping, so
+// the same holds for them. A BitLength that disagrees with len(Bytes)*8 is
+// therefore refused exactly like a wrong byte count is: it is checked before
+// the registry lookup below, so it also catches this on XMSS, XMSS-MT and
+// HSS-LMS, which have no registry byte count to check against at all.
 //
 // An empty body is refused whatever the algorithm, for the same reason
 // rejectPrivateKeyBody refuses one: no encoding of any key is zero bytes, so
@@ -885,6 +906,18 @@ func registryPublicKeyBodySize(info algorithmInfo) int {
 func rejectPublicKeyBody(info algorithmInfo, pubKey asn1.BitString) string {
 	if len(pubKey.Bytes) == 0 {
 		return "empty body"
+	}
+
+	// encoding/asn1 keeps Bytes and BitLength independent: its decoder only
+	// requires the bits a BIT STRING declares unused to actually be zero, not
+	// that BitLength == len(Bytes)*8, so a body can decode with the right byte
+	// count and a BitLength a few bits short of it. None of these RFCs' PUBLIC-
+	// KEY definitions leave room for that -- see the doc comment above -- so
+	// this is checked exactly, the same way the byte count below is, and
+	// before the registry lookup so it applies to XMSS/XMSS-MT/HSS-LMS too,
+	// which registryPublicKeyBodySize has no byte count for.
+	if pubKey.BitLength != len(pubKey.Bytes)*8 {
+		return fmt.Sprintf("not a %d-bit public key", len(pubKey.Bytes)*8)
 	}
 
 	want := registryPublicKeyBodySize(info)

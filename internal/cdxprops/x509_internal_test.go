@@ -7,6 +7,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -98,8 +99,49 @@ func Test_certSPKI_RealCertificateFixturesMatchTheRegistry(t *testing.T) {
 				"the registry's byte count for %s", tt.algo)
 			require.Equal(t, tt.want, len(spki.PublicKey.Bytes),
 				"the fixture's BIT STRING content, with the unused-bits octet excluded")
+			require.Equal(t, tt.want*8, spki.PublicKey.BitLength,
+				"the fixture's declared bit count, with no unused bits")
 			require.Empty(t, rejectPublicKeyBody(info, spki.PublicKey),
 				"a real %s certificate must survive the check its garbage twin fails", tt.algo)
+		})
+	}
+}
+
+// Test_rejectPublicKeyBody_BitLengthMustMatchBytes pins the guard directly
+// against the unit rejectPublicKeyBody is: a BitLength that disagrees with
+// len(Bytes)*8 must be refused even when len(Bytes) alone is exactly the
+// registry's want, because encoding/asn1's BIT STRING decoder never requires
+// the two to agree (it only requires the padding octet's declared-unused bits
+// to be zero -- see parseBitString in GOROOT's encoding/asn1/asn1.go).
+//
+// Built by hand rather than through a DER round-trip: asn1.BitString{Bytes,
+// BitLength} is exactly the shape rejectPublicKeyBody reads, and the internal
+// test package can call it directly without going through unsupportedPKIX or
+// a PEM envelope.
+func Test_rejectPublicKeyBody_BitLengthMustMatchBytes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		oid   asn1.ObjectIdentifier
+		delta int // relative to byteWant*8
+	}{
+		{"ML-DSA-65 one bit short", mlDSA65OID, -1},
+		{"ML-KEM-768 four bits short", mlKEM768OID, -4},
+		{"ML-DSA-65 one bit long (unreachable off the wire, checked anyway)", mlDSA65OID, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			info, ok := unsupportedAlgorithms[tt.oid.String()]
+			require.True(t, ok)
+			byteWant := registryPublicKeyBodySize(info)
+			require.NotZero(t, byteWant)
+
+			body := asn1.BitString{Bytes: make([]byte, byteWant), BitLength: byteWant*8 + tt.delta}
+			reason := rejectPublicKeyBody(info, body)
+			require.NotEmpty(t, reason)
+			require.NotEqual(t, fmt.Sprintf("not a %d-byte public key", byteWant), reason,
+				"a right-byte-count body failing for the OLD reason means the bit-length check never ran")
 		})
 	}
 }

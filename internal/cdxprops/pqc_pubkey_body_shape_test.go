@@ -66,6 +66,56 @@ func pkixDERBody(t *testing.T, oid asn1.ObjectIdentifier, body []byte) []byte {
 	return der
 }
 
+// pkixDERBodyWithBitLength is pkixDERBody with the BIT STRING's declared
+// BitLength chosen independently of body's length, which pkixDERBody can
+// never produce: it fixes BitLength at len(body)*8 by construction, because a
+// BIT STRING whose declared bit count disagrees with its content is a
+// different defect from the one that helper exists to test.
+//
+// encoding/asn1's BitString encoder derives the wire's one unused-bits octet
+// from bitLength alone and copies body after it verbatim; it does not check
+// that the two agree. Its decoder, on the far end, rejects the result unless
+// the low bits the padding count claims are unused are actually zero, so a
+// caller cannot hand this noise() as body and get a valid fixture out for
+// every bitLength: this helper clears those bits itself, so any body
+// round-trips regardless of what its last byte happened to contain.
+//
+// It cannot produce every (len(body), bitLength) pair a caller might ask for.
+// A BIT STRING's one unused-bits octet holds 0-7, so a decodable bitLength can
+// only land in [len(body)*8-7, len(body)*8] -- the same structural limit that
+// makes the finding this helper exists for a narrow one (1-7 quietly unused
+// bits), not an arbitrary mismatch. Asking for a bitLength outside that range
+// is a test-author error, not a case worth silently reinterpreting, so it
+// fails loudly here instead of building a fixture that does not test what its
+// caller thinks it does.
+func pkixDERBodyWithBitLength(t *testing.T, oid asn1.ObjectIdentifier, body []byte, bitLength int) []byte {
+	t.Helper()
+
+	if len(body) == 0 {
+		require.Zero(t, bitLength, "an empty BIT STRING can only declare BitLength 0")
+	} else {
+		require.True(t, bitLength <= len(body)*8 && bitLength > (len(body)-1)*8,
+			"bitLength %d is not reachable from a %d-byte BIT STRING body", bitLength, len(body))
+	}
+
+	padding := (8 - bitLength%8) % 8
+	if padding > 0 {
+		body = append([]byte(nil), body...)
+		body[len(body)-1] &= byte(0xff << padding)
+	}
+
+	der, err := asn1.Marshal(struct {
+		Algorithm pkix.AlgorithmIdentifier
+		PublicKey asn1.BitString
+	}{
+		Algorithm: pkix.AlgorithmIdentifier{Algorithm: oid},
+		PublicKey: asn1.BitString{Bytes: body, BitLength: bitLength},
+	})
+	require.NoError(t, err)
+
+	return der
+}
+
 // pemPublicKey wraps DER in a `PUBLIC KEY` block. Go's stdlib cannot parse a
 // post-quantum SubjectPublicKeyInfo, so the scanner routes it to ParseErrors
 // and the block reaches analyzeParseError -- the production path.
@@ -206,6 +256,41 @@ func TestPQCPipeline_CertificateSPKIUndersizedBodyYieldsAlgorithmNotKey(t *testi
 	}
 }
 
+// TestPQCPipeline_CertificateSPKIBitLengthMismatchYieldsAlgorithmNotKey is the
+// certificate half of TestPQCPipeline_PKIXBitLengthMismatchYieldsAlgorithmNotKey:
+// a certificate's raw SPKI is the same structure as a standalone `PUBLIC KEY`
+// block, so a body with the registry's exact byte count and a BitLength a few
+// bits short of it must be refused there too, not just in the PKIX path.
+func TestPQCPipeline_CertificateSPKIBitLengthMismatchYieldsAlgorithmNotKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		oid       asn1.ObjectIdentifier
+		size      int
+		bitsShort int
+		algo      string
+	}{
+		{"ML-DSA-65 one bit short", mlDSA65OID, mlDSA65PubKey, 1, "ML-DSA-65"},
+		{"ML-KEM-768 four bits short", mlKEM768OID, mlKEM768EncapKey, 4, "ML-KEM-768"},
+		{"SLH-DSA-SHA2-128S seven bits short", slhDSA128sOID, slhDSA128sPubKey, 7, "SLH-DSA-SHA2-128S"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			der := pkixDERBodyWithBitLength(t, tt.oid, noise(tt.size), tt.size*8-tt.bitsShort)
+			certificates, algorithms, material := assetsOfCertPEM(t, certWithSPKIPEM(t, der))
+
+			require.Empty(t, material,
+				"a body with the right byte count but the wrong declared bit count must not be reported as a key")
+			require.Len(t, certificates, 1,
+				"the certificate is a real asset whatever its subject key holds")
+			require.Contains(t, algorithmNames(algorithms), tt.algo,
+				"the OID establishes the algorithm is referenced, whatever the body holds")
+		})
+	}
+}
+
 // TestPQCPipeline_CertificateUnsizedAlgorithmRejectsOnlyAnEmptyBody is the
 // certificate half of TestPQCPipeline_PKIXUnsizedAlgorithmRejectsOnlyAnEmptyBody,
 // and it is the only certificate case where the length comparison is not what
@@ -248,6 +333,16 @@ func TestPQCPipeline_CertificateUnsizedAlgorithmRejectsOnlyAnEmptyBody(t *testin
 		require.Len(t, material, 1,
 			"with no size in the registry there is nothing to check, and dropping the key is worse")
 		require.Equal(t, "XMSS", material[0].Name)
+	})
+
+	t.Run("one byte, bit-length mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		_, _, material := assetsOfCertPEM(t,
+			certWithSPKIPEM(t, pkixDERBodyWithBitLength(t, xmssOID, noise(1), 7)))
+
+		require.Empty(t, material,
+			"no byte count is registered for XMSS, but a bit count that disagrees with the body is still refused")
 	})
 }
 
@@ -384,6 +479,45 @@ func TestPQCPipeline_PKIXUndersizedBodyYieldsAlgorithmNotKey(t *testing.T) {
 				"the OID establishes the algorithm is referenced, whatever the body holds")
 			require.Empty(t, material,
 				"a body that is not this algorithm's public key must not be reported as one")
+		})
+	}
+}
+
+// TestPQCPipeline_PKIXBitLengthMismatchYieldsAlgorithmNotKey covers the case
+// TestPQCPipeline_PKIXUndersizedBodyYieldsAlgorithmNotKey cannot reach: a body
+// with the registry's EXACT byte count, but a BitLength a few bits short of
+// it.
+//
+// encoding/asn1's BIT STRING decoder keeps BitLength independent of Bytes: it
+// requires only that the bits a padding octet declares unused are actually
+// zero, never that BitLength == len(Bytes)*8. So a body can decode with the
+// right byte count and a BitLength 1-7 bits short of it -- the range the wire
+// format's one unused-bits octet can express -- and a check that only reads
+// len(Bytes) accepts that as a full key. RFC 9909 sec. 5 (SLH-DSA), RFC 9881
+// sec. 4 (ML-DSA) and RFC 9935 sec. 4 (ML-KEM) all map a whole OCTET STRING
+// bit-for-bit into the BIT STRING with nothing left unused, so this is not a
+// legal encoding of any of them.
+func TestPQCPipeline_PKIXBitLengthMismatchYieldsAlgorithmNotKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		oid       asn1.ObjectIdentifier
+		size      int
+		bitsShort int
+		algo      string
+	}{
+		{"ML-DSA-65 one bit short", mlDSA65OID, mlDSA65PubKey, 1, "ML-DSA-65"},
+		{"ML-KEM-768 four bits short", mlKEM768OID, mlKEM768EncapKey, 4, "ML-KEM-768"},
+		{"SLH-DSA-SHA2-128S seven bits short", slhDSA128sOID, slhDSA128sPubKey, 7, "SLH-DSA-SHA2-128S"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			der := pkixDERBodyWithBitLength(t, tt.oid, noise(tt.size), tt.size*8-tt.bitsShort)
+			algorithms, material := assetsOfPub(t, der)
+			require.Contains(t, algorithmNames(algorithms), tt.algo)
+			require.Empty(t, material,
+				"a body with the right byte count but the wrong declared bit count must not be reported as a key")
 		})
 	}
 }
@@ -563,6 +697,14 @@ func TestPQCPipeline_PKIXUnsizedAlgorithmRejectsOnlyAnEmptyBody(t *testing.T) {
 
 		require.Len(t, material, 1,
 			"with no size in the registry there is nothing to check, and dropping the key is worse")
+	})
+
+	t.Run("one byte, bit-length mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		_, material := assetsOfPub(t, pkixDERBodyWithBitLength(t, xmssOID, noise(1), 7))
+		require.Empty(t, material,
+			"no byte count is registered for XMSS, but a bit count that disagrees with the body is still refused")
 	})
 }
 
