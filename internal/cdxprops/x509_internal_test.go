@@ -173,7 +173,8 @@ func TestPKCS8Struct_ParsesRFC5958TrailingFields(t *testing.T) {
 	key, algo, err := NewConverter().unsupportedPKCS8PrivateKey(t.Context(), der)
 	require.NoError(t, err)
 	require.Equal(t, "ML-DSA-65", algo.Name)
-	require.NotEmpty(t, key.BOMRef, "a full-size body must yield a key component")
+	require.NotNil(t, key, "a full-size body must yield a key component")
+	require.NotEmpty(t, key.BOMRef)
 }
 
 func Test_hashRawPublicKey(t *testing.T) {

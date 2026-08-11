@@ -198,16 +198,27 @@ func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, 
 		if err != nil {
 			return nil, errors.Join(origErr, err)
 		}
-		// unsupportedPKCS8PrivateKey yields the algorithm alone when the
-		// PKCS#8 body is too small to be the key the registry describes. The
-		// zero Component must not be appended: it has neither ref nor crypto
-		// properties, so the Builder would drop it with a warning and
-		// setPEMFormat would walk it for nothing. Same guard, same reason, as
-		// the zero public-key component in restOfPEMBundleToCDX above.
-		if key.BOMRef == "" {
+		// A PKCS#8 body that is not a legal encoding of the key the registry
+		// describes yields no key: unsupportedPKCS8PrivateKey returns nil for
+		// it, and the algorithm stands on the OID alone.
+		//
+		// The empty-BOMRef sentinel restOfPEMBundleToCDX uses above expresses the
+		// same decision and is deliberately left alone. publicKeyComponents has
+		// three production callers -- that loop, Converter.PEMBundle's keypair
+		// loop, and certHitToComponents -- and each reads .BOMRef off its result
+		// through a field selector, which Go applies to a pointer just as happily
+		// as to a value, so the same conversion there would compile silently at
+		// all three. PEMBundle does that read through strings.Cut before it guards
+		// on anything, so it would trade an inert sentinel for a nil dereference.
+		//
+		// unsupportedPKIX still hands its key back as a value, and that is not
+		// an endorsement of the sentinel: a no-key branch added there owes this
+		// caller the same pointer rather than another empty component to
+		// recognise.
+		if key == nil {
 			return []cdx.Component{algo}, nil
 		}
-		return []cdx.Component{key, algo}, nil
+		return []cdx.Component{*key, algo}, nil
 	case "PUBLIC KEY":
 		key, algo, err := c.unsupportedPKIX(ctx, block.Bytes)
 		if err != nil {
@@ -249,7 +260,14 @@ func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, 
 // to be the key the registry describes yields the algorithm and no key, which
 // is exactly what this function returned before it learned to emit key
 // material.
-func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (key, algo cdx.Component, err error) {
+//
+// That "no key" case is why the key is a pointer: nil is how this function says
+// the body is not a legal encoding of a key, so the caller reads the answer
+// rather than re-deriving it from an empty component. The two claims ride the
+// return type the way the input supports them -- the algorithm as a value,
+// because the OID establishes it whatever follows, and the key behind a
+// pointer, because the body may establish nothing at all.
+func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (key *cdx.Component, algo cdx.Component, err error) {
 	var pkcs8 pkcs8Struct
 	rest, uerr := asn1.Unmarshal(der, &pkcs8)
 	if uerr != nil {
@@ -314,7 +332,11 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 			"oid", info.oid,
 			"body_bytes", len(pkcs8.PrivateKey),
 			"reason", reason)
-		return
+		// The OID established that the algorithm is referenced here, whatever
+		// the body turned out to hold, so algo stands. Nothing in this block
+		// establishes that a key exists: nil IS the answer, not a component
+		// that happens to be empty.
+		return nil, algo, nil
 	}
 
 	relatedProps := &cdx.RelatedCryptoMaterialProperties{
@@ -339,7 +361,7 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 		relatedProps.Size = &info.keySize
 	}
 
-	key = cdx.Component{
+	key = &cdx.Component{
 		Type:        cdx.ComponentTypeCryptographicAsset,
 		Name:        info.name,
 		Description: "Private Key",
@@ -372,7 +394,7 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 		},
 	}
 
-	return
+	return key, algo, nil
 }
 
 // registryKeyBodySizes returns the two sizes in BYTES that a PKCS#8 privateKey

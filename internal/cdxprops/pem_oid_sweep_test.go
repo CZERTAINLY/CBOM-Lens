@@ -121,6 +121,7 @@ func TestOIDSweep_PKCS8PrivateKey(t *testing.T) {
 			c := NewConverter().WithIlmExtensions(true)
 			key, algo, err := c.unsupportedPKCS8PrivateKey(t.Context(), synthPKCS8(t, oidOf(t, dotted)))
 			require.NoError(t, err, "OID %s must be recognised", dotted)
+			require.NotNil(t, key, "OID %s must yield a key component", dotted)
 
 			require.Equal(t, want.name, algo.Name)
 			require.Equal(t, want.oid, algo.CryptoProperties.OID)
@@ -173,6 +174,61 @@ func TestOIDSweep_PKCS8PrivateKey(t *testing.T) {
 				strings.HasPrefix(algo.BOMRef,
 					"crypto/algorithm/"+strings.ToLower(want.name)+"@"),
 				"unexpected algorithm bom-ref %q", algo.BOMRef)
+		})
+	}
+}
+
+// TestOIDSweep_PKCS8RejectedBodyYieldsNilKey pins the SHAPE of the "no key"
+// answer, which the sweep above cannot: it only ever feeds legal bodies.
+//
+// unsupportedPKCS8PrivateKey used to signal "this body is not a legal encoding
+// of a key" by leaving a value-typed named result at its zero value, and
+// analyzeParseError re-derived that by testing key.BOMRef == "". Asserting
+// emptiness here would re-create that inference, and it would NOT catch the
+// defect it is supposed to guard: hoist the key = &cdx.Component{...}
+// construction above the rejectPrivateKeyBody guard and the component comes
+// back fully populated, carrying a ref content-addressed over a body already
+// judged not to be a key -- free to escape into a document as a private-key
+// asset that does not exist. Only require.Nil rejects that; any field check
+// also passes against an empty-component sentinel someone reintroduces.
+//
+// Both halves are here because one row does not pin a contract: if nil became
+// the answer for every body, the negative row alone would still pass while
+// every post-quantum private key silently vanished from the CBOM.
+func TestOIDSweep_PKCS8RejectedBodyYieldsNilKey(t *testing.T) {
+	t.Parallel()
+
+	// ML-DSA-65: seed 32, expanded 4032. A 100-byte body sits between the legal
+	// alternatives and is not a valid DER wrapper either, so
+	// rejectPrivateKeyBody fires; synthPKCS8 builds the registry's expanded
+	// size, which must still yield its key.
+	oid := oidOf(t, "2.16.840.1.101.3.4.3.18")
+
+	for _, tc := range []struct {
+		name    string
+		der     []byte
+		wantKey bool
+	}{
+		{"illegal body yields the algorithm and no key", synthPKCS8Body(t, oid, 100), false},
+		{"legal body yields its key", synthPKCS8(t, oid), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			key, algo, err := NewConverter().unsupportedPKCS8PrivateKey(t.Context(), tc.der)
+			// A rejected body is not an error, and the OID claim stands on its
+			// own: the algorithm is REFERENCED here whatever the bytes turned
+			// out to hold, so algo must be right in both rows.
+			require.NoError(t, err)
+			require.Equal(t, "ML-DSA-65", algo.Name)
+			require.Equal(t, "2.16.840.1.101.3.4.3.18", algo.CryptoProperties.OID)
+
+			if tc.wantKey {
+				require.NotNil(t, key)
+				return
+			}
+			require.Nil(t, key,
+				"a body that is not a legal key encoding must yield no key component at all")
 		})
 	}
 }
