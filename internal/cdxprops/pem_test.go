@@ -824,6 +824,35 @@ func materialAlgorithmRefs(compo cdx.Component) []string {
 	return refs
 }
 
+// certificateKeyRefs returns the key material a certificate component points
+// at, in whichever way the emitted document expresses it. It is
+// materialAlgorithmRefs for the other end of the same edge: 1.6 writes
+// certificateProperties.subjectPublicKeyRef, and emit17 CLEARS that field --
+// deliberately, since relatedCryptographicAssets supersedes it with structural
+// ref integrity -- and writes a relatedCryptographicAssets entry typed
+// "publicKey" instead. A test that read only subjectPublicKeyRef would
+// therefore not merely prove less in 1.7, it would fail there on a correct
+// document.
+func certificateKeyRefs(compo cdx.Component) []string {
+	if compo.CryptoProperties == nil || compo.CryptoProperties.CertificateProperties == nil {
+		return nil
+	}
+	certp := compo.CryptoProperties.CertificateProperties
+	var refs []string
+	if certp.SubjectPublicKeyRef != "" {
+		refs = append(refs, string(certp.SubjectPublicKeyRef))
+	}
+	if certp.RelatedCryptographicAssets == nil {
+		return refs
+	}
+	for _, rca := range *certp.RelatedCryptographicAssets {
+		if rca.Type == "publicKey" {
+			refs = append(refs, rca.Ref)
+		}
+	}
+	return refs
+}
+
 // dependsOn returns what the emitted document says ref depends on.
 func dependsOn(doc cdx.BOM, ref string) []string {
 	if doc.Dependencies == nil {
@@ -2273,4 +2302,516 @@ func TestPEMBundle_CSRWarnNamesItsAttributes(t *testing.T) {
 			"somewhere in the rendered line")
 	require.Equal(t, "1.3.9999.6.1.1", record["spki_oid"],
 		"and the OID read off this request's own SubjectPublicKeyInfo")
+}
+
+// TestPEMBundle_CSRWithRegisteredPQCOIDYieldsItsKey is the request half of the
+// registry fallback, and the gap it closes is the one a PQC migration cares
+// about most: a request is the EARLIEST place a key that will have to be
+// migrated becomes visible, and it was the only place this tool could not see
+// one.
+//
+// publicKeyComponents reaches the registry only for a CERTIFICATE -- the OID
+// fallback is guarded by cert != nil, because the OID is read off
+// certSPKI(cert) -- and a request has no x509.Certificate to hang its
+// SubjectPublicKeyInfo on. So a request under a registered ML-DSA, ML-KEM or
+// SLH-DSA arc never consulted the registry at all: Go returns it successfully
+// with UnknownPublicKeyAlgorithm and a nil PublicKey, the algorithm fell
+// through to the placeholder, csrToCDX suppressed it, and the key was never
+// built. The identical SubjectPublicKeyInfo in a `PUBLIC KEY` block or a
+// CERTIFICATE beside it produced a full algorithm and key. The SPKI is on the
+// request, byte for byte, in RawSubjectPublicKeyInfo.
+//
+// The Value assertion is the load-bearing one and it is deliberately not
+// spkiOfCSR: that helper marshals csr.PublicKey, which is nil on exactly this
+// path. Comparing against base64 of csr.RawSubjectPublicKeyInfo is what pins
+// "the key published is the key in THIS request" -- it fails if someone hashes
+// csr.Raw or the tbsCertificateRequest instead, both of which would still
+// produce a plausible-looking, per-request, content-addressed ref.
+//
+// The DEPENDENCY assertion is what holds the return order. unsupportedPKIX
+// returns (key, algo, err) while publicKeyComponents returns (algo, key), and
+// both are cdx.Component, so swapping them compiles. What that does is subtler
+// than "the key is published as the algorithm": each component still carries
+// the AssetType and the bom-ref prefix it was built with, so both still emit
+// correctly typed and the AssetType assertions below stay green. What moves is
+// everything csrToCDX reads OFF the two variables -- the request's dependency
+// edge, which it builds from key.BOMRef, comes to name the ALGORITHM instead of
+// the key. So the swap surfaces here as `dependsOn(doc, csrRef)` holding
+// crypto/algorithm/... where crypto/key/... belongs, and nowhere else in this
+// test. The AssetType assertions earn their place against a different mutation
+// -- a recovery that returns two components of the same kind -- not this one.
+//
+// Both spec versions are required: the 1.7 emitter builds its components from
+// the IR and maps relatedCryptoMaterialProperties.algorithmRef onto
+// relatedCryptographicAssets, so the key-to-algorithm edge is a different field
+// there, and a recovery proved only against 1.6 says nothing about what a 1.7
+// document carries. materialAlgorithmRefs reads both shapes.
+//
+// The SLH-DSA row is not redundant with the ML-DSA one. Its 32-byte public key
+// is a size nothing else in its registry entry shares, so it is what catches a
+// body check written against the wrong field.
+func TestPEMBundle_CSRWithRegisteredPQCOIDYieldsItsKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		oid     asn1.ObjectIdentifier
+		body    int
+		algo    string
+		dotted  string
+		subject string
+	}{
+		{
+			name: "ML-DSA-65", oid: mlDSA65OID, body: mlDSA65PubKey,
+			algo: "ML-DSA-65", dotted: "2.16.840.1.101.3.4.3.18",
+			subject: "ml-dsa-request.example",
+		},
+		{
+			name: "SLH-DSA-SHA2-128S", oid: slhDSA128sOID, body: slhDSA128sPubKey,
+			algo: "SLH-DSA-SHA2-128S", dotted: "2.16.840.1.101.3.4.3.20",
+			subject: "slh-dsa-request.example",
+		},
+	}
+
+	for _, tt := range tests {
+		for _, version := range []string{"1.6", "1.7"} {
+			t.Run(tt.name+"/"+version, func(t *testing.T) {
+				t.Parallel()
+
+				csr := csrWithSPKI(t,
+					pkix.Name{CommonName: tt.subject},
+					pkix.AlgorithmIdentifier{Algorithm: tt.oid},
+					asn1.BitString{Bytes: noise(tt.body), BitLength: tt.body * 8})
+				require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+					"the fixture must reach the unparseable-key path, or this proves nothing")
+				require.Nil(t, csr.PublicKey,
+					"Go leaves the key nil for an SPKI algorithm it cannot name")
+
+				d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+					Location:            "/test/pqc-request.pem",
+					CertificateRequests: []*x509.CertificateRequest{csr},
+				})
+				require.NotNil(t, d)
+
+				doc := emitDocument(t, version, *d)
+				byRef := componentsByRef(doc)
+
+				require.Len(t, csrRefs(doc), 1,
+					"the request is one asset, got %v", slices.Sorted(maps.Keys(byRef)))
+				csrRef := csrRefs(doc)[0]
+
+				var keys []cdx.Component
+				for ref, compo := range byRef {
+					if strings.HasPrefix(ref, "crypto/key/") {
+						keys = append(keys, compo)
+					}
+				}
+				require.Len(t, keys, 1,
+					"the requested key is recoverable from the request's own SPKI, got %v",
+					slices.Sorted(maps.Keys(byRef)))
+				keyCompo := keys[0]
+
+				require.Equal(t, tt.algo, keyCompo.Name,
+					"the name comes from the registry entry the OID matched")
+				require.NotNil(t, keyCompo.CryptoProperties)
+				require.Equal(t, cdx.CryptoAssetTypeRelatedCryptoMaterial,
+					keyCompo.CryptoProperties.AssetType,
+					"unsupportedPKIX returns (key, algo); a swapped return compiles")
+				rcmp := keyCompo.CryptoProperties.RelatedCryptoMaterialProperties
+				require.NotNil(t, rcmp)
+				require.Equal(t, cdx.RelatedCryptoMaterialTypePublicKey, rcmp.Type)
+				require.Equal(t,
+					base64.StdEncoding.EncodeToString(csr.RawSubjectPublicKeyInfo),
+					rcmp.Value,
+					"the key published must be the key in THIS request, not a digest "+
+						"of the request or of its tbs")
+
+				algoRefs := materialAlgorithmRefs(keyCompo)
+				require.Len(t, algoRefs, 1,
+					"the key names exactly one algorithm, got %v", algoRefs)
+				algoCompo, ok := byRef[algoRefs[0]]
+				require.True(t, ok,
+					"the key points at an algorithm that is not in the document: %s", algoRefs[0])
+				require.NotNil(t, algoCompo.CryptoProperties)
+				require.Equal(t, cdx.CryptoAssetTypeAlgorithm,
+					algoCompo.CryptoProperties.AssetType)
+				require.Equal(t, tt.algo, algoCompo.Name)
+				require.Equal(t, tt.dotted, algoCompo.CryptoProperties.OID,
+					"the oid is what established the algorithm in the first place")
+
+				require.Contains(t, dependsOn(doc, csrRef), keyCompo.BOMRef,
+					"the request must depend on the key it asks to have certified")
+
+				requireNoDanglingEdges(t, doc)
+			})
+		}
+	}
+}
+
+// TestPEMBundle_CSRForMLKEMIsNotReportedAsASignatureScheme states where the
+// primitive of a recovered key's algorithm comes from: the registry entry, and
+// nowhere else.
+//
+// The key component carries no primitive at all -- it is related crypto
+// material of type publicKey -- so the primitive lives on the algorithm it
+// points at, and unsupportedPKIX takes it from registryPrimitive(info). Nothing
+// derives it from KeyUsage, and a request has no KeyUsage to derive it from in
+// any case. Without this, the natural "just call publicKeyComponents with the
+// recovered info" refactor silently reintroduces the defect registryPrimitive
+// was written to close: publicKeyComponents' own default is "signature", so an
+// ML-KEM encapsulation key someone asked to have certified would be published
+// as something that signs -- and a consumer counting signature schemes to plan
+// a migration would be counting the wrong thing, in the wrong bucket, with
+// nothing in the document to say so.
+//
+// The negative half is asserted as well as the positive one. "The algorithm is
+// a kem" is satisfiable by a document that also carries a stray placeholder
+// signature component beside it, which is exactly what a recovery bolted on
+// after publicKeyComponents would produce.
+func TestPEMBundle_CSRForMLKEMIsNotReportedAsASignatureScheme(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			csr := csrWithSPKI(t,
+				pkix.Name{CommonName: "ml-kem-request.example"},
+				pkix.AlgorithmIdentifier{Algorithm: mlKEM768OID},
+				asn1.BitString{Bytes: noise(mlKEM768EncapKey), BitLength: mlKEM768EncapKey * 8})
+			require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+				"the fixture must reach the unparseable-key path, or this proves nothing")
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+				Location:            "/test/ml-kem-request.pem",
+				CertificateRequests: []*x509.CertificateRequest{csr},
+			})
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, version, *d)
+			byRef := componentsByRef(doc)
+
+			var keyCompo cdx.Component
+			for ref, compo := range byRef {
+				if strings.HasPrefix(ref, "crypto/key/") {
+					keyCompo = compo
+				}
+			}
+			require.NotEmpty(t, keyCompo.BOMRef,
+				"the encapsulation key must be recovered, got %v",
+				slices.Sorted(maps.Keys(byRef)))
+
+			algoRefs := materialAlgorithmRefs(keyCompo)
+			require.Len(t, algoRefs, 1, "the key names exactly one algorithm, got %v", algoRefs)
+			algoCompo, ok := byRef[algoRefs[0]]
+			require.True(t, ok, "the key points at an algorithm not in the document: %s", algoRefs[0])
+
+			require.Equal(t, "ML-KEM-768", algoCompo.Name)
+			require.NotNil(t, algoCompo.CryptoProperties.AlgorithmProperties)
+			props := algoCompo.CryptoProperties.AlgorithmProperties
+			require.Equal(t, cdx.CryptoPrimitiveKEM, props.Primitive,
+				"a KEM reported as a signature scheme is the mislabel registryPrimitive exists to stop")
+			require.Equal(t, "768", props.ParameterSetIdentifier)
+			require.NotNil(t, props.CryptoFunctions)
+			require.Subset(t, *props.CryptoFunctions,
+				[]cdx.CryptoFunction{cdx.CryptoFunctionEncapsulate, cdx.CryptoFunctionDecapsulate},
+				"what an encapsulation key is FOR is the reason it is in the inventory")
+
+			for ref, compo := range byRef {
+				if compo.CryptoProperties == nil ||
+					compo.CryptoProperties.AlgorithmProperties == nil {
+					continue
+				}
+				require.NotEqual(t, cdx.CryptoPrimitiveSignature,
+					compo.CryptoProperties.AlgorithmProperties.Primitive,
+					"nothing in an ML-KEM request signs anything: %s", ref)
+			}
+		})
+	}
+}
+
+// TestPEMBundle_CSRWithRegisteredOIDIsSilent is the composition test: the
+// recovery happens INSTEAD of the two refusals, not after them.
+//
+// TestPEMBundle_CSRWithRegisteredPQCOIDYieldsItsKey cannot tell the difference.
+// A recovery bolted on downstream of publicKeyComponents -- on the placeholder
+// branch, which is where the review comment's literal phrasing puts it --
+// produces exactly the same document while leaving "cannot identify public key:
+// omitting key component algorithm=Unknown" in the operator's log, one call
+// before a document that carries the key it says was dropped. A recovery bolted
+// on after the suppression's own Warn adds a second such line. In a package
+// whose tests pin Warn ATTRIBUTES as an operator contract -- see
+// TestPEMBundle_CSRWarnNamesItsAttributes -- shipping a Warn the same call then
+// falsifies is a new defect, not a wart: an operator triaging a scan of ten
+// thousand files reads those lines as the list of things the tool refused to
+// describe, and a request that WAS described has no business in it.
+//
+// The component assertions are the other half. Silence alone is satisfiable by
+// a tool that fabricates quietly, so the placeholder's three fingerprints --
+// the name "Unknown", the OID 0.0.0.0, and the crypto/algorithm/unknown ref --
+// are each required to be absent from what the converter produced.
+//
+// It is stated on the DETECTION rather than an emitted document because the
+// Warns are the converter's and the Builder is not in the picture; and at
+// converter level in one spec version, because a log line is not something an
+// emitter can change.
+//
+// Not parallel: it swaps the process-wide slog default. See the note on
+// TestPEMBundle_BundleErrorLogIdentifiesFileAndBlock.
+func TestPEMBundle_CSRWithRegisteredOIDIsSilent(t *testing.T) {
+	var logBuf bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	csr := csrWithSPKI(t,
+		pkix.Name{CommonName: "ml-dsa-request.example"},
+		pkix.AlgorithmIdentifier{Algorithm: mlDSA65OID},
+		asn1.BitString{Bytes: noise(mlDSA65PubKey), BitLength: mlDSA65PubKey * 8})
+	require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+		"the fixture must reach the unparseable-key path, or this proves nothing")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+		Location:            "/test/ml-dsa-request.pem",
+		CertificateRequests: []*x509.CertificateRequest{csr},
+	})
+	require.NotNil(t, d)
+
+	// Both claims below are of the form "nothing said X", and both are
+	// satisfied by a converter that produced nothing at all -- a recovery that
+	// returned the algorithm and dropped the key would be silent too, and this
+	// test would have called that a pass while asserting the OPPOSITE of what
+	// its name and its comment promise. The recovery has to be established
+	// first, in the same run, or the silence is not evidence of anything.
+	var recovered []string
+	for _, compo := range d.Components {
+		if strings.HasPrefix(compo.BOMRef, "crypto/key/") {
+			recovered = append(recovered, compo.BOMRef)
+		}
+	}
+	require.Len(t, recovered, 1,
+		"the silence has to be the silence of a request that WAS described")
+
+	logged := logBuf.String()
+	require.NotContains(t, logged, "not reporting an algorithm for a certificate request",
+		"the algorithm was reported, so nothing may say it was refused")
+	require.NotContains(t, logged, "cannot identify public key",
+		"the key was identified, from this request's own SubjectPublicKeyInfo")
+
+	for _, compo := range d.Components {
+		require.NotEqual(t, "Unknown", compo.Name,
+			"the registry named this algorithm: %s", compo.BOMRef)
+		require.False(t, strings.HasPrefix(compo.BOMRef, "crypto/algorithm/unknown"),
+			"the placeholder's ref must not be in the detection: %s", compo.BOMRef)
+		if compo.CryptoProperties == nil {
+			continue
+		}
+		require.NotEqual(t, "0.0.0.0", compo.CryptoProperties.OID,
+			"an arc nothing is registered under is a fabrication, not a finding: %s",
+			compo.BOMRef)
+	}
+}
+
+// TestPEMBundle_CSRAndItsCertificateShareOneKeyAsset states that the request
+// path reuses the certificate path's IDENTITY rather than inventing a parallel
+// one: the same SubjectPublicKeyInfo, met under two PEM labels in one file,
+// dedups onto one key component and one algorithm component.
+//
+// This is the regression net for the whole recovery. Everything the request
+// path emits is built by unsupportedPKIX, and everything the certificate path
+// emits is built by publicKeyComponents, and the two agree today only because
+// they read the same registry entry, take the primitive from the same place,
+// hash the same DER and mint the same crypto/key/<name>@<digest> ref. Any
+// divergence -- a primitive derived differently, a name taken from elsewhere, a
+// digest over the request rather than over its SPKI -- shows up here as two
+// components where there must be one, and nowhere else: the per-path tests all
+// pass with two parallel identities, and a consumer counting keys to size a
+// migration would count this one twice.
+//
+// The claim is about the same SubjectPublicKeyInfo, NOT about a request and the
+// certificate a CA really issued from it. Both fixtures marshal the identical
+// {AlgorithmIdentifier, BIT STRING} shape, so the DER is byte-identical, and
+// that is asserted directly -- a real CA re-encodes from the parsed key, which
+// yields identical DER for canonical inputs but is guaranteed by nothing this
+// repo controls. Without the assertion the test would pass vacuously the day
+// the two fixtures stopped agreeing.
+//
+// Both spec versions: dedup is the Builder's, but which components it is asked
+// to dedup is the emitter's, and 1.7 rebuilds them from the IR.
+func TestPEMBundle_CSRAndItsCertificateShareOneKeyAsset(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			spki := pkixDERBody(t, mlDSA65OID, noise(mlDSA65PubKey))
+
+			csr := csrWithSPKI(t,
+				pkix.Name{CommonName: "ml-dsa-request.example"},
+				pkix.AlgorithmIdentifier{Algorithm: mlDSA65OID},
+				asn1.BitString{Bytes: noise(mlDSA65PubKey), BitLength: mlDSA65PubKey * 8})
+			require.Equal(t, spki, csr.RawSubjectPublicKeyInfo,
+				"the two fixtures must carry the SAME SubjectPublicKeyInfo, or this "+
+					"test proves nothing about dedup")
+
+			certDER, err := cdxtest.CertWithSPKI(spki)
+			require.NoError(t, err)
+
+			var file []byte
+			file = append(file, pem.EncodeToMemory(&pem.Block{
+				Type: "CERTIFICATE REQUEST", Bytes: csr.Raw})...)
+			file = append(file, pem.EncodeToMemory(&pem.Block{
+				Type: "CERTIFICATE", Bytes: certDER})...)
+
+			bundle, err := pemscan.Scanner{}.Scan(t.Context(), file, "/test/request-and-cert.pem")
+			require.NoError(t, err)
+			require.Len(t, bundle.CertificateRequests, 1)
+			require.Len(t, bundle.Certificates, 1)
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, version, *d)
+			byRef := componentsByRef(doc)
+
+			var keys, algorithms, certificates []cdx.Component
+			for _, compo := range byRef {
+				if compo.CryptoProperties == nil {
+					continue
+				}
+				switch compo.CryptoProperties.AssetType {
+				case cdx.CryptoAssetTypeAlgorithm:
+					if compo.Name == "ML-DSA-65" {
+						algorithms = append(algorithms, compo)
+					}
+				case cdx.CryptoAssetTypeRelatedCryptoMaterial:
+					if compo.Name == "ML-DSA-65" {
+						keys = append(keys, compo)
+					}
+				case cdx.CryptoAssetTypeCertificate:
+					certificates = append(certificates, compo)
+				}
+			}
+
+			require.Len(t, keys, 1,
+				"one SubjectPublicKeyInfo is one key asset, however many artefacts "+
+					"carry it, got %v", slices.Sorted(maps.Keys(byRef)))
+			require.Len(t, algorithms, 1,
+				"and one algorithm asset, got %v", slices.Sorted(maps.Keys(byRef)))
+			require.Len(t, certificates, 1)
+			require.Len(t, csrRefs(doc), 1)
+
+			require.Equal(t, []string{keys[0].BOMRef}, certificateKeyRefs(certificates[0]),
+				"the certificate must point at that one key")
+			require.Contains(t, dependsOn(doc, csrRefs(doc)[0]), keys[0].BOMRef,
+				"and the request must depend on the same one, not on a second copy")
+
+			requireNoDanglingEdges(t, doc)
+		})
+	}
+}
+
+// TestPEMBundle_CSRWhoseAlgorithmGoNamedKeepsIt pins the GATE on the recovery:
+// the SPKI-OID lookup is a fallback for a request Go could not name, not an
+// override of one it could.
+//
+// requestedKeyComponents consults the registry only when
+// csr.PublicKeyAlgorithm is UnknownPublicKeyAlgorithm. Delete that condition
+// and every request -- RSA, ECDSA, Ed25519, DSA -- gets its
+// SubjectPublicKeyInfo run through unsupportedPKIX first, and today NOTHING
+// else in the suite notices, because no OID in the fallback registry is one
+// Go's enum can name: every lookup misses, the error is returned, and control
+// falls through to publicKeyComponents exactly as before. The gate is a no-op
+// on every input the package currently has, which is precisely why it needs a
+// test of its own -- an unpinned condition that costs nothing to delete is the
+// one a later refactor deletes.
+//
+// What it costs is paid later. The registry is hand-maintained and grows: the
+// day it gains an entry Go's getPublicKeyAlgorithmFromOID also recognises --
+// a composite or hybrid arc wrapping a classical key is the obvious candidate,
+// and it is the direction the drafts are going -- an ungated recovery takes
+// over a request whose key Go PARSED. It would then be described from the OID
+// alone: no keySize off the parsed key, and none of publicKeyComponents'
+// KeyUsage logic, which is the only thing that reports an RSA key as pke
+// rather than signature. The document would still look well formed. Nothing
+// would say the tool had stopped reading the key it was handed.
+//
+// The fixture is deliberately one x509.ParseCertificateRequest cannot produce.
+// A parsed request derives PublicKeyAlgorithm FROM the SPKI's OID, so the two
+// can never disagree in the wild and no realistic file can separate "gated"
+// from "ungated" today -- that is the same fact that lets the mutation
+// survive. Overwriting RawSubjectPublicKeyInfo on a real RSA request states
+// the rule directly instead: whatever the raw SPKI says, when Go has named the
+// algorithm, Go's answer is the one the document carries. The converter takes
+// *x509.CertificateRequest structs from the bundle, so this is the same entry
+// point every other request reaches it by.
+//
+// Both spec versions, because the claim is about the emitted document.
+func TestPEMBundle_CSRWhoseAlgorithmGoNamedKeepsIt(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			rsaKey, err := cdxtest.GenRSAPrivateKey(2048)
+			require.NoError(t, err)
+			csr := csrFor(t, "classical-request.example", rsaKey)
+			require.Equal(t, x509.RSA, csr.PublicKeyAlgorithm,
+				"the fixture must be a request Go DID name, or this proves nothing")
+			require.NotNil(t, csr.PublicKey)
+
+			// The disagreement the gate is the only thing standing between.
+			csr.RawSubjectPublicKeyInfo = pkixDERBody(t, mlDSA65OID, noise(mlDSA65PubKey))
+
+			d := cdxprops.NewConverter().PEMBundle(t.Context(), model.PEMBundle{
+				Location:            "/test/classical-request.pem",
+				CertificateRequests: []*x509.CertificateRequest{csr},
+			})
+			require.NotNil(t, d)
+
+			doc := emitDocument(t, version, *d)
+			byRef := componentsByRef(doc)
+
+			keys := keyComponents(doc)
+			require.Len(t, keys, 1,
+				"one request asks to certify one key, got %v", slices.Sorted(maps.Keys(byRef)))
+			keyRef := slices.Sorted(maps.Keys(keys))[0]
+			keyCompo := keys[keyRef]
+
+			require.Equal(t, "RSA-2048", keyCompo.Name,
+				"the key Go parsed is the key the document describes")
+			rcmp := keyCompo.CryptoProperties.RelatedCryptoMaterialProperties
+			require.NotNil(t, rcmp)
+			require.Equal(t, spkiOfCSR(t, csr), rcmp.Value,
+				"the value must be the PARSED key re-marshalled, not the raw SPKI "+
+					"the registry would have matched")
+
+			algRefs := materialAlgorithmRefs(keyCompo)
+			require.Len(t, algRefs, 1, "the key names exactly one algorithm, got %v", algRefs)
+			algoCompo, ok := byRef[algRefs[0]]
+			require.True(t, ok, "the key points at an algorithm not in the document: %s", algRefs[0])
+			require.Equal(t, "RSA-2048", algoCompo.Name)
+			require.Equal(t, "1.2.840.113549.1.1.1", algoCompo.CryptoProperties.OID)
+
+			// The negative half. "An RSA key is present" is satisfiable by a
+			// document that carries the registry's answer beside it.
+			for ref, compo := range byRef {
+				require.NotEqual(t, "ML-DSA-65", compo.Name,
+					"the registry described a request Go had already named: %s", ref)
+				require.NotContains(t, ref, "ml-dsa-65",
+					"nothing recovered from the raw SPKI may reach the document: %s", ref)
+				if compo.CryptoProperties == nil {
+					continue
+				}
+				require.NotEqual(t, "2.16.840.1.101.3.4.3.18", compo.CryptoProperties.OID,
+					"the SPKI OID must not have been consulted at all: %s", ref)
+			}
+
+			require.Equal(t, []string{keyRef}, dependsOn(doc, csrRefs(doc)[0]),
+				"the request depends on the key Go parsed for it")
+			requireNoDanglingEdges(t, doc)
+		})
+	}
 }

@@ -2,6 +2,7 @@ package cdxprops_test
 
 import (
 	"bytes"
+	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	pemlib "encoding/pem"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops"
 	"github.com/OmniTrustILM/cbom-lens/internal/cdxprops/cdxtest"
+	"github.com/OmniTrustILM/cbom-lens/internal/model"
 	"github.com/OmniTrustILM/cbom-lens/internal/scanner/pem"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -161,6 +163,56 @@ func certPEM(der []byte) []byte {
 	return pemlib.EncodeToMemory(&pemlib.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
+// csrWithSPKIDetection is the request counterpart of assetsOfCertPEM, and it
+// takes the whole detection rather than a split of it.
+//
+// The request component and the key component are both related crypto material
+// -- a request is typed "other" -- so an asset-type split cannot tell "the key
+// was dropped" from "the request was dropped", which is precisely the confusion
+// the certificate helper avoids by counting certificates separately. Bom-ref
+// prefixes can, and the detection carries the dependency edges too: a rejected
+// body must leave the request depending on nothing, and a split of components
+// would not show that.
+//
+// It runs the real scanner over a real `CERTIFICATE REQUEST` block, because
+// that is the route this defect hides in: the scanner parses such a block
+// SUCCESSFULLY even when the SPKI algorithm is one Go cannot name, so the
+// request lands in CertificateRequests and never reaches ParseErrors or
+// analyzeParseError.
+func csrWithSPKIDetection(t *testing.T, oid asn1.ObjectIdentifier, subject string, body []byte) *model.Detection {
+	t.Helper()
+
+	csr := csrWithSPKI(t,
+		pkix.Name{CommonName: subject},
+		pkix.AlgorithmIdentifier{Algorithm: oid},
+		asn1.BitString{Bytes: body, BitLength: len(body) * 8})
+	require.Equal(t, x509.UnknownPublicKeyAlgorithm, csr.PublicKeyAlgorithm,
+		"the fixture must reach the unparseable-key path, or this proves nothing")
+
+	bundle, err := pem.Scanner{}.Scan(t.Context(),
+		pemlib.EncodeToMemory(&pemlib.Block{Type: "CERTIFICATE REQUEST", Bytes: csr.Raw}),
+		"synthetic.pem")
+	require.NoError(t, err, "the PEM envelope itself is well formed")
+	require.Len(t, bundle.CertificateRequests, 1,
+		"a request under an unnameable SPKI algorithm still parses, and must reach the converter")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+	return d
+}
+
+// refsWithPrefix lists the bom-refs of a detection's components under prefix,
+// so an assertion can name what survived rather than only count it.
+func refsWithPrefix(d *model.Detection, prefix string) []string {
+	var refs []string
+	for _, compo := range d.Components {
+		if strings.HasPrefix(compo.BOMRef, prefix) {
+			refs = append(refs, compo.BOMRef)
+		}
+	}
+	return refs
+}
+
 // certWithSPKIPEM is the certificate counterpart of pemPublicKey: it puts spki
 // where a certificate carries its subject public key, and wraps the result in a
 // `CERTIFICATE` block, so the same bytes that reach unsupportedPKIX under one
@@ -289,6 +341,125 @@ func TestPQCPipeline_CertificateSPKIBitLengthMismatchYieldsAlgorithmNotKey(t *te
 				"the OID establishes the algorithm is referenced, whatever the body holds")
 		})
 	}
+}
+
+// TestPQCPipeline_CSRSPKIRejectedBodyYieldsAlgorithmNotKey is the third member
+// of the family: the same rule, at the same price, for a certificate REQUEST.
+//
+// A request reaches unsupportedPKIX through requestedKeyComponents, with its
+// own RawSubjectPublicKeyInfo, so the body check is the one the `PUBLIC KEY`
+// and CERTIFICATE paths already apply and the rows below are its certificate
+// sibling's, unchanged. A request that had bought the key claim more cheaply
+// than a bare key does would be the same defect the other two closed, moved to
+// the one artefact nobody looks at twice.
+//
+// The algorithm must come out WHOLE, not merely present. The obvious "why
+// build what we are about to reject" refactor hoists the guard above
+// setAlgorithmPrimitive and BOMRefHash, and Builder.appendDetection drops a
+// component with no bom-ref -- so under it a rejected request would lose the
+// algorithm as well as the key, silently, and a test that only counted
+// components would stay green.
+//
+// The dependency assertion is the request-specific half. csrToCDX emits the
+// request-to-key edge only alongside the key, so an edge here would name a
+// component that is not in the detection.
+func TestPQCPipeline_CSRSPKIRejectedBodyYieldsAlgorithmNotKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		oid       asn1.ObjectIdentifier
+		body      []byte
+		algo      string
+		dotted    string
+		primitive cdx.CryptoPrimitive
+	}{
+		{
+			name: "ML-DSA-65 four bytes of garbage", oid: mlDSA65OID, body: noise(4),
+			algo: "ML-DSA-65", dotted: "2.16.840.1.101.3.4.3.18",
+			primitive: cdx.CryptoPrimitiveSignature,
+		},
+		{
+			name: "ML-KEM-768 one byte short", oid: mlKEM768OID, body: noise(mlKEM768EncapKey - 1),
+			algo: "ML-KEM-768", dotted: "2.16.840.1.101.3.4.4.2",
+			primitive: cdx.CryptoPrimitiveKEM,
+		},
+		{
+			name: "SLH-DSA-SHA2-128S one byte long", oid: slhDSA128sOID, body: noise(slhDSA128sPubKey + 1),
+			algo: "SLH-DSA-SHA2-128S", dotted: "2.16.840.1.101.3.4.3.20",
+			primitive: cdx.CryptoPrimitiveSignature,
+		},
+		// XMSS is the only row where the length comparison is not what does the
+		// work: RFC 9802 puts the parameter set in the key value rather than the
+		// OID, so registryPublicKeyBodySize is 0 and "no encoding of any key is
+		// zero bytes" is the entire check. A length comparison inlined at the
+		// request's call site would pass every row above and lose only this one.
+		{
+			name: "XMSS empty body", oid: xmssOID, body: nil,
+			algo: "XMSS", dotted: "1.3.6.1.5.5.7.6.34",
+			primitive: cdx.CryptoPrimitiveSignature,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := csrWithSPKIDetection(t, tt.oid, "rejected-request.example", tt.body)
+
+			require.Len(t, refsWithPrefix(d, "crypto/csr/"), 1,
+				"the request is a real asset whatever its SPKI body holds")
+			require.Empty(t, refsWithPrefix(d, "crypto/key/"),
+				"a body that is not this algorithm's public key must not be reported as one")
+
+			var algorithms []cdx.Component
+			for _, compo := range d.Components {
+				require.NotNil(t, compo.CryptoProperties, "the zero Component must never be appended")
+				if compo.CryptoProperties.AssetType == cdx.CryptoAssetTypeAlgorithm {
+					algorithms = append(algorithms, compo)
+				}
+			}
+			require.Len(t, algorithms, 1,
+				"the OID establishes the algorithm is referenced, whatever the body holds")
+			algo := algorithms[0]
+
+			require.Equal(t, tt.algo, algo.Name)
+			require.Equal(t, tt.dotted, algo.CryptoProperties.OID,
+				"the oid is what established the algorithm in the first place")
+			require.NotEmpty(t, algo.BOMRef,
+				"Builder.appendDetection drops a component with no bom-ref, so a "+
+					"hoisted guard would cost the request its algorithm too")
+			require.NotNil(t, algo.CryptoProperties.AlgorithmProperties)
+			require.Equal(t, tt.primitive,
+				algo.CryptoProperties.AlgorithmProperties.Primitive,
+				"a KEM reported as a signature scheme is a mislabel the rejection path must not reintroduce")
+
+			require.Empty(t, d.Dependencies,
+				"the request-to-key edge must not name a key that was never built")
+		})
+	}
+}
+
+// TestPQCPipeline_CSRUnsizedAlgorithmStillYieldsItsKey is the other direction
+// of the XMSS row above, and the two are only meaningful together.
+//
+// Refusing everything the registry states no size for would delete real
+// hash-based signature keys from an inventory built to find them; refusing
+// nothing unsized publishes key material over an empty BIT STRING. A request
+// carrying an XMSS key must therefore keep it, on the same terms the
+// `PUBLIC KEY` and CERTIFICATE paths keep theirs.
+func TestPQCPipeline_CSRUnsizedAlgorithmStillYieldsItsKey(t *testing.T) {
+	t.Parallel()
+
+	d := csrWithSPKIDetection(t, xmssOID, "xmss-request.example", noise(1))
+
+	keys := refsWithPrefix(d, "crypto/key/")
+	require.Len(t, keys, 1,
+		"with no size in the registry there is nothing to check, and dropping the key is worse")
+	require.True(t, strings.HasPrefix(keys[0], "crypto/key/xmss@"),
+		"the key is named by the registry entry the OID matched, got %s", keys[0])
+	require.Len(t, d.Dependencies, 1,
+		"a request that establishes a key depends on it")
 }
 
 // TestPQCPipeline_CertificateUnsizedAlgorithmRejectsOnlyAnEmptyBody is the
@@ -429,6 +600,38 @@ func TestPQCPipeline_CertificateRejectedBodyIsLoggedAtWarn(t *testing.T) {
 	_, _, material := assetsOfCertPEM(t,
 		certWithSPKIPEM(t, pkixDERBody(t, mlDSA65OID, noise(4))))
 	require.Empty(t, material)
+
+	logged := logBuf.String()
+	require.Contains(t, logged, "level=WARN",
+		"a dropped key at Debug level is a silently dropped key")
+	require.Contains(t, logged, "not reporting a public key")
+	require.Contains(t, logged, "algorithm=ML-DSA-65",
+		"the operator has to know which key was dropped")
+	require.Contains(t, logged, "body_bytes=4",
+		"and what was wrong with it")
+}
+
+// TestPQCPipeline_CSRRejectedBodyIsLoggedAtWarn pins the operator-facing half
+// of the guard for a request, exactly as its certificate and `PUBLIC KEY`
+// siblings do. A key dropped silently is indistinguishable, in the document and
+// in the output, from a request that never held one.
+//
+// The message and the attributes are the ones the other two paths emit, and
+// that is the claim: one message class across all three, not three dialects
+// that a log query has to know about separately. They come free from
+// unsupportedPKIX today; this pins that they keep coming from there rather than
+// being reimplemented at the request's call site the day someone wants to add
+// the subject to the line.
+//
+// It cannot run in parallel: slog.SetDefault is process-wide.
+func TestPQCPipeline_CSRRejectedBodyIsLoggedAtWarn(t *testing.T) {
+	var logBuf bytes.Buffer
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	d := csrWithSPKIDetection(t, mlDSA65OID, "rejected-request.example", noise(4))
+	require.Empty(t, refsWithPrefix(d, "crypto/key/"))
 
 	logged := logBuf.String()
 	require.Contains(t, logged, "level=WARN",

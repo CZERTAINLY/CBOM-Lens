@@ -115,6 +115,15 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // PublicKeyAlgorithm=UnknownPublicKeyAlgorithm and a nil PublicKey, which is
 // what every post-quantum request in the wild currently produces.
 //
+// That answer is no longer the last word on it. The registry is now the second
+// thing tried, not the first: when Go's enum could not name the algorithm,
+// requestedKeyComponents looks the SPKI's own OID up there, so a request for a
+// key this tool has an entry for -- every ML-DSA, ML-KEM and SLH-DSA arc --
+// reaches the branches below with a real algorithm and a real key, and never
+// reaches the placeholder at all. The placeholder is what is left when the
+// registry misses too, and what follows is about those requests: the ones
+// nothing names.
+//
 // The key goes because publicKeyComponents yields a zero Component for it, and
 // appending that would hand the Builder a refless component to drop while the
 // dependency edge below pointed at a ref present nowhere in the document. Same
@@ -154,10 +163,18 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // a dangling ref of the same class the key guard below prevents, running the
 // other way: that one keeps the request's dependency edge off a key that was
 // never built, this one would leave a key pointing at an algorithm that never
-// was. What that
-// key wants is an SPKI-OID fallback for requests, the same one that would stop
-// this branch firing at all; publication under a name nothing gave it is not a
-// substitute.
+// was. What that key wants is an SPKI-OID fallback for requests. There is now
+// one -- requestedKeyComponents runs the request's own SubjectPublicKeyInfo
+// through unsupportedPKIX -- but it is gated on UnknownPublicKeyAlgorithm and
+// so does not reach this case: a request Go named with a value
+// publicKeyAlgorithmInfo's switch has no case for never consults the registry
+// at all. That is the gate failing in the direction it was chosen to fail in,
+// argued on requestedKeyComponents itself. What the fallback does cover is the
+// case that exists today -- a request Go could not name, carrying an OID the
+// registry knows -- which is described under the name the registry gives it and
+// never reaches this branch. What is left here is the key belonging to an
+// algorithm nothing this tool consults names, and publication under a name
+// nothing gave it is still not a substitute.
 //
 // A DSA request keeps its algorithm, and that is why the test below is over the
 // emitted component and not over key.BOMRef. Go's getPublicKeyAlgorithmFromOID
@@ -187,11 +204,13 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 		},
 	}
 
-	// The key-to-algorithm edge is not built here: publicKeyComponents already
-	// writes it as relatedCryptoMaterialProperties.algorithmRef, and
-	// Builder.model turns that into a relationship generically. Adding a second
-	// one would emit the same edge twice.
-	algo, key := c.publicKeyComponents(ctx, csr.PublicKeyAlgorithm, csr.PublicKey, nil)
+	// The key-to-algorithm edge is not built here: whichever producer
+	// requestedKeyComponents reaches -- publicKeyComponents, or unsupportedPKIX
+	// on the recovery path -- already writes it as
+	// relatedCryptoMaterialProperties.algorithmRef, and Builder.model turns
+	// that into a relationship generically. Adding a second one would emit the
+	// same edge twice.
+	algo, key := c.requestedKeyComponents(ctx, csr)
 	// The placeholder case satisfies key.BOMRef == "" too, so it has to be
 	// tested first or the branch below emits the component this one exists to
 	// suppress. CryptoProperties is never nil: componentWOBomRef allocates it
@@ -210,6 +229,79 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 			Ref:          compo.BOMRef,
 			Dependencies: &[]string{key.BOMRef},
 		}}
+}
+
+// requestedKeyComponents describes the key a certificate request asks to have
+// certified: the algorithm, and the key material when the request establishes
+// it.
+//
+// It exists because publicKeyComponents reaches the registry only for a
+// CERTIFICATE. Its OID fallback is guarded by cert != nil -- the OID is read
+// off certSPKI(cert) -- and a request has no x509.Certificate to hang its
+// SubjectPublicKeyInfo on, so a request under a registered ML-DSA, ML-KEM or
+// SLH-DSA OID never consulted the registry at all. Go returns such a request
+// successfully with UnknownPublicKeyAlgorithm and a nil PublicKey, so the
+// algorithm fell through to the placeholder and csrToCDX suppressed it, and the
+// key was never built: a scanned post-quantum .csr contributed the request
+// component and nothing else, while the identical SubjectPublicKeyInfo in a
+// `PUBLIC KEY` block or a CERTIFICATE beside it produced a full algorithm and
+// key. The SPKI is on the request, byte for byte, in RawSubjectPublicKeyInfo.
+//
+// The recovery is unsupportedPKIX itself rather than a lookup written here.
+// That function already reads one decode of the SubjectPublicKeyInfo for both
+// the OID and the body, takes the primitive from the registry entry
+// (hardcoding "signature" reported an ML-KEM encapsulation key as a signature
+// scheme), refuses a body that is not this algorithm's public key through the
+// same rejectPublicKeyBody the certificate path uses, and hashes the SPKI into
+// the same crypto/key/<name>@<digest> ref. A request asserting a key on the
+// same evidence has to buy it at the same price, and a second copy of any of
+// that is how one path comes to hold an opinion its sibling does not.
+//
+// It runs BEFORE publicKeyComponents, not on the placeholder branch after it.
+// publicKeyComponents warns "cannot identify public key: omitting key
+// component" on its way to that placeholder, and recovering afterwards would
+// leave that line in the operator's log next to a document that carries the key
+// it says was dropped.
+//
+// The gate is Go's own answer. publicKeyAlgorithmInfo sends
+// UnknownPublicKeyAlgorithm to extractAlgorithmInfo's default branch, the only
+// place oidPlaceholder is ever written, so this is the same condition
+// csrToCDX's suppression tests for, asked one step earlier -- before the Warn
+// rather than after it. Should Go ever grow a PublicKeyAlgorithm value that
+// switch has no case for, this gate misses and the request falls back to
+// today's behaviour: the placeholder, the suppression, and its Warn. That is
+// the safe direction to fail in.
+//
+// The error is deliberately dropped. Its only realistic value is "unsupported
+// fallback oid <arc>" for an OID outside the registry -- oqs-provider's
+// 1.3.9999.6.1.1, say -- and the caller's Warn already hands the operator that
+// same arc under spki_oid, alongside the subject that says WHICH request it
+// was. Logging here would emit two lines about one refusal, the weaker one
+// first. The other errors unsupportedPKIX can return cannot arise from this
+// caller: RawSubjectPublicKeyInfo is the exact bytes of one
+// SubjectPublicKeyInfo element, so there is no trailing data and nothing left
+// to fail to decode.
+//
+// TestPEMBundle_CSRWithRegisteredPQCOIDYieldsItsKey pins the recovery;
+// TestPEMBundle_CSRWithRegisteredOIDIsSilent pins that neither Warn fires on
+// it; TestPEMBundle_CSRWithUnregisteredOIDStaysWellFormed pins that a registry
+// miss still suppresses; TestPEMBundle_CSRWhoseAlgorithmGoNamedKeepsIt pins the
+// gate, that a request whose algorithm Go could name keeps it and is not taken
+// over by the registry lookup; and
+// TestPQCPipeline_CSRSPKIRejectedBodyYieldsAlgorithmNotKey pins the rejected
+// body, where unsupportedPKIX returns no error and no key: the algorithm
+// survives, the key does not.
+func (c Converter) requestedKeyComponents(ctx context.Context, csr *x509.CertificateRequest) (algo, key cdx.Component) {
+	if csr.PublicKeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
+		// NOTE the return order: unsupportedPKIX yields (key, algo, err) and
+		// publicKeyComponents yields (algo, key). Both are cdx.Component, so
+		// swapping them compiles and publishes the key material as the
+		// algorithm.
+		if recoveredKey, recoveredAlgo, err := c.unsupportedPKIX(ctx, csr.RawSubjectPublicKeyInfo); err == nil {
+			return recoveredAlgo, recoveredKey
+		}
+	}
+	return c.publicKeyComponents(ctx, csr.PublicKeyAlgorithm, csr.PublicKey, nil)
 }
 
 // crlToCDX converts a certificate revocation list into the list component, the
@@ -726,9 +818,19 @@ func registryPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
 	return cdx.CryptoPrimitiveSignature
 }
 
-// unsupportedPKIX handles a `PUBLIC KEY` PEM block Go's stdlib cannot parse,
+// unsupportedPKIX describes a SubjectPublicKeyInfo Go's stdlib cannot parse,
 // returning the key material component and the algorithm component that
 // describes it.
+//
+// It takes the DER rather than a PEM block because the same structure arrives
+// from two places: analyzeParseError hands it the body of a `PUBLIC KEY` block
+// the scanner filed under ParseErrors, and requestedKeyComponents hands it a
+// certificate request's RawSubjectPublicKeyInfo -- a SubjectPublicKeyInfo with
+// no certificate and no PEM label of its own, since x509.ParseCertificateRequest
+// accepts an SPKI algorithm it cannot name and the block never reaches
+// ParseErrors at all. Same structure, same OID, same BIT STRING; one function,
+// so the registry lookup, the primitive and the body check cannot come to
+// differ between them.
 //
 // The two claims it can make are not equally supported by the input, for the
 // same reason unsupportedPKCS8PrivateKey's are not (see that function's
@@ -894,15 +996,17 @@ func registryPublicKeyBodySize(info algorithmInfo) int {
 // three entries the registry states no size for (XMSS, XMSS-MT, HSS-LMS: RFC
 // 9802 puts the parameters in the key value, not in the OID).
 //
-// It has two callers, and that is why it is a function rather than an inline
-// comparison. unsupportedPKIX checks the SubjectPublicKeyInfo of a standalone
-// `PUBLIC KEY` block; publicKeyComponents checks the SubjectPublicKeyInfo of a
-// CERTIFICATE, on the branch where Go could not parse the key and the raw SPKI
-// is published in its place. Those are the same structure, carrying the same
-// BIT STRING under the same OID, differing only in the PEM label around them --
-// so a local length comparison at either call site would be a second opinion on
-// one rule, and one path holding an opinion the other did not is the defect this
-// closed in the first place.
+// It is reached three ways from two call sites, and that is why it is a
+// function rather than an inline comparison. unsupportedPKIX checks the
+// SubjectPublicKeyInfo of a standalone `PUBLIC KEY` block and, through
+// requestedKeyComponents, the SubjectPublicKeyInfo of a certificate REQUEST;
+// publicKeyComponents checks the SubjectPublicKeyInfo of a CERTIFICATE, on the
+// branch where Go could not parse the key and the raw SPKI is published in its
+// place. Those are the same structure, carrying the same BIT STRING under the
+// same OID, differing only in what is wrapped around them -- so a local length
+// comparison at either call site would be a second opinion on one rule, and one
+// path holding an opinion the others did not is the defect this closed in the
+// first place.
 func rejectPublicKeyBody(info algorithmInfo, pubKey asn1.BitString) string {
 	if len(pubKey.Bytes) == 0 {
 		return "empty body"

@@ -3,7 +3,9 @@
 Go's standard library does not parse post-quantum keys, so CBOM-Lens falls back
 to reading the ASN.1 `AlgorithmIdentifier` directly and looking the OID up in a
 hand-maintained registry (`internal/cdxprops/algorithm.go`). This works for PEM
-files (`PUBLIC KEY`, `PRIVATE KEY`) and for X.509 certificates.
+files (`PUBLIC KEY`, `PRIVATE KEY`), for X.509 certificates, and for certificate
+requests — a request's `subjectPublicKeyInfo` is the same structure, and Go
+parses such a request successfully while leaving its key nil.
 
 Because the identifier is all we get, **everything reported comes from the OID
 alone**. Where a property is a function of a parameter set carried inside the
