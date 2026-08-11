@@ -27,11 +27,11 @@ import (
 // The test it must pass is simpler than the private one, and deliberately so.
 // RFC 9881 sec. 6 makes a PKCS#8 privateKey a CHOICE -- seed, expandedKey, or
 // both -- so several lengths are legal and the encodings have to be enumerated.
-// RFC 9881 sec. 4, and the SLH-DSA (RFC 9883) and ML-KEM (RFC 9882)
-// equivalents, put the encoded public key directly in the BIT STRING with no
-// CHOICE at all. One algorithm, one legal length. So the cases below pin an
-// EXACT match: one byte short and one byte long are both wrong, and there is
-// no wrapper for a `derOctetStringOf`-style shape test to look at.
+// RFC 9881 sec. 4, and the SLH-DSA (RFC 9909 sec. 5) and ML-KEM (RFC 9935
+// sec. 4) equivalents, put the encoded public key directly in the BIT STRING
+// with no CHOICE at all. One algorithm, one legal length. So the cases below
+// pin an EXACT match: one byte short and one byte long are both wrong, and
+// there is no wrapper for a `derOctetStringOf`-style shape test to look at.
 
 // The registry's public-key sizes in BYTES, from FIPS 204 Table 2, FIPS 205
 // Table 2 and FIPS 203 Table 3. They are repeated here rather than read from
