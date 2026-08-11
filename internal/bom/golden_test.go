@@ -222,10 +222,9 @@ func TestGolden_1_6(t *testing.T) {
 // from certificateRelatedProperties), so a consumer filtering assets by the
 // presence of that field over-counted key material by a factor of three.
 func TestGolden_NoMaterialPropsOnNonMaterialAssets(t *testing.T) {
-	detections := fixtureDetections(t)
-
 	for _, version := range []string{"1.6", "1.7"} {
 		t.Run(version, func(t *testing.T) {
+			detections := fixtureDetections(t)
 			b, err := NewBuilder(model.CBOM{Version: version})
 			require.NoError(t, err)
 			fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
