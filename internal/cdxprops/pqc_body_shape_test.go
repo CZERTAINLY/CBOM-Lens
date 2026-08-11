@@ -22,12 +22,12 @@ import (
 // garbage" report the guard was written to stop. The encodings are enumerable,
 // so they are checked as encodings.
 //
-// RFC 9881 sec. 6 (ML-DSA) and RFC 9882 (ML-KEM) make privateKey a CHOICE of
-// seed [0] OCTET STRING, expandedKey OCTET STRING, or a SEQUENCE of both.
-// SLH-DSA (RFC 9883) has no seed alternative and stores the key raw. Bodies
-// below are built from those definitions rather than from a fixture, because
-// the defect this replaces came from believing the corpus covered the encoding
-// space.
+// RFC 9881 sec. 6 (ML-DSA) and RFC 9935 sec. 6 (ML-KEM) make privateKey a
+// CHOICE of seed [0] OCTET STRING, expandedKey OCTET STRING, or a SEQUENCE of
+// both. SLH-DSA (RFC 9909 sec. 7) has no seed alternative and stores the key
+// raw. Bodies below are built from those definitions rather than from a
+// fixture, because the defect this replaces came from believing the corpus
+// covered the encoding space.
 
 var (
 	mlDSA65OID     = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}

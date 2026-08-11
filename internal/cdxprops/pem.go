@@ -423,9 +423,9 @@ func registryKeyBodySizes(info algorithmInfo) (seed, expanded int) {
 //
 // The accepted set is, in the order tried:
 //
-//   - the raw key, unwrapped. This is how SLH-DSA is stored (RFC 9883 gives it
-//     no seed alternative) and it is what the fixtures hold: 64 bytes for
-//     SHA2-128s, not 66. It is also accepted for the seed-bearing schemes,
+//   - the raw key, unwrapped. This is how SLH-DSA is stored (RFC 9909 sec. 7
+//     gives it no seed alternative) and it is what the fixtures hold: 64 bytes
+//     for SHA2-128s, not 66. It is also accepted for the seed-bearing schemes,
 //     where RFC 9881 does not define it: a producer that skips the CHOICE
 //     wrapper emits a real key, and reporting a real key as absent is the
 //     failure this check exists to avoid, inverted.

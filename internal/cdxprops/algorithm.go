@@ -61,7 +61,7 @@ type pqcInfo struct {
 	// encoding. RFC 9881 sec. 6 makes the ML-DSA privateKey field a CHOICE of
 	// seed [0] (32 bytes, and the RECOMMENDED form), expandedKey, or both, so
 	// a stored ML-DSA key is legitimately either 32 bytes or privKeySize.
-	// RFC 9882 gives SLH-DSA no such alternative, so it leaves this 0.
+	// RFC 9909 sec. 7 gives SLH-DSA no such alternative, so it leaves this 0.
 	seedSize int
 }
 

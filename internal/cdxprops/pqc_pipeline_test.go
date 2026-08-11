@@ -288,8 +288,8 @@ func TestPQCPipeline_UndersizedBodyYieldsAlgorithmNotKey(t *testing.T) {
 		// the check that rejects a body of exactly 32 bytes as well.
 		{"ML-DSA-65 one byte under the seed", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}, 31},
 		{"ML-KEM-768 one byte under the seed", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}, 63},
-		// SLH-DSA has no seed alternative (RFC 9882) and stores the key raw, so
-		// the only body that can be one is 64 bytes exactly.
+		// SLH-DSA has no seed alternative (RFC 9909 sec. 7) and stores the key
+		// raw, so the only body that can be one is 64 bytes exactly.
 		{"SLH-DSA-SHA2-128S empty body", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}, 0},
 		{"SLH-DSA-SHA2-128S one byte short", asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}, 63},
 	}
