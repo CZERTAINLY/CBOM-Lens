@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   test:
-    uses: OmniTrustILM/.github/.github/workflows/containers-test.yml@50f83b9285f0f12ed0b329696a920c811bf8fe23 # main
+    uses: OmniTrustILM/.github/.github/workflows/containers-test.yml@c89a3ffb3c9505e6bf45141297443aa926dd14f0 # main
     with:
       image: ilm/cbom-lens
       cache-scope: cbom-lens
