@@ -537,9 +537,12 @@ func TestPEMBundle_CRLWithoutNextUpdateOmitsTheProperty(t *testing.T) {
 				"a CRL with no nextUpdate must omit the property, not invent %q", p.Value)
 		}
 		// The rest must survive, or "omitted" could just mean the property set
-		// was dropped wholesale. A CRL carries no pem_type -- only csrToCDX
-		// sets that one.
-		require.Subset(t, names, []string{"issuer", "this_update", "revoked_count"})
+		// was dropped wholesale. That includes pem_type: type: other is the only
+		// schema-native marker both csrToCDX and crlToCDX share, so pem_type is
+		// the sole machine-readable way to tell a CRL component from a CSR one,
+		// and it must actually say "CRL" rather than merely be present.
+		require.Subset(t, names, []string{"pem_type", "issuer", "this_update", "revoked_count"})
+		require.Equal(t, "CRL", cdxtest.GetProp(compo, "pem_type"))
 	}
 	require.True(t, found, "no CRL component emitted")
 }
@@ -608,6 +611,7 @@ func TestPEMBundle_CSRAndCRLReachTheBOM(t *testing.T) {
 			}
 			require.NotEmpty(t, crlCompo.Name, "the CRL never reached the document, got %v", slices.Sorted(maps.Keys(byName)))
 			require.NotEmpty(t, crlCompo.BOMRef)
+			require.Equal(t, "CRL", cdxtest.GetProp(crlCompo, "pem_type"))
 			require.Equal(t, "1", cdxtest.GetProp(crlCompo, "revoked_count"))
 
 			// The location moved to evidence.occurrences, where the Builder can

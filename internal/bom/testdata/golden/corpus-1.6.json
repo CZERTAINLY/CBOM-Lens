@@ -569,6 +569,10 @@
       "name": "CRL: crl-issuer.fixture.test",
       "properties": [
         {
+          "name": "pem_type",
+          "value": "CRL"
+        },
+        {
           "name": "issuer",
           "value": "CN=crl-issuer.fixture.test"
         },

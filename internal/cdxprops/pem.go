@@ -128,9 +128,19 @@ func (c Converter) csrToCDX(csr *x509.CertificateRequest) cdx.Component {
 // would have kept only the first location -- a property that quietly lies
 // about where the asset was seen. evidence.occurrences already carries every
 // location, and populating it is the Builder's job.
+//
+// It DOES carry pem_type=CRL, mirroring csrToCDX's pem_type=CSR. Both
+// components declare relatedCryptoMaterialProperties.type as "other" because
+// CycloneDX's RelatedCryptoMaterialType enum has no CSR or CRL variant, so
+// "other" is the only schema-native shape either can take -- which also makes
+// it useless for telling the two apart. pem_type is the sole machine-readable
+// discriminator between them, so leaving it off here was not asymmetry by
+// design, it silently made every CRL indistinguishable from a CSR to anything
+// reading properties instead of guessing from the Name string.
 func (c Converter) crlToCDX(crl *x509.RevocationList) cdx.Component {
 	name := crlIssuerName(crl)
 	props := []cdx.Property{
+		{Name: "pem_type", Value: "CRL"},
 		{Name: "issuer", Value: crl.Issuer.String()},
 		{Name: "this_update", Value: crl.ThisUpdate.Format(time.RFC3339)},
 	}
