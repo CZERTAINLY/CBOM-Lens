@@ -34,6 +34,8 @@ var (
 	mlKEM768OID    = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}
 	slhDSA128sOID  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}
 	xmssOID        = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 34}
+	xmssMTOID      = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 35}
+	hssLMSOID      = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 3, 17}
 	mlDSA65Seed    = 32
 	mlDSA65Expand  = 4032
 	mlKEM768Seed   = 64
@@ -239,34 +241,139 @@ func TestPQCPipeline_LegalBodyEncodingsYieldTheirKey(t *testing.T) {
 	}
 }
 
-// TestPQCPipeline_UnsizedAlgorithmRejectsOnlyAnEmptyBody covers the entries the
-// registry states no size for: XMSS, XMSS-MT and HSS-LMS put their parameters
-// in the key value rather than the OID (RFC 9802), so there is no length and no
-// shape to check against.
+// TestPQCPipeline_UndefinedPrivateKeyEncodingRejectsOnlyEmptyBody covers XMSS,
+// XMSS-MT and HSS-LMS, where the gap is not an unstated SIZE but a missing
+// ENCODING: no RFC says what the PKCS#8 privateKey OCTET STRING holds under
+// these three OIDs, so beyond "not zero bytes" there is nothing to check.
 //
-// Nothing can be validated there, and refusing those keys would be the worse
-// error. An EMPTY body is still refused: no encoding of any key is zero bytes,
-// so it is the one thing that can be ruled out without knowing the algorithm.
-func TestPQCPipeline_UnsizedAlgorithmRejectsOnlyAnEmptyBody(t *testing.T) {
+// RFC 8554 sec. 3.3: "The private key format is not included as it is not
+// needed for interoperability and an implementation MAY use any private key
+// format." Sec. 4.2 and sec. 5.2 repeat it per level -- "The format of the
+// LM-OTS private key is an internal matter to the implementation, and this
+// document does not attempt to define it" and the same sentence for the LMS
+// private key. RFC 8391 sec. 4.1.7: "Note that we do not define any specific
+// format or handling for the XMSS private key SK by introducing this
+// algorithm", and sec. 4.2.2: "This document does not define any specific
+// format for the XMSS^MT private key SK_MT as it is not required for
+// interoperability."
+//
+// A code review raised RFC 8554 sec. 6.1 as a counter-example, arguing the HSS
+// private key is structured as u32str(L) followed by per-level state and is
+// therefore validatable. The primary text was checked and the claim does not
+// hold: the sentences above are the document's own statement about its scope.
+// The one concrete byte layout in RFC 8554 is the private key data in Test
+// Case 2 of Appendix F, which sec. 3.3 introduces with "However, for clarity,
+// we include an example of private key data" -- an illustration, explicitly not
+// a format. A future reader will find Appendix F and mistake it for a spec.
+//
+// So the sub-cases below are deliberate: one arbitrary byte IS accepted as a
+// private key, because with no defined encoding the alternative is dropping
+// real keys, which is the worse error. The twenty-four-byte case pins a floor
+// that was considered and rejected -- see rejectPrivateKeyBody's doc comment --
+// so it cannot be reintroduced without a test change.
+func TestPQCPipeline_UndefinedPrivateKeyEncodingRejectsOnlyEmptyBody(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty body", func(t *testing.T) {
-		t.Parallel()
+	algos := []struct {
+		name string
+		oid  asn1.ObjectIdentifier
+	}{
+		{"XMSS", xmssOID},
+		{"XMSS-MT", xmssMTOID},
+		{"HSS-LMS", hssLMSOID},
+	}
 
-		algorithms, material := assetsOf(t, pkcs8DERBody(t, xmssOID, nil))
+	bodies := []struct {
+		name string
+		body []byte
+		// material is how many private-key components the body must yield: 0 or
+		// 1. Stated as a number so the empty case and the accepted cases read
+		// off the same table rather than as two shapes of assertion.
+		material int
+		why      string
+	}{
+		{
+			name:     "empty body",
+			body:     nil,
+			material: 0,
+			why:      "an empty body cannot hold a key of any algorithm",
+		},
+		{
+			// The behaviour the review wanted changed. Kept, because no RFC
+			// defines an encoding to measure this against.
+			name:     "one byte",
+			body:     noise(1),
+			material: 1,
+			why:      "no encoding is defined for this OID, so dropping the key is the worse error",
+		},
+		{
+			// RFC 9858 Table 2 adds LMS_SHA256_M24_* and LMS_SHAKE_M24_*, all
+			// m=24 -- the smallest m of any registered LMS parameter set, and
+			// so the lowest floor a length check could have used. It is not
+			// applied: that m bounds an optional, internal, explicitly
+			// non-interoperable key-GENERATION input, not the bytes a producer
+			// puts in a transmitted PKCS#8 body, and RFC 8391 states no
+			// equivalent number for XMSS at all.
+			//
+			// This case sits ON the boundary, so it does NOT catch the floor
+			// itself: `len(body) < 24` accepts twenty-four bytes and this case
+			// still passes. The "one byte" case above is what fails when the
+			// floor is added. What this case catches is the off-by-one form,
+			// `<= 24` or `< 25`, which rejects the very parameter set the
+			// number was taken from -- verified by mutation, both ways.
+			name:     "twenty-four bytes",
+			body:     noise(24),
+			material: 1,
+			why:      "the m=24 floor from RFC 9858 was considered and rejected; it must stay rejected",
+		},
+	}
 
-		require.Len(t, algorithms, 1)
-		require.Empty(t, material, "an empty body cannot hold a key of any algorithm")
-	})
+	for _, algo := range algos {
+		for _, body := range bodies {
+			t.Run(algo.name+"/"+body.name, func(t *testing.T) {
+				t.Parallel()
 
-	t.Run("one byte", func(t *testing.T) {
-		t.Parallel()
+				algorithms, material := assetsOf(t, pkcs8DERBody(t, algo.oid, body.body))
 
-		_, material := assetsOf(t, pkcs8DERBody(t, xmssOID, noise(1)))
+				require.Len(t, algorithms, 1,
+					"the OID establishes the algorithm is referenced, whatever the body holds")
+				// Each OID must reach its OWN registry entry. Counting
+				// components cannot see a copy-pasted row mapping XMSS-MT's OID
+				// onto XMSS's entry: the counts are 1 and 1 either way, so every
+				// sub-case would still pass while the document named the wrong
+				// algorithm. Naming the algorithm is also the proof that these
+				// three OIDs reach rejectPrivateKeyBody at all rather than
+				// being dropped earlier as an unregistered OID, which yields no
+				// components whatsoever.
+				require.Equal(t, algo.name, algorithms[0].Name)
 
-		require.Len(t, material, 1,
-			"with no size in the registry there is nothing to check, and dropping the key is worse")
-	})
+				require.Len(t, material, body.material, body.why)
+				if body.material == 0 {
+					return
+				}
+
+				// These three OIDs accept a body nothing could validate, which
+				// makes them the entries most likely to carry garbage -- and so
+				// the ones where publishing that body would hurt most. That is
+				// exactly the risk the review raised, so it is pinned here and
+				// not only in the sized-algorithm tests above: an unvalidatable
+				// body must still never reach the emitted document.
+				key := material[0]
+				require.Equal(t, algo.name, key.Name)
+
+				props := key.CryptoProperties.RelatedCryptoMaterialProperties
+				require.NotNil(t, props)
+				require.Equal(t, cdx.RelatedCryptoMaterialTypePrivateKey, props.Type,
+					"an accepted body is claimed to be a private key, so it must say so")
+				require.Empty(t, props.Value,
+					"the secret must never be published, least of all bytes nothing validated")
+				// The registry states no size for these entries. A guessed one
+				// would be in bytes where the schema wants bits, and would
+				// validate, so nothing downstream would ever catch it.
+				require.Nil(t, props.Size)
+			})
+		}
+	}
 }
 
 // TestPQCPipeline_TrailingDataAfterPKCS8YieldsNoComponents pins that the DER

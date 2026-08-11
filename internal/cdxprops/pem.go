@@ -436,17 +436,48 @@ func registryKeyBodySizes(info algorithmInfo) (seed, expanded int) {
 //     what Node.js writes by default.
 //   - both, SEQUENCE { seed, expandedKey } -- OpenSSL's default.
 //
-// An empty body is refused whatever the algorithm, including the entries the
-// registry states no size for (XMSS, XMSS-MT, HSS-LMS: RFC 9802 puts the
-// parameters in the key value, not in the OID). Those cannot be validated and
-// refusing them would be the worse error, but no encoding of any key is zero
-// bytes, so that much can be ruled out without knowing the algorithm.
+// An empty body is refused whatever the algorithm. For XMSS, XMSS-MT and
+// HSS-LMS that is ALL that is refused, and the reason is not a missing size but
+// a missing ENCODING: no RFC defines what the PKCS#8 privateKey field holds
+// under those three OIDs, so there is no tag, no length and no structure to
+// check. RFC 8554 sec. 3.3: "The private key format is not included as it is
+// not needed for interoperability and an implementation MAY use any private key
+// format." Sec. 4.2 and sec. 5.2 say it again per level -- "The format of the
+// LM-OTS private key is an internal matter to the implementation, and this
+// document does not attempt to define it", and the same sentence for the LMS
+// private key. RFC 8391 sec. 4.1.7: "Note that we do not define any specific
+// format or handling for the XMSS private key SK by introducing this
+// algorithm"; sec. 4.2.2: "This document does not define any specific format
+// for the XMSS^MT private key SK_MT as it is not required for
+// interoperability." The one byte layout RFC 8554 does print is the private key
+// data in Test Case 2 of Appendix F, which sec. 3.3 offers "for clarity" as an
+// example -- it is an illustration, NOT a format, and nothing may be validated
+// against it.
+//
+// A minimum-length floor was tried and rejected. The only candidate number is
+// m: RFC 9858 Table 2 registers LMS_SHA256_M24_H5..H25 and
+// LMS_SHAKE_M24_H5..H25, all m=24, the smallest of any registered LMS parameter
+// set (RFC 8554 Table 2's baseline is m=32). But that MUST -- RFC 8554 sec.
+// 5.2, "An LMS private key MAY be generated pseudorandomly from a secret value;
+// in this case, the secret value MUST be at least m bytes long ..." -- bounds an
+// OPTIONAL, internal, explicitly non-interoperable key-GENERATION input, not
+// the bytes a producer places in a transmitted privateKey OCTET STRING; the
+// same paragraph adds "The details of how this process is done do not affect
+// interoperability". And RFC 8391 states no equivalent number for XMSS at all,
+// so the floor could not be applied uniformly to the three entries even if it
+// were sound. One arbitrary byte is therefore accepted under these OIDs, on
+// purpose: with no defined encoding, dropping a real key is the worse error.
+// TestPQCPipeline_UndefinedPrivateKeyEncodingRejectsOnlyEmptyBody pins both the
+// one-byte case and the rejected 24-byte floor.
 func rejectPrivateKeyBody(info algorithmInfo, body []byte) string {
 	if len(body) == 0 {
 		return "empty body"
 	}
 
 	seed, expanded := registryKeyBodySizes(info)
+	// No size in the registry means no defined encoding either: XMSS, XMSS-MT
+	// and HSS-LMS reach here, and the doc comment above records why nothing
+	// past the emptiness check can be asserted about their bodies.
 	if expanded == 0 {
 		return ""
 	}
