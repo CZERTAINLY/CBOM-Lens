@@ -2454,11 +2454,13 @@ func TestPEMBundle_CSRWithRegisteredPQCOIDYieldsItsKey(t *testing.T) {
 //
 // The key component carries no primitive at all -- it is related crypto
 // material of type publicKey -- so the primitive lives on the algorithm it
-// points at, and unsupportedPKIX takes it from registryPrimitive(info). Nothing
-// derives it from KeyUsage, and a request has no KeyUsage to derive it from in
-// any case. Without this, the natural "just call publicKeyComponents with the
-// recovered info" refactor silently reintroduces the defect registryPrimitive
-// was written to close: publicKeyComponents' own default is "signature", so an
+// points at, and unsupportedPKIX takes it from algorithmPrimitive(info) (named
+// registryPrimitive when this was written, before every producer was routed
+// through it). Nothing derives it from KeyUsage, and a request has no KeyUsage
+// to derive it from in any case. Without this, the natural "just call
+// publicKeyComponents with the recovered info" refactor silently reintroduces
+// the defect that function was written to close: the Unknown placeholder's
+// primitive is "signature", so an
 // ML-KEM encapsulation key someone asked to have certified would be published
 // as something that signs -- and a consumer counting signature schemes to plan
 // a migration would be counting the wrong thing, in the wrong bucket, with
@@ -2510,7 +2512,7 @@ func TestPEMBundle_CSRForMLKEMIsNotReportedAsASignatureScheme(t *testing.T) {
 			require.NotNil(t, algoCompo.CryptoProperties.AlgorithmProperties)
 			props := algoCompo.CryptoProperties.AlgorithmProperties
 			require.Equal(t, cdx.CryptoPrimitiveKEM, props.Primitive,
-				"a KEM reported as a signature scheme is the mislabel registryPrimitive exists to stop")
+				"a KEM reported as a signature scheme is the mislabel algorithmPrimitive exists to stop")
 			require.Equal(t, "768", props.ParameterSetIdentifier)
 			require.NotNil(t, props.CryptoFunctions)
 			require.Subset(t, *props.CryptoFunctions,
