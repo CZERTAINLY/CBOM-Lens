@@ -168,26 +168,14 @@ func (c Converter) crlToCDX(crl *x509.RevocationList) cdx.Component {
 // empty subject produces "crypto/csr/@sha256:..." -- a ref a reader cannot
 // tell from a truncation or a formatting bug.
 func csrSubjectName(csr *x509.CertificateRequest) string {
-	if csr.Subject.CommonName != "" {
-		return csr.Subject.CommonName
-	}
-	if subject := csr.Subject.String(); subject != "" {
-		return subject
-	}
-	return "unknown"
+	return nameOrFallback(csr.Subject, func() string { return "unknown" })
 }
 
 // crlIssuerName names a revocation list for its bom-ref and Name. A CRL has no
 // subject, so it is named after its issuer, otherwise following
 // csrSubjectName -- including why the "unknown" fallback is there.
 func crlIssuerName(crl *x509.RevocationList) string {
-	if crl.Issuer.CommonName != "" {
-		return crl.Issuer.CommonName
-	}
-	if issuer := crl.Issuer.String(); issuer != "" {
-		return issuer
-	}
-	return "unknown"
+	return nameOrFallback(crl.Issuer, func() string { return "unknown" })
 }
 
 // Helper functions

@@ -241,21 +241,33 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 	return
 }
 
-// formatCertificateName creates a human-readable name for the certificate
+// nameOrFallback returns a human-readable name for a pkix.Name -- a
+// certificate's subject, a CSR's subject, or a CRL's issuer: the Common Name
+// if one is set, else the full DN from pkix.Name.String(), else fallback().
+//
+// fallback is a func() rather than an already-formatted string so that
+// formatCertificateName's serial-number fallback -- an fmt.Sprintf plus a
+// big.Int-to-decimal conversion -- runs only for the rare certificate whose
+// subject is entirely empty, not for every certificate this is called for.
+// csrSubjectName and crlIssuerName pay nothing extra for the indirection: a
+// func literal that captures nothing compiles to the same zero-cost value as
+// the string literal it returns.
+func nameOrFallback(name pkix.Name, fallback func() string) string {
+	if name.CommonName != "" {
+		return name.CommonName
+	}
+	if s := name.String(); s != "" {
+		return s
+	}
+	return fallback()
+}
+
+// formatCertificateName creates a human-readable name for the certificate:
+// CN if there is one, else the full subject DN, else the serial number.
 func formatCertificateName(cert *x509.Certificate) string {
-	// Try to use CN (Common Name) if available
-	if cert.Subject.CommonName != "" {
-		return cert.Subject.CommonName
-	}
-
-	// Fallback to full subject DN
-	subject := cert.Subject.String()
-	if subject != "" {
-		return subject
-	}
-
-	// Last resort: use serial number
-	return fmt.Sprintf("Certificate %s", cert.SerialNumber.String())
+	return nameOrFallback(cert.Subject, func() string {
+		return fmt.Sprintf("Certificate %s", cert.SerialNumber.String())
+	})
 }
 
 // extractFingerprints calculates certificate fingerprints
