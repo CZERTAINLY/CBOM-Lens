@@ -118,6 +118,60 @@ func bothChoice(t *testing.T, seed, expanded int) []byte {
 	return body
 }
 
+// bothChoiceExtra encodes `both` with a third element appended. That is not a
+// longer form of the key, it is not the key: RFC 9881 sec. 6 and RFC 9935 sec.
+// 6 write SEQUENCE { seed, expandedKey } with no extension marker, and neither
+// X509-ML-DSA-2025 nor X509-ML-KEM-2025 declares EXTENSIBILITY IMPLIED, so
+// nothing supplies the "..." the syntax omits -- unlike the OneAsymmetricKey
+// wrapper one level out, which is extensible and does carry it. Go's asn1
+// tolerates trailing elements a destination struct has no field for, which is
+// what let a body of this shape be reported as a private key.
+func bothChoiceExtra(t *testing.T, seed, expanded int) []byte {
+	t.Helper()
+
+	body, err := asn1.Marshal(struct {
+		Seed     []byte
+		Expanded []byte
+		Extra    []byte
+	}{noise(seed), noise(expanded), noise(4)})
+	require.NoError(t, err)
+
+	return body
+}
+
+// bothChoiceStray is `both` with stray appended INSIDE the outer SEQUENCE's
+// content, after the two children, with the outer length recomputed to cover it.
+//
+// bothChoiceExtra above appends a whole third ELEMENT, six bytes at its smallest
+// here -- it always carries noise(4), so `04 04` and four content bytes. This
+// appends less than any element it can build: one raw byte, too few to be an
+// element at all, or the two-byte zero-length OCTET STRING that is as small as a
+// well-formed element gets. The distinction matters because it is the difference
+// between deleting the completeness check and merely LOOSENING it:
+// `len(afterExpanded) < 4` accepts every body this builds while every
+// bothChoiceExtra row still passes. Bytes appended after the outer element
+// instead land in asn1.Unmarshal's rest and are caught by a different clause, so
+// TestPQCPipeline_TrailingDataAfterPKCS8YieldsNoComponents does not cover this
+// either.
+func bothChoiceStray(t *testing.T, seed, expanded int, stray []byte) []byte {
+	t.Helper()
+
+	var outer asn1.RawValue
+	rest, err := asn1.Unmarshal(bothChoice(t, seed, expanded), &outer)
+	require.NoError(t, err)
+	require.Empty(t, rest)
+
+	body, err := asn1.Marshal(asn1.RawValue{
+		Class:      asn1.ClassUniversal,
+		Tag:        asn1.TagSequence,
+		IsCompound: true,
+		Bytes:      append(append([]byte(nil), outer.Bytes...), stray...),
+	})
+	require.NoError(t, err)
+
+	return body
+}
+
 // assetsOf splits a detection's components by asset type, asserting the zero
 // Component is never appended.
 func assetsOf(t *testing.T, der []byte) (algorithms, material []cdx.Component) {
@@ -150,33 +204,71 @@ func TestPQCPipeline_IllegalBodyEncodingYieldsAlgorithmNotKey(t *testing.T) {
 
 	tests := []struct {
 		name string
+		// algo is the registry name the OID must resolve to. Counting
+		// components cannot see a row whose OID reaches the wrong entry --
+		// the count is 1 either way -- so the document would name the wrong
+		// algorithm while every sub-case still passed. It is also the proof
+		// that the OID reaches rejectPrivateKeyBody at all, rather than being
+		// dropped earlier as unregistered, which yields no components.
+		algo string
 		oid  asn1.ObjectIdentifier
 		body []byte
 	}{
 		// Exactly the seed length, but bare bytes rather than `[0]
 		// OCTET STRING`. A floor at the seed accepts this, which is the whole
 		// defect: 32 bytes of noise reported as a full ML-DSA-65 private key.
-		{"ML-DSA-65 bare seed-length noise", mlDSA65OID, noise(mlDSA65Seed)},
-		{"ML-KEM-768 bare seed-length noise", mlKEM768OID, noise(mlKEM768Seed)},
+		{"ML-DSA-65 bare seed-length noise", "ML-DSA-65", mlDSA65OID, noise(mlDSA65Seed)},
+		{"ML-KEM-768 bare seed-length noise", "ML-KEM-768", mlKEM768OID, noise(mlKEM768Seed)},
 		// The length of the seed ENCODING, still not that encoding.
-		{"ML-DSA-65 noise the length of a seed encoding", mlDSA65OID, noise(mlDSA65Seed + 2)},
-		{"ML-KEM-768 noise the length of a seed encoding", mlKEM768OID, noise(mlKEM768Seed + 2)},
+		{"ML-DSA-65 noise the length of a seed encoding", "ML-DSA-65", mlDSA65OID, noise(mlDSA65Seed + 2)},
+		{"ML-KEM-768 noise the length of a seed encoding", "ML-KEM-768", mlKEM768OID, noise(mlKEM768Seed + 2)},
 		// Between the two alternatives: too long to be a seed, too short to be
 		// an expanded key, and a floor at the seed accepts every one.
-		{"ML-DSA-65 noise between the alternatives", mlDSA65OID, noise(100)},
-		{"ML-DSA-65 long noise", mlDSA65OID, noise(2000)},
-		{"ML-KEM-768 long noise", mlKEM768OID, noise(1000)},
+		{"ML-DSA-65 noise between the alternatives", "ML-DSA-65", mlDSA65OID, noise(100)},
+		{"ML-DSA-65 long noise", "ML-DSA-65", mlDSA65OID, noise(2000)},
+		{"ML-KEM-768 long noise", "ML-KEM-768", mlKEM768OID, noise(1000)},
 		// A well-formed OCTET STRING of the WRONG size. The tag is right, so
 		// only checking the encoding's shape and not its length would pass it.
-		{"ML-DSA-65 expandedKey one byte short", mlDSA65OID, expandedChoice(t, mlDSA65Expand-1)},
-		{"ML-KEM-768 expandedKey one byte short", mlKEM768OID, expandedChoice(t, mlKEM768Expand-1)},
+		{"ML-DSA-65 expandedKey one byte short", "ML-DSA-65", mlDSA65OID, expandedChoice(t, mlDSA65Expand-1)},
+		{"ML-KEM-768 expandedKey one byte short", "ML-KEM-768", mlKEM768OID, expandedChoice(t, mlKEM768Expand-1)},
 		// A well-formed seed of the wrong size, and one under the OID of an
 		// algorithm that has no seed alternative at all.
-		{"ML-DSA-65 seed one byte short", mlDSA65OID, seedChoice(t, mlDSA65Seed-1)},
-		{"SLH-DSA-SHA2-128S seed encoding", slhDSA128sOID, seedChoice(t, 32)},
+		{"ML-DSA-65 seed one byte short", "ML-DSA-65", mlDSA65OID, seedChoice(t, mlDSA65Seed-1)},
+		{"SLH-DSA-SHA2-128S seed encoding", "SLH-DSA-SHA2-128S", slhDSA128sOID, seedChoice(t, 32)},
 		// The `both` SEQUENCE with its halves swapped: both lengths are legal
-		// somewhere, neither is legal in that position.
-		{"ML-DSA-65 both with halves swapped", mlDSA65OID, bothChoice(t, mlDSA65Expand, mlDSA65Seed)},
+		// somewhere, neither is legal in that position. Checked under both
+		// OIDs, because the two have different sizes and a check that reads a
+		// length against the wrong member survives either one alone.
+		{"ML-DSA-65 both with halves swapped", "ML-DSA-65", mlDSA65OID, bothChoice(t, mlDSA65Expand, mlDSA65Seed)},
+		{"ML-KEM-768 both with halves swapped", "ML-KEM-768", mlKEM768OID, bothChoice(t, mlKEM768Expand, mlKEM768Seed)},
+		// The `both` SEQUENCE with a third element. The two members are the
+		// right size in the right order, so nothing but the extra element
+		// distinguishes this from a key -- see bothChoiceExtra for why the
+		// RFCs make that enough.
+		{"ML-DSA-65 both with a third element", "ML-DSA-65", mlDSA65OID, bothChoiceExtra(t, mlDSA65Seed, mlDSA65Expand)},
+		{"ML-KEM-768 both with a third element", "ML-KEM-768", mlKEM768OID, bothChoiceExtra(t, mlKEM768Seed, mlKEM768Expand)},
+		// The same SEQUENCE with leftovers too SMALL to be an element. The
+		// smallest third element the rows above can carry is six bytes, so a
+		// completeness check loosened rather than deleted -- `<= 1`, `<= 2`,
+		// `< 4`, the shape a "be tolerant of encoders" change takes -- passes
+		// every row above and accepts these. One raw byte, and the smallest
+		// well-formed element there is, cover the band.
+		{"ML-DSA-65 both with one stray byte inside the SEQUENCE", "ML-DSA-65", mlDSA65OID,
+			bothChoiceStray(t, mlDSA65Seed, mlDSA65Expand, []byte{0xff})},
+		{"ML-KEM-768 both with a zero-length third element", "ML-KEM-768", mlKEM768OID,
+			bothChoiceStray(t, mlKEM768Seed, mlKEM768Expand, []byte{0x04, 0x00})},
+		// SLH-DSA has NO seed alternative: RFC 9909 sec. 7 stores the key raw,
+		// so the registry states no seedSize and rejectPrivateKeyBody guards
+		// both seed-bearing alternatives with `seed > 0`. Nothing pinned that
+		// guard -- deleting it left every test in this package green -- and
+		// without it a zero-length seed satisfies both: `[0] OCTET STRING` of
+		// nothing, and a SEQUENCE whose first child is an empty OCTET STRING,
+		// each reported as a full SLH-DSA private key under an OID whose RFC
+		// defines neither encoding. The second is the more dangerous of the
+		// two, because its expanded half IS the right size, so it differs from
+		// a real raw key only by a wrapper the spec never mentions.
+		{"SLH-DSA-SHA2-128S zero-length seed encoding", "SLH-DSA-SHA2-128S", slhDSA128sOID, seedChoice(t, 0)},
+		{"SLH-DSA-SHA2-128S both with an empty seed", "SLH-DSA-SHA2-128S", slhDSA128sOID, bothChoice(t, 0, 64)},
 	}
 
 	for _, tt := range tests {
@@ -187,6 +279,8 @@ func TestPQCPipeline_IllegalBodyEncodingYieldsAlgorithmNotKey(t *testing.T) {
 
 			require.Len(t, algorithms, 1,
 				"the OID establishes the algorithm is referenced, whatever the body holds")
+			require.Equal(t, tt.algo, algorithms[0].Name,
+				"the OID must reach its own registry entry, not merely some entry")
 			require.Empty(t, material,
 				"a body that is not a legal private-key encoding must not be reported as a key")
 		})
@@ -202,6 +296,15 @@ func TestPQCPipeline_IllegalBodyEncodingYieldsAlgorithmNotKey(t *testing.T) {
 // a valid seed from 32 arbitrary bytes -- there is no content test to make --
 // so the encoding and its declared lengths are all this can check, and that is
 // exactly what it must accept.
+//
+// It asserts what is EMITTED, not how much of it. A count of one plus a name is
+// satisfied by a key component whose relatedCryptoMaterialProperties is a
+// different type, points at nothing, or carries the body it was handed; each of
+// those is a wrong document that this test used to pass. The load-bearing one
+// is algorithmRef: it is the only link a post-quantum private key has to its
+// algorithm -- the bom-ref hashes the private DER, from which the public half
+// cannot be recovered, so unlike a classical keypair there is no shared digest
+// to pair on -- and a count cannot see wiring.
 func TestPQCPipeline_LegalBodyEncodingsYieldTheirKey(t *testing.T) {
 	t.Parallel()
 
@@ -231,12 +334,45 @@ func TestPQCPipeline_LegalBodyEncodingsYieldTheirKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, material := assetsOf(t, pkcs8DERBody(t, tt.oid, tt.body))
+			algorithms, material := assetsOf(t, pkcs8DERBody(t, tt.oid, tt.body))
+
+			require.Len(t, algorithms, 1,
+				"the OID establishes the algorithm is referenced, whatever the body holds")
+			require.Equal(t, tt.algo, algorithms[0].Name,
+				"the OID must reach its own registry entry, not merely some entry")
 
 			require.Len(t, material, 1, "a legal %s encoding is a private key", tt.algo)
-			require.Equal(t, tt.algo, material[0].Name)
-			require.Empty(t, material[0].CryptoProperties.RelatedCryptoMaterialProperties.Value,
+			key := material[0]
+			require.Equal(t, tt.algo, key.Name)
+			require.Equal(t, tt.oid.String(), key.CryptoProperties.OID,
+				"the key must carry the OID it was found under")
+
+			props := key.CryptoProperties.RelatedCryptoMaterialProperties
+			require.NotNil(t, props,
+				"a related-crypto-material asset with no related-crypto-material properties "+
+					"says a key exists and nothing about it")
+			require.Equal(t, cdx.RelatedCryptoMaterialTypePrivateKey, props.Type,
+				"the body was accepted as a PRIVATE key, so the document must say private")
+
+			// The key must point at the algorithm component emitted BESIDE it.
+			// Both are built in unsupportedPKCS8PrivateKey from the same
+			// registry entry, and the ref is taken after the algorithm is
+			// hashed -- read it before, or hash it under a different name, and
+			// the document carries a key whose algorithmRef resolves to
+			// nothing. Assert the identity rather than "not empty": a
+			// well-formed ref pointing somewhere else is the failure mode a
+			// presence check cannot see.
+			require.Equal(t, cdx.BOMReference(algorithms[0].BOMRef), props.AlgorithmRef,
+				"the key must reference the algorithm component emitted with it")
+
+			require.Empty(t, props.Value,
 				"the secret must never be published")
+			// Every post-quantum registry entry states keySize 0, so no size is
+			// emitted. The fallback that must NOT appear is pqcInfo.privKeySize
+			// or kemInfo.decapKeySize: those are FIPS 203/204 BYTE counts while
+			// the schema's size is in BITS, so 4032 for ML-DSA-65 would
+			// understate the key eightfold and still validate.
+			require.Nil(t, props.Size)
 		})
 	}
 }

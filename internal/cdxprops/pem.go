@@ -650,17 +650,71 @@ func derOctetStringOf(body []byte, want int, params string) bool {
 	return err == nil && len(rest) == 0 && len(content) == want
 }
 
-// derSeedAndExpandedOf reports whether body is the `both` alternative. The two
-// lengths are checked in position: swapping the halves gives a SEQUENCE whose
+// derSeedAndExpandedOf reports whether body is the `both` alternative and
+// nothing else: SEQUENCE { seed OCTET STRING, expandedKey OCTET STRING }, two
+// children, no third.
+//
+// That "no third" is the RFC's, not a house rule. RFC 9881 sec. 6 (ML-DSA) and
+// RFC 9935 sec. 6 (ML-KEM) write the production with no extension marker, and
+// neither ASN.1 module -- X509-ML-DSA-2025 and X509-ML-KEM-2025, Appendix A of
+// each, both `DEFINITIONS IMPLICIT TAGS` -- declares EXTENSIBILITY IMPLIED, so
+// nothing supplies the "..." the syntax omits. The omission is deliberate: the
+// OneAsymmetricKey those same sections replicate one paragraph earlier carries
+// "..." twice. Both RFCs also say privateKey holds "one of the following
+// DER-encoded CHOICE structures", and DER admits one encoding per value. A
+// SEQUENCE of {seed, expandedKey, anything} is therefore not a key this tool
+// declines to describe -- it is not a key of this algorithm, and the caller is
+// right to report the OID's algorithm and no key material.
+//
+// This is the opposite call from the one pkcs8Struct makes one wrapper out, and
+// both are correct because the two productions differ. RFC 5958's
+// OneAsymmetricKey IS extensible and real keys append attributes [0] and
+// publicKey [1]; the laxity Go's asn1 grants a struct with fewer fields than the
+// SEQUENCE has is what lets those keys parse, so pkcs8Struct leans on it on
+// purpose. Inside `both` there is no marker to honour and the same laxity is a
+// hole. This function used to unmarshal into a two-field struct and check the
+// returned rest, but rest is what follows the OUTER SEQUENCE and never what is
+// left INSIDE it, so a third element was accepted in silence and the body
+// reported as a key. The check was strict in the two places it could afford to
+// be sloppy and sloppy in the one place it could not: derOctetStringOf has
+// always required len(rest) == 0, which is complete for the seed-only and
+// expandedKey-only alternatives because each is a single element, so two of the
+// three CHOICE arms were strict and only this one was not.
+//
+// Hence the shape. The outer element is read as a RawValue and its class, tag
+// and constructed bit asserted by hand, because asn1.RawValue matches ANY tag
+// and the struct this replaces was silently supplying all three checks.
+// Restating them keeps a primitive 0x10 (whose content would otherwise decode
+// identically), a SET 0x31 and a context-tagged 0xA0 out, which is also what
+// both sec. 6s ask for: "the ASN.1 tag explicitly indicates which variant of
+// CHOICE is present ... rather than any other heuristic". The children are then
+// read out of the SEQUENCE's CONTENT, where the leftover really is the leftover.
+// Unmarshalling a child into []byte already demands a universal, primitive OCTET
+// STRING, so a `[0] OCTET STRING` first child -- the seed alternative's own
+// tagging, illegal in this position -- and a nested SEQUENCE are refused without
+// a further assertion.
+//
+// The two lengths stay positional: swapping the halves gives a SEQUENCE whose
 // members are individually the right size and which encodes no key.
 func derSeedAndExpandedOf(body []byte, wantSeed, wantExpanded int) bool {
-	var both struct {
-		Seed     []byte
-		Expanded []byte
+	var outer asn1.RawValue
+	rest, err := asn1.Unmarshal(body, &outer)
+	if err != nil || len(rest) != 0 ||
+		outer.Class != asn1.ClassUniversal ||
+		outer.Tag != asn1.TagSequence ||
+		!outer.IsCompound {
+		return false
 	}
-	rest, err := asn1.Unmarshal(body, &both)
-	return err == nil && len(rest) == 0 &&
-		len(both.Seed) == wantSeed && len(both.Expanded) == wantExpanded
+
+	var seed []byte
+	afterSeed, err := asn1.Unmarshal(outer.Bytes, &seed)
+	if err != nil || len(seed) != wantSeed {
+		return false
+	}
+
+	var expanded []byte
+	afterExpanded, err := asn1.Unmarshal(afterSeed, &expanded)
+	return err == nil && len(afterExpanded) == 0 && len(expanded) == wantExpanded
 }
 
 // registryPrimitive returns the primitive a registry entry declares, falling
