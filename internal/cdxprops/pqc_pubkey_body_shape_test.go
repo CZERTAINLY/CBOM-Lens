@@ -983,3 +983,89 @@ func TestPQCPipeline_PKIXRejectedBodyIsLoggedAtWarn(t *testing.T) {
 	require.Contains(t, logged, "body_bytes=100",
 		"and what was wrong with it")
 }
+
+// TestPQCPipeline_UnregisteredSPKIOIDIsPublishedNotReplacedByASentinel pins
+// what a certificate says about a key neither Go's enum nor the registry can
+// name.
+//
+// It used to say two things that were not true. extractAlgorithmInfo's Unknown
+// branch leaves oid at oidPlaceholder -- the literal "0.0.0.0", which that
+// constant's own comment calls not an OID -- and leaves the primitive at
+// "signature", so an X25519 certificate published a key-agreement algorithm as
+// something that signs, under an arc no registry resolves, while the OID that
+// would have identified it went to a log line and nowhere else.
+//
+// X25519 is the honest fixture for this rather than an invented arc: it is a
+// real, widely deployed algorithm, and it is outside unsupportedAlgorithms for
+// a structural reason that will not change -- that registry exists for the
+// post-quantum schemes Go cannot parse, and X25519 is neither.
+//
+// The assertions are on the VALUE, not the count. A test that counted
+// components, or asserted only that "0.0.0.0" was absent, would pass on a fix
+// that dropped the OID field entirely -- which loses the one true fact the
+// certificate states about its key.
+func TestPQCPipeline_UnregisteredSPKIOIDIsPublishedNotReplacedByASentinel(t *testing.T) {
+	t.Parallel()
+
+	// RFC 8410 sec. 3: id-X25519 is 1.3.101.110, and its public key is 32 bytes.
+	x25519 := asn1.ObjectIdentifier{1, 3, 101, 110}
+	certificates, algorithms, material := assetsOfCertPEM(t,
+		certWithSPKIPEM(t, pkixDERBody(t, x25519, noise(32))))
+
+	require.Len(t, certificates, 1, "the certificate is a real asset whatever names its key")
+	require.Len(t, material, 1, "the key is real too: the SPKI carries it")
+	require.ElementsMatch(t, []string{"Unknown", "SHA256-RSA", "SHA-256"}, algorithmNames(algorithms),
+		"the subject key's algorithm, the one that signed the certificate, and that one's hash")
+
+	var unknown cdx.Component
+	for _, algo := range algorithms {
+		if algo.Name == "Unknown" {
+			unknown = algo
+		}
+	}
+	require.NotEmpty(t, unknown.BOMRef,
+		"an algorithm nothing names is still referenced by the key, so it must exist, got %v",
+		algorithmNames(algorithms))
+
+	require.Equal(t, "1.3.101.110", unknown.CryptoProperties.OID,
+		"the certificate states which algorithm this is; publishing the sentinel instead discards it")
+	require.Equal(t, "1.3.101.110", material[0].CryptoProperties.OID,
+		"the key carries the same OID as the algorithm describing it")
+	require.Equal(t, cdx.CryptoPrimitiveUnknown,
+		unknown.CryptoProperties.AlgorithmProperties.Primitive,
+		"X25519 does not sign, and an inventory counting signature schemes must not count it")
+
+	// The sentinel must not survive anywhere in the document, including on the
+	// key component, which reads the same algorithmInfo.
+	for _, compo := range append(append(certificates, algorithms...), material...) {
+		require.NotEqual(t, oidPlaceholderForTest, compo.CryptoProperties.OID,
+			"%s still carries the sentinel", compo.BOMRef)
+	}
+
+	// The same key on its own. Reading the OID only off a certificate is what
+	// made the sentinel survive here after the certificate path stopped
+	// emitting it: publicKeyComponents guarded the fallback on cert != nil, so
+	// one X25519 key was 1.3.101.110 inside a certificate and "0.0.0.0" in a
+	// `PUBLIC KEY` block beside it -- one path holding an opinion its sibling
+	// did not, which is the defect class #213 is about.
+	//
+	// Asserting the REF, not just the OID, is the point: a bom-ref is a digest
+	// of the component, so equal refs is the strongest available statement
+	// that the two producers built the same asset, and it is what makes the
+	// Builder dedup them into one.
+	bareAlgorithms, bareMaterial := assetsOfPub(t, pkixDERBody(t, x25519, noise(32)))
+
+	require.Len(t, bareAlgorithms, 1, "a bare public key references exactly its own algorithm")
+	require.Equal(t, unknown.BOMRef, bareAlgorithms[0].BOMRef,
+		"one X25519 key is one algorithm asset whether a certificate carried it or not")
+	require.Equal(t, "1.3.101.110", bareAlgorithms[0].CryptoProperties.OID)
+	require.Equal(t, cdx.CryptoPrimitiveUnknown,
+		bareAlgorithms[0].CryptoProperties.AlgorithmProperties.Primitive)
+	require.Len(t, bareMaterial, 1)
+	require.Equal(t, "1.3.101.110", bareMaterial[0].CryptoProperties.OID)
+}
+
+// oidPlaceholderForTest restates the production sentinel rather than importing
+// it: this is an external test package, and the assertion above is about what
+// reaches a CONSUMER, who sees the string and not the constant.
+const oidPlaceholderForTest = "0.0.0.0"

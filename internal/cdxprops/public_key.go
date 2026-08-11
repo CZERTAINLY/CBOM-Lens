@@ -27,8 +27,27 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 	// absent at the other.
 	var spki pkixStruct
 	var haveSPKI bool
-	if cert != nil {
+	switch {
+	case cert != nil:
 		spki, haveSPKI = certSPKI(cert)
+	case pubKey != nil:
+		// A standalone `PUBLIC KEY` block has no certificate to hang its
+		// SubjectPublicKeyInfo on, and reading the OID only off a certificate
+		// is what made the two paths disagree: the same X25519 key published
+		// oid "1.3.101.110" inside a certificate and the "0.0.0.0" sentinel on
+		// its own. Go parsed this key, so marshalling it back recovers the
+		// same structure certSPKI decodes -- the algorithm identifier is
+		// exactly what x509.MarshalPKIXPublicKey writes from the key's type.
+		//
+		// The error is dropped deliberately. It is returned for the key types
+		// Go cannot marshal -- *dsa.PublicKey above all -- and those have a
+		// real name from the enum already, so they never reach the placeholder
+		// this fallback exists to replace. Nothing is lost by leaving haveSPKI
+		// false for them, and hashPublicKey below reports the same failure
+		// where a caller can act on it.
+		if der, err := x509.MarshalPKIXPublicKey(pubKey); err == nil {
+			spki, haveSPKI = spkiFromRaw(der)
+		}
 	}
 
 	if info.oid == oidPlaceholder && haveSPKI {
@@ -40,6 +59,34 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		if fallback, ok := unsupportedAlgorithms[oidFallback]; ok {
 			info = fallback
 		} else if oidFallback != "" {
+			// The registry cannot NAME this algorithm, but the certificate
+			// still states which one it is, and the placeholder threw that
+			// away: extractAlgorithmInfo's Unknown branch leaves oid at
+			// oidPlaceholder, the literal "0.0.0.0", which the constant's own
+			// comment calls not an OID. An X25519 certificate -- 1.3.101.110,
+			// outside the registry because the registry is post-quantum --
+			// published `"oid": "0.0.0.0"` on both the key and the algorithm,
+			// and the arc that would have identified it was written to a log
+			// line and dropped. A consumer cannot tell that component from any
+			// other unnameable key, and "0.0.0.0" is a claim no registry
+			// resolves.
+			//
+			// The primitive goes for the same reason, one step further: the
+			// Unknown placeholder's is "signature", so a key-agreement
+			// algorithm was published as something that signs -- a false
+			// claim, not merely a missing one, and one an inventory counting
+			// signature schemes for a migration would count. Both schemas
+			// carry "unknown" in the primitive enum for exactly this case.
+			//
+			// csrToCDX refuses to publish this placeholder at all (#217), and
+			// a certificate reaching the same placeholder by the same route
+			// must not be more credulous than a request. It publishes more
+			// than the request can because it has more: the request's
+			// suppression fires when nothing names the algorithm AND there is
+			// no asset worth emitting, whereas here the certificate is a real
+			// asset whose subjectPublicKeyRef must resolve.
+			info.oid = oidFallback
+			info.primitive = cdx.CryptoPrimitiveUnknown
 			slog.WarnContext(ctx, "can't find public key components", "oid", oidFallback)
 		}
 	}

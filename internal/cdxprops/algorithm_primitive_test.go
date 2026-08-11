@@ -181,14 +181,45 @@ func TestAlgorithmPrimitive_UnknownPlaceholderFallbackIsLoadBearing(t *testing.T
 	require.Equal(t, "Unknown", algo.Name)
 	require.NotNil(t, algo.CryptoProperties)
 	require.NotNil(t, algo.CryptoProperties.AlgorithmProperties)
-	require.Equal(t, cdx.CryptoPrimitiveSignature,
+	// This asserted "signature" when it was written, and said in its own
+	// comment that the thread fixing the placeholder is what would have to
+	// change it. That thread landed: publicKeyComponents no longer lets the
+	// fallback decide what an unnameable algorithm does. It reads the OID off
+	// the SubjectPublicKeyInfo -- which is present whether or not a
+	// certificate carried it -- and states "unknown" rather than claiming a
+	// key-agreement algorithm signs.
+	//
+	// The fallback itself is untouched and still asserted above, because it is
+	// still what algorithmPrimitive returns for an info stating no primitive.
+	// What changed is that no producer now hands it one: this is the branch
+	// that used to, and the assertions below say it stopped.
+	require.Equal(t, cdx.CryptoPrimitiveUnknown,
 		algo.CryptoProperties.AlgorithmProperties.Primitive,
-		"the placeholder's emitted primitive is what the fallback supplies")
+		"an algorithm nothing names states no primitive rather than a false one")
+	require.Equal(t, "1.3.101.110", algo.CryptoProperties.OID,
+		"the SPKI says which algorithm this is, so the sentinel is not published")
 
-	// The same component, built the same way, minus the fallback.
-	withoutFallback := info.componentWOBomRef(false)
-	c.BOMRefHash(&withoutFallback, info.algorithmName)
-	require.NotEqual(t, withoutFallback.BOMRef, algo.BOMRef,
-		"the primitive is inside the digest, so dropping the fallback moves this "+
-			"asset's ref -- which is the whole reason the fallback was kept")
+	// The same component, built the same way, minus the primitive. This says
+	// the primitive is INSIDE the digest, which is why neither the fallback
+	// nor the value above is cosmetic: a bom-ref is a hash of the component,
+	// and downstream documents already reference it.
+	//
+	// It isolates the primitive deliberately. Comparing against the untouched
+	// placeholder info would differ in the OID too -- which this change also
+	// moved -- and would then prove nothing about the primitive in particular.
+	withPrimitive := info
+	withPrimitive.oid = algo.CryptoProperties.OID
+	withoutPrimitive := withPrimitive.componentWOBomRef(false)
+	c.BOMRefHash(&withoutPrimitive, info.algorithmName)
+
+	withPrimitive.primitive = cdx.CryptoPrimitiveUnknown
+	stated := withPrimitive.componentWOBomRef(false)
+	setAlgorithmPrimitive(&stated, algorithmPrimitive(withPrimitive))
+	c.BOMRefHash(&stated, info.algorithmName)
+
+	require.NotEqual(t, withoutPrimitive.BOMRef, stated.BOMRef,
+		"the primitive is inside the digest, so what this branch states about an "+
+			"unnameable algorithm is part of that asset's identity")
+	require.Equal(t, stated.BOMRef, algo.BOMRef,
+		"and the ref the producer emitted is the one that identity predicts")
 }
