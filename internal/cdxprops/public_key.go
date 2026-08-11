@@ -20,8 +20,19 @@ import (
 func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate) (algo, key cdx.Component) {
 	info := publicKeyAlgorithmInfo(pubKeyAlg, pubKey)
 
-	if info.oid == oidPlaceholder && cert != nil {
-		oidFallback := spkiOID(cert)
+	// One decode of the certificate's subjectPublicKeyInfo, read in two places
+	// below: the OID names the algorithm when Go's enum could not, and the BIT
+	// STRING is the body the key claim rests on. Decoding it separately at each
+	// of those two points is how a rule enforced at one of them comes to be
+	// absent at the other.
+	var spki pkixStruct
+	var haveSPKI bool
+	if cert != nil {
+		spki, haveSPKI = certSPKI(cert)
+	}
+
+	if info.oid == oidPlaceholder && haveSPKI {
+		oidFallback := spki.Algorithm.Algorithm.String()
 		// Only overwrite info on a hit. The previous two-value assignment
 		// replaced it with the zero algorithmInfo on a miss, so both returned
 		// components got an empty Name and Builder.appendDetection dropped
@@ -73,6 +84,33 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		// same fallback unsupportedPKIX already uses.
 		slog.DebugContext(ctx, "public key is not marshallable; hashing the certificate's SPKI instead",
 			"algorithm", info.name, "error", err.Error())
+
+		// Hashing that DER is also ASSERTING it. Everything below says a public
+		// key of info's algorithm exists here, and on this branch the only
+		// evidence for that is the SPKI's own body -- Go did not parse the key,
+		// so nothing has looked at those bytes. x509.ParseCertificate reads the
+		// subjectPublicKey BIT STRING, finds an algorithm OID its enum does not
+		// name, leaves PublicKey nil and returns successfully; it never
+		// interprets the body. So the four bytes of garbage unsupportedPKIX
+		// refuses under a `PUBLIC KEY` block arrive here intact under a
+		// `CERTIFICATE` block, and a certificate must not buy the key claim more
+		// cheaply than a bare key does. Same registry sizes, same function,
+		// deliberately not a second copy of the rule.
+		if !haveSPKI {
+			slog.WarnContext(ctx, "not reporting a public key: the certificate's subjectPublicKeyInfo could not be decoded",
+				"algorithm", info.name,
+				"oid", info.oid)
+			return algo, cdx.Component{}
+		}
+		if reason := rejectPublicKeyBody(info, spki.PublicKey); reason != "" {
+			slog.WarnContext(ctx, "not reporting a public key: the certificate's SPKI body is not this algorithm's public key",
+				"algorithm", info.name,
+				"oid", info.oid,
+				"body_bytes", len(spki.PublicKey.Bytes),
+				"reason", reason)
+			return algo, cdx.Component{}
+		}
+
 		pubKeyValue, pubKeyHash = c.hashRawPublicKey(cert.RawSubjectPublicKeyInfo)
 	} else if err != nil {
 		// No certificate to fall back on: a digest-less bom-ref would merge

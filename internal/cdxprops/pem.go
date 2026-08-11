@@ -818,6 +818,16 @@ func registryPublicKeyBodySize(info algorithmInfo) int {
 // that much can be ruled out without knowing the algorithm, including for the
 // three entries the registry states no size for (XMSS, XMSS-MT, HSS-LMS: RFC
 // 9802 puts the parameters in the key value, not in the OID).
+//
+// It has two callers, and that is why it is a function rather than an inline
+// comparison. unsupportedPKIX checks the SubjectPublicKeyInfo of a standalone
+// `PUBLIC KEY` block; publicKeyComponents checks the SubjectPublicKeyInfo of a
+// CERTIFICATE, on the branch where Go could not parse the key and the raw SPKI
+// is published in its place. Those are the same structure, carrying the same
+// BIT STRING under the same OID, differing only in the PEM label around them --
+// so a local length comparison at either call site would be a second opinion on
+// one rule, and one path holding an opinion the other did not is the defect this
+// closed in the first place.
 func rejectPublicKeyBody(info algorithmInfo, pubKey asn1.BitString) string {
 	if len(pubKey.Bytes) == 0 {
 		return "empty body"

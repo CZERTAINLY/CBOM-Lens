@@ -17,18 +17,91 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_spkiOID(t *testing.T) {
+func Test_certSPKI(t *testing.T) {
 	t.Parallel()
 
 	selfSigned, err := cdxtest.GenSelfSignedCert()
 	require.NoError(t, err)
 
-	res := spkiOID(selfSigned.Cert)
-	require.Equal(t, "1.2.840.113549.1.1.1", res)
+	spki, ok := certSPKI(selfSigned.Cert)
+	require.True(t, ok)
+	require.Equal(t, "1.2.840.113549.1.1.1", spki.Algorithm.Algorithm.String())
+	// The body is the half spkiOID could not return, and the half the guard in
+	// publicKeyComponents rests on: a decode that reported the OID and dropped
+	// the BIT STRING would leave that guard measuring nothing.
+	require.NotEmpty(t, spki.PublicKey.Bytes)
 
 	selfSigned.Cert.RawSubjectPublicKeyInfo = []byte("garbage")
-	res = spkiOID(selfSigned.Cert)
-	require.Equal(t, "", res)
+	spki, ok = certSPKI(selfSigned.Cert)
+	require.False(t, ok)
+	require.Equal(t, pkixStruct{}, spki,
+		"a failed decode must not hand back a half-filled structure for a "+
+			"caller to read an OID or a length out of")
+}
+
+// Test_certSPKI_RealCertificateFixturesMatchTheRegistry is the units check the
+// certificate guard rests on, made a committed assertion.
+//
+// registryPublicKeyBodySize returns byte counts, and the BIT STRING inside a
+// certificate is one byte longer on the wire than its content because DER puts
+// an unused-bits octet in front of it. asn1.BitString.Bytes excludes that octet,
+// so the two are directly comparable -- but "directly comparable" is a claim
+// about a decoder, and the way to retire it is to measure three real
+// certificates OpenSSL wrote real keys into. Their subjectPublicKey BIT STRINGs
+// are 1953, 1185 and 33 bytes on the wire; the wants below are those minus one.
+//
+// The wants are literals rather than reads from the registry, for the same
+// reason the constants in pqc_pubkey_body_shape_test.go are: a failure has to
+// say the registry changed, not change with it.
+//
+// require.Nil on cert.PublicKey is a precondition, not an observation. These
+// three fixtures reach the guarded branch precisely because Go did not parse
+// their keys; if a future Go learns ML-DSA, they stop exercising the branch and
+// this test would go on passing while measuring a path nothing takes.
+func Test_certSPKI_RealCertificateFixturesMatchTheRegistry(t *testing.T) {
+	t.Parallel()
+
+	for name, tt := range map[string]struct {
+		fixture string
+		algo    string
+		// want is the registry's byte count for this algorithm's public key:
+		// FIPS 204 Table 2 for ML-DSA-65, FIPS 203 Table 3 for ML-KEM-768's
+		// encapsulation key, FIPS 205 Table 2 for SLH-DSA-SHA2-128s.
+		want int
+	}{
+		"ML-DSA-65":         {cdxtest.MLDSA65Certificate, "ML-DSA-65", 1952},
+		"ML-KEM-768":        {cdxtest.MLKEM768Certificate, "ML-KEM-768", 1184},
+		"SLH-DSA-SHA2-128S": {cdxtest.SLHDSASHA2128sCertificate, "SLH-DSA-SHA2-128S", 32},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := cdxtest.TestData(tt.fixture)
+			require.NoError(t, err)
+			block, _ := pem.Decode(data)
+			require.NotNil(t, block)
+			require.Equal(t, "CERTIFICATE", block.Type)
+
+			cert, err := x509.ParseCertificate(block.Bytes)
+			require.NoError(t, err)
+			require.Nil(t, cert.PublicKey,
+				"this fixture is here for the branch Go's parser leaves empty")
+
+			spki, ok := certSPKI(cert)
+			require.True(t, ok, "a certificate's SPKI decodes by construction")
+
+			info, ok := unsupportedAlgorithms[spki.Algorithm.Algorithm.String()]
+			require.True(t, ok, "the registry must name %s", tt.algo)
+			require.Equal(t, tt.algo, info.name)
+
+			require.Equal(t, tt.want, registryPublicKeyBodySize(info),
+				"the registry's byte count for %s", tt.algo)
+			require.Equal(t, tt.want, len(spki.PublicKey.Bytes),
+				"the fixture's BIT STRING content, with the unused-bits octet excluded")
+			require.Empty(t, rejectPublicKeyBody(info, spki.PublicKey),
+				"a real %s certificate must survive the check its garbage twin fails", tt.algo)
+		})
+	}
 }
 
 // TestOIDPlaceholder_IsTheSentinelEveryProducerStamps pins the VALUE of

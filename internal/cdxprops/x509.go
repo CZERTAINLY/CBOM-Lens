@@ -94,29 +94,45 @@ func sigAlgOIDFromRaw(raw []byte) string {
 	return outer.SigAlg.Algorithm.String()
 }
 
-// spkiOID returns the algorithm OID a certificate's subjectPublicKeyInfo
-// declares, or empty string if it fails
-func spkiOID(cert *x509.Certificate) string {
-	return spkiOIDFromRaw(cert.RawSubjectPublicKeyInfo)
+// certSPKI decodes a certificate's subjectPublicKeyInfo into the two things
+// this package reads from it: the algorithm OID, which names the key when Go's
+// own enum could not, and the publicKey BIT STRING, which is the only evidence
+// that a key of that algorithm is present at all. ok is false when those bytes
+// are not a SubjectPublicKeyInfo.
+//
+// It returns the whole structure rather than just the OID -- which is all its
+// predecessor spkiOID returned -- so that publicKeyComponents decodes this
+// field ONCE and reads it twice. Two decodes of one field are two chances to
+// disagree about what it holds, and a body check reading a different decode
+// from the OID lookup beside it is the shape of the defect the body check
+// exists to close.
+//
+// asn1.BitString.Bytes excludes the leading unused-bits octet, so the length of
+// PublicKey.Bytes is directly comparable to the byte counts
+// registryPublicKeyBodySize returns. rejectPublicKeyBody does the comparing.
+func certSPKI(cert *x509.Certificate) (pkixStruct, bool) {
+	return spkiFromRaw(cert.RawSubjectPublicKeyInfo)
 }
 
-// spkiOIDFromRaw returns the algorithm OID declared in the DER of a
-// SubjectPublicKeyInfo, or "" when the bytes do not have that shape.
-//
-// It takes the raw DER rather than a certificate for the reason
-// sigAlgOIDFromRaw does: a certificate request carries the identical
-// SubjectPublicKeyInfo structure and is not a certificate, so the OID is out of
-// reach for one until the parameter is the bytes rather than the container they
-// happen to sit in.
-//
-// For a request it feeds a diagnostic and not a component. Reading the OID off
-// the DER is not fabrication -- the arc is genuinely what the request declares
-// -- but whether it belongs in the emitted inventory is a separate decision
-// about what a request contributes, and csrToCDX's answer is that an arc
-// nothing is registered under goes to the operator's log instead.
-func spkiOIDFromRaw(raw []byte) string {
+// spkiFromRaw decodes a SubjectPublicKeyInfo that is not attached to a parsed
+// certificate. A certificate request carries the same structure and no
+// x509.Certificate to hang it on, so the decode has to be reachable from the
+// bytes alone.
+func spkiFromRaw(raw []byte) (pkixStruct, bool) {
 	var info pkixStruct
 	if _, err := asn1.Unmarshal(raw, &info); err != nil {
+		return pkixStruct{}, false
+	}
+	return info, true
+}
+
+// spkiOIDFromRaw names the algorithm a SubjectPublicKeyInfo declares, or "" if
+// the structure does not decode. It reads the OID off the same decode certSPKI
+// performs rather than repeating the unmarshal, which is what keeps a rule
+// enforced on one path from going missing on the other.
+func spkiOIDFromRaw(raw []byte) string {
+	info, ok := spkiFromRaw(raw)
+	if !ok {
 		return ""
 	}
 	return info.Algorithm.Algorithm.String()
@@ -185,12 +201,17 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	// as a signature, but it silently discarded the public key's real primitive
 	// -- reporting a keyEncipherment RSA key as a signature scheme and an
 	// ML-KEM key as a signature rather than a kem.
-	compos := []cdx.Component{
-		mainCertCompo,
-		signatureAlgCompo,
-		publicKeyCompo,
-		publicKeyAlgCompo,
+	compos := []cdx.Component{mainCertCompo, signatureAlgCompo}
+	// publicKeyComponents yields the zero Component when the certificate's SPKI
+	// body cannot be this algorithm's public key. Appending it would hand
+	// Builder.appendDetection a component with no ref and no name to drop with a
+	// warning that reads as a Builder failure, which is why csrToCDX and
+	// restOfPEMBundleToCDX already filter it at the call site. Nothing is left
+	// dangling: SubjectPublicKeyRef above is conditional on the same emptiness.
+	if publicKeyCompo.BOMRef != "" {
+		compos = append(compos, publicKeyCompo)
 	}
+	compos = append(compos, publicKeyAlgCompo)
 
 	var deps []cdx.Dependency
 

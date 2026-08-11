@@ -106,6 +106,245 @@ func assetsOfPubPEM(t *testing.T, data []byte) (algorithms, material []cdx.Compo
 	return algorithms, material
 }
 
+// certPEM wraps DER in a `CERTIFICATE` block.
+func certPEM(der []byte) []byte {
+	return pemlib.EncodeToMemory(&pemlib.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// certWithSPKIPEM is the certificate counterpart of pemPublicKey: it puts spki
+// where a certificate carries its subject public key, and wraps the result in a
+// `CERTIFICATE` block, so the same bytes that reach unsupportedPKIX under one
+// PEM label reach publicKeyComponents under the other.
+func certWithSPKIPEM(t *testing.T, spki []byte) []byte {
+	t.Helper()
+
+	der, err := cdxtest.CertWithSPKI(spki)
+	require.NoError(t, err)
+	return certPEM(der)
+}
+
+// assetsOfCertPEM splits a detection's components three ways rather than two: a
+// certificate produces a certificate asset as well as algorithms and material,
+// and a test that only looked at the last two could not tell "the key was
+// dropped" from "the certificate was dropped with it".
+func assetsOfCertPEM(t *testing.T, data []byte) (certificates, algorithms, material []cdx.Component) {
+	t.Helper()
+
+	bundle, err := pem.Scanner{}.Scan(t.Context(), data, "synthetic.pem")
+	require.NoError(t, err, "the PEM envelope itself is well formed")
+
+	d := cdxprops.NewConverter().PEMBundle(t.Context(), bundle)
+	require.NotNil(t, d)
+
+	for _, compo := range d.Components {
+		require.NotNil(t, compo.CryptoProperties, "the zero Component must never be appended")
+		switch compo.CryptoProperties.AssetType {
+		case cdx.CryptoAssetTypeCertificate:
+			certificates = append(certificates, compo)
+		case cdx.CryptoAssetTypeAlgorithm:
+			algorithms = append(algorithms, compo)
+		case cdx.CryptoAssetTypeRelatedCryptoMaterial:
+			material = append(material, compo)
+		}
+	}
+
+	return certificates, algorithms, material
+}
+
+// algorithmNames lists the algorithm components by name, so an assertion can
+// say which algorithms a file referenced rather than only how many.
+func algorithmNames(algorithms []cdx.Component) []string {
+	names := make([]string, 0, len(algorithms))
+	for _, algo := range algorithms {
+		names = append(names, algo.Name)
+	}
+	return names
+}
+
+// TestPQCPipeline_CertificateSPKIUndersizedBodyYieldsAlgorithmNotKey is the
+// certificate half of TestPQCPipeline_PKIXUndersizedBodyYieldsAlgorithmNotKey,
+// through the whole pipeline rather than one function.
+//
+// The two paths read the same structure -- a SubjectPublicKeyInfo, one
+// AlgorithmIdentifier and one BIT STRING -- differing only in the PEM label
+// around it. Before the certificate guard, four bytes of garbage under the
+// ML-DSA-65 OID were refused inside a `PUBLIC KEY` block and reported as a
+// fully formed ML-DSA-65 public key inside a `CERTIFICATE` one, with its
+// material published as base64 of the noise.
+//
+// The certificate must survive: it is a real asset, established by its own DER,
+// and a scanner that reports LESS the more broken its input is would be worse
+// than one that over-reports.
+func TestPQCPipeline_CertificateSPKIUndersizedBodyYieldsAlgorithmNotKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		oid  asn1.ObjectIdentifier
+		body []byte
+		algo string
+	}{
+		{"ML-DSA-65 four bytes of garbage", mlDSA65OID, noise(4), "ML-DSA-65"},
+		{"ML-KEM-768 one byte short", mlKEM768OID, noise(mlKEM768EncapKey - 1), "ML-KEM-768"},
+		{"SLH-DSA-SHA2-128S one byte long", slhDSA128sOID, noise(slhDSA128sPubKey + 1), "SLH-DSA-SHA2-128S"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			certificates, algorithms, material := assetsOfCertPEM(t,
+				certWithSPKIPEM(t, pkixDERBody(t, tt.oid, tt.body)))
+
+			require.Empty(t, material,
+				"a body that is not this algorithm's public key must not be reported as one")
+			require.Len(t, certificates, 1,
+				"the certificate is a real asset whatever its subject key holds")
+			require.Contains(t, algorithmNames(algorithms), tt.algo,
+				"the OID establishes the algorithm is referenced, whatever the body holds")
+		})
+	}
+}
+
+// TestPQCPipeline_CertificateUnsizedAlgorithmRejectsOnlyAnEmptyBody is the
+// certificate half of TestPQCPipeline_PKIXUnsizedAlgorithmRejectsOnlyAnEmptyBody,
+// and it is the only certificate case where the length comparison is not what
+// does the work.
+//
+// XMSS, XMSS-MT and HSS-LMS are named by the registry and sized by none of it:
+// RFC 9802 puts the parameter set in the key value rather than the OID, so
+// registryPublicKeyBodySize is 0 and "no encoding of any key is zero bytes" is
+// the entire check. Every other certificate row in this file is refused by the
+// length comparison as well, so a length comparison inlined at the certificate
+// call site -- the one thing rejectPublicKeyBody's doc comment forbids, because
+// it makes one rule into two opinions -- passes all of them and loses only this.
+//
+// Both halves are asserted together because either alone is satisfiable by
+// something worse: refusing everything unsized would delete real hash-based
+// signature keys from an inventory built to find them, and refusing nothing
+// unsized publishes key material over an empty BIT STRING.
+func TestPQCPipeline_CertificateUnsizedAlgorithmRejectsOnlyAnEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty body", func(t *testing.T) {
+		t.Parallel()
+
+		certificates, algorithms, material := assetsOfCertPEM(t,
+			certWithSPKIPEM(t, pkixDERBody(t, xmssOID, nil)))
+
+		require.Empty(t, material, "an empty body cannot hold a key of any algorithm")
+		require.Len(t, certificates, 1,
+			"the certificate is a real asset whatever its subject key holds")
+		require.Contains(t, algorithmNames(algorithms), "XMSS",
+			"the OID establishes the algorithm is referenced, whatever the body holds")
+	})
+
+	t.Run("one byte", func(t *testing.T) {
+		t.Parallel()
+
+		_, _, material := assetsOfCertPEM(t,
+			certWithSPKIPEM(t, pkixDERBody(t, xmssOID, noise(1))))
+
+		require.Len(t, material, 1,
+			"with no size in the registry there is nothing to check, and dropping the key is worse")
+		require.Equal(t, "XMSS", material[0].Name)
+	})
+}
+
+// TestPQCPipeline_CertificateOneBadKeyDoesNotTakeTheGoodOneWithIt puts a
+// garbage-SPKI certificate and a real one in a single file, for the reason its
+// `PUBLIC KEY` sibling does: a one-block file cannot tell "the offending key was
+// dropped" from "the file produced nothing", and over-application is the natural
+// failure mode of any guard that drops a component.
+func TestPQCPipeline_CertificateOneBadKeyDoesNotTakeTheGoodOneWithIt(t *testing.T) {
+	t.Parallel()
+
+	good, err := cdxtest.TestData(cdxtest.MLKEM768Certificate)
+	require.NoError(t, err)
+
+	var file []byte
+	file = append(file, certWithSPKIPEM(t, pkixDERBody(t, mlDSA65OID, noise(4)))...)
+	file = append(file, good...)
+
+	certificates, algorithms, material := assetsOfCertPEM(t, file)
+
+	require.Len(t, material, 1, "exactly one of the two certificates carries a key")
+	require.Equal(t, "ML-KEM-768", material[0].Name,
+		"the surviving key must be the real one, not the garbage under the ML-DSA-65 OID")
+	require.Len(t, certificates, 2, "both certificates are real assets")
+	require.Contains(t, algorithmNames(algorithms), "ML-DSA-65",
+		"the rejected certificate still references its OID")
+}
+
+// TestPQCPipeline_CertificateRealFixturesStillYieldTheirKey is the certificate
+// counterpart of TestPQCPipeline_PKIXRealFixturesStillYieldTheirKey, and it
+// checks one thing that function cannot: that the certificate still POINTS at
+// the key it carries.
+//
+// Dropping a key and leaving certificateProperties.subjectPublicKeyRef naming it
+// would be a dangling reference; keeping the ref and dropping nothing would make
+// this pass for the wrong reason. Asserting the ref RESOLVES to the emitted
+// material is what ties the two halves together.
+func TestPQCPipeline_CertificateRealFixturesStillYieldTheirKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		fixture string
+		algo    string
+	}{
+		{cdxtest.MLDSA65Certificate, "ML-DSA-65"},
+		{cdxtest.MLKEM768Certificate, "ML-KEM-768"},
+		{cdxtest.SLHDSASHA2128sCertificate, "SLH-DSA-SHA2-128S"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.algo, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := cdxtest.TestData(tt.fixture)
+			require.NoError(t, err, "fixture %s", tt.fixture)
+
+			certificates, _, material := assetsOfCertPEM(t, data)
+
+			require.Len(t, material, 1, "a real %s certificate must still yield its key", tt.algo)
+			require.Equal(t, tt.algo, material[0].Name)
+			require.NotEmpty(t, material[0].CryptoProperties.RelatedCryptoMaterialProperties.Value,
+				"a public key is not a secret and must be published")
+
+			require.Len(t, certificates, 1)
+			require.Equal(t, cdx.BOMReference(material[0].BOMRef),
+				certificates[0].CryptoProperties.CertificateProperties.SubjectPublicKeyRef,
+				"the certificate must point at the key it carries")
+		})
+	}
+}
+
+// TestPQCPipeline_CertificateRejectedBodyIsLoggedAtWarn pins the operator-facing
+// half of the certificate guard, exactly as its `PUBLIC KEY` sibling does. A key
+// dropped silently is indistinguishable, in the document and in the output, from
+// a certificate that never held one.
+//
+// It cannot run in parallel: slog.SetDefault is process-wide.
+func TestPQCPipeline_CertificateRejectedBodyIsLoggedAtWarn(t *testing.T) {
+	var logBuf bytes.Buffer
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	_, _, material := assetsOfCertPEM(t,
+		certWithSPKIPEM(t, pkixDERBody(t, mlDSA65OID, noise(4))))
+	require.Empty(t, material)
+
+	logged := logBuf.String()
+	require.Contains(t, logged, "level=WARN",
+		"a dropped key at Debug level is a silently dropped key")
+	require.Contains(t, logged, "not reporting a public key")
+	require.Contains(t, logged, "algorithm=ML-DSA-65",
+		"the operator has to know which key was dropped")
+	require.Contains(t, logged, "body_bytes=4",
+		"and what was wrong with it")
+}
+
 // TestPQCPipeline_PKIXUndersizedBodyYieldsAlgorithmNotKey pins the bodies that
 // cannot be the public key the OID names.
 //
