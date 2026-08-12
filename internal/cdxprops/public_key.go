@@ -30,26 +30,41 @@ import (
 // one of them (Converter.PEMBundle) read through strings.Cut before testing
 // anything. A pointer says the same thing in the type, and the compiler stops
 // caring whether a given call site remembered.
-func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate) (algo cdx.Component, key *cdx.Component) {
+func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, spkiDER []byte) (algo cdx.Component, key *cdx.Component) {
 	info := publicKeyAlgorithmInfo(pubKeyAlg, pubKey)
 
-	// One decode of the certificate's subjectPublicKeyInfo, read in two places
+	// The subjectPublicKeyInfo, decoded at most once and read in two places
 	// below: the OID names the algorithm when Go's enum could not, and the BIT
 	// STRING is the body the key claim rests on. Decoding it separately at each
 	// of those two points is how a rule enforced at one of them comes to be
 	// absent at the other.
+	//
+	// It is decoded LAZILY because neither reader runs for a key Go parsed and
+	// can marshal, which is every classical key this package sees: the OID
+	// fallback is behind info.oid == oidPlaceholder and the body check is behind
+	// hashPublicKey failing. Decoding eagerly meant a full DER marshal plus a
+	// full ASN.1 decode per bare key -- and the marshal again inside
+	// hashPublicKey -- for a result nothing read.
 	var spki pkixStruct
-	var haveSPKI bool
-	switch {
-	case cert != nil:
-		spki, haveSPKI = certSPKI(cert)
-	case pubKey != nil:
-		// A standalone `PUBLIC KEY` block has no certificate to hang its
-		// SubjectPublicKeyInfo on, and reading the OID only off a certificate
-		// is what made the two paths disagree: the same X25519 key published
-		// oid "1.3.101.110" inside a certificate and the "0.0.0.0" sentinel on
-		// its own. Go parsed this key, so marshalling it back recovers the
-		// same structure certSPKI decodes -- the algorithm identifier is
+	var haveSPKI, spkiLoaded bool
+	loadSPKI := func() {
+		if spkiLoaded {
+			return
+		}
+		spkiLoaded = true
+		if len(spkiDER) > 0 {
+			spki, haveSPKI = spkiFromRaw(spkiDER)
+			return
+		}
+		if pubKey == nil {
+			return
+		}
+		// A standalone `PUBLIC KEY` block hands over no SubjectPublicKeyInfo of
+		// its own, and reading the OID only off a certificate is what made the
+		// two paths disagree: the same X25519 key published oid "1.3.101.110"
+		// inside a certificate and the "0.0.0.0" sentinel on its own. Go parsed
+		// this key, so marshalling it back recovers the same structure the
+		// caller's bytes would have carried -- the algorithm identifier is
 		// exactly what x509.MarshalPKIXPublicKey writes from the key's type.
 		//
 		// The error is dropped deliberately. It is returned for the key types
@@ -63,6 +78,9 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		}
 	}
 
+	if info.oid == oidPlaceholder {
+		loadSPKI()
+	}
 	if info.oid == oidPlaceholder && haveSPKI {
 		oidFallback := spki.Algorithm.Algorithm.String()
 		// Only overwrite info on a hit. The previous two-value assignment
@@ -140,12 +158,19 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 	c.BOMRefHash(&algo, info.algorithmName)
 
 	pubKeyValue, pubKeyHash, err := c.hashPublicKey(pubKey)
-	if err != nil && cert != nil {
-		// Go does not parse post-quantum keys, so cert.PublicKey is nil for
-		// ML-DSA/ML-KEM/SLH-DSA and marshalling fails. The DER is still on the
-		// certificate, and hashing that is what keeps each key distinct — the
-		// same fallback unsupportedPKIX already uses.
-		slog.DebugContext(ctx, "public key is not marshallable; hashing the certificate's SPKI instead",
+	if err != nil && len(spkiDER) > 0 {
+		loadSPKI()
+		// Go does not parse post-quantum keys, so the parsed key is nil for
+		// ML-DSA/ML-KEM/SLH-DSA and marshalling fails. The DER is still in
+		// hand, and hashing that is what keeps each key distinct — the same
+		// fallback unsupportedPKIX already uses.
+		//
+		// The gate is the BYTES, not a certificate. It used to be `cert != nil`,
+		// which made this fallback the property of one caller: anything holding
+		// a SubjectPublicKeyInfo without an x509.Certificate around it -- a
+		// certificate request, most obviously -- lost the fallback silently and
+		// had to reimplement it or go without.
+		slog.DebugContext(ctx, "public key is not marshallable; hashing the SPKI instead",
 			"algorithm", info.name, "error", err.Error())
 
 		// Hashing that DER is also ASSERTING it. Everything below says a public
@@ -160,13 +185,13 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		// cheaply than a bare key does. Same registry sizes, same function,
 		// deliberately not a second copy of the rule.
 		if !haveSPKI {
-			slog.WarnContext(ctx, "not reporting a public key: the certificate's subjectPublicKeyInfo could not be decoded",
+			slog.WarnContext(ctx, "not reporting a public key: the subjectPublicKeyInfo could not be decoded",
 				"algorithm", info.name,
 				"oid", info.oid)
 			return algo, nil
 		}
 		if reason := rejectPublicKeyBody(info, spki.PublicKey); reason != "" {
-			slog.WarnContext(ctx, "not reporting a public key: the certificate's SPKI body is not this algorithm's public key",
+			slog.WarnContext(ctx, "not reporting a public key: the SPKI body is not this algorithm's public key",
 				"algorithm", info.name,
 				"oid", info.oid,
 				"body_bytes", len(spki.PublicKey.Bytes),
@@ -174,10 +199,10 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 			return algo, nil
 		}
 
-		pubKeyValue, pubKeyHash = c.hashRawPublicKey(cert.RawSubjectPublicKeyInfo)
+		pubKeyValue, pubKeyHash = c.hashRawPublicKey(spkiDER)
 	} else if err != nil {
-		// No certificate to fall back on: a digest-less bom-ref would merge
-		// this key with every other key of the same algorithm.
+		// No SPKI to fall back on: a digest-less bom-ref would merge this key
+		// with every other key of the same algorithm.
 		slog.WarnContext(ctx, "cannot identify public key: omitting key component",
 			"algorithm", info.name, "error", err.Error())
 		return algo, nil

@@ -124,7 +124,7 @@ func TestAlgorithmInfo_EveryClassicalAlgorithmStatesItsOwnPrimitive(t *testing.T
 				"the primitive is a property of the algorithm and is established "+
 					"where the algorithm is named")
 
-			algo, _ := NewConverter().publicKeyComponents(t.Context(), alg, pub, cert)
+			algo, _ := NewConverter().publicKeyComponents(t.Context(), alg, pub, cert.RawSubjectPublicKeyInfo)
 			require.NotNil(t, algo.CryptoProperties)
 			require.NotNil(t, algo.CryptoProperties.AlgorithmProperties)
 			require.Equal(t, tt.want, algo.CryptoProperties.AlgorithmProperties.Primitive,
@@ -176,7 +176,7 @@ func TestAlgorithmPrimitive_UnknownPlaceholderFallbackIsLoadBearing(t *testing.T
 	require.Equal(t, x509.UnknownPublicKeyAlgorithm, cert.PublicKeyAlgorithm)
 
 	c := NewConverter()
-	algo, _ := c.publicKeyComponents(t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+	algo, _ := c.publicKeyComponents(t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 	require.Equal(t, "Unknown", algo.Name)
 	require.NotNil(t, algo.CryptoProperties)

@@ -2318,16 +2318,15 @@ func TestPEMBundle_CSRWarnNamesItsAttributes(t *testing.T) {
 // migrated becomes visible, and it was the only place this tool could not see
 // one.
 //
-// publicKeyComponents reaches the registry only for a CERTIFICATE -- the OID
-// fallback is guarded by cert != nil, because the OID is read off
-// certSPKI(cert) -- and a request has no x509.Certificate to hang its
-// SubjectPublicKeyInfo on. So a request under a registered ML-DSA, ML-KEM or
-// SLH-DSA arc never consulted the registry at all: Go returns it successfully
-// with UnknownPublicKeyAlgorithm and a nil PublicKey, the algorithm fell
-// through to the placeholder, csrToCDX suppressed it, and the key was never
-// built. The identical SubjectPublicKeyInfo in a `PUBLIC KEY` block or a
-// CERTIFICATE beside it produced a full algorithm and key. The SPKI is on the
-// request, byte for byte, in RawSubjectPublicKeyInfo.
+// A request under a registered ML-DSA, ML-KEM or SLH-DSA arc never consulted
+// the registry at all: Go returns it successfully with
+// UnknownPublicKeyAlgorithm and a nil PublicKey, the algorithm fell through to
+// the placeholder, csrToCDX suppressed it, and the key was never built. The
+// identical SubjectPublicKeyInfo in a `PUBLIC KEY` block or a CERTIFICATE
+// beside it produced a full algorithm and key. The SPKI is on the request,
+// byte for byte, in RawSubjectPublicKeyInfo, and requestedKeyComponents is
+// what reads it -- see the note there on why publicKeyComponents is not handed
+// those bytes directly.
 //
 // The Value assertion is the load-bearing one and it is deliberately not
 // spkiOfCSR: that helper marshals csr.PublicKey, which is nil on exactly this

@@ -99,7 +99,7 @@ func TestConverter_publicKeyComponents(t *testing.T) {
 	require.NoError(t, err)
 
 	c := NewConverter()
-	algo, key := c.publicKeyComponents(t.Context(), -1, cert.PublicKey, cert)
+	algo, key := c.publicKeyComponents(t.Context(), -1, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 	require.Equal(t, "ML-DSA-65", algo.Name)
 	require.Equal(t, "ML-DSA-65", key.Name)
@@ -210,7 +210,7 @@ func TestPublicKeyComponents_RSAAlgorithmIsAFunctionOfTheKeyNotTheCertificate(t 
 	var first cdx.Component
 	for i, u := range usages {
 		cert := rsaCertForKey(t, key, u.usage)
-		algo, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, cert)
+		algo, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 		require.NotNil(t, algo.CryptoProperties)
 		require.NotNil(t, algo.CryptoProperties.AlgorithmProperties)
@@ -262,7 +262,7 @@ func TestRSAAlgorithmAsset_IsOneAssetWhicheverProducerBuiltIt(t *testing.T) {
 
 	c := NewConverter()
 
-	fromCertificate, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, cert)
+	fromCertificate, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 	csrCompos, _ := c.csrToCDX(t.Context(), csr)
 	fromCSR := algorithmComponentOf(t, csrCompos)
@@ -399,7 +399,7 @@ func TestAlgorithmAsset_PQCKeyIsOneAssetFromACertificateAndFromAPublicKeyBlock(t
 			cert, err := x509.ParseCertificate(certBlock.Bytes)
 			require.NoError(t, err)
 			fromCertificate, _ := c.publicKeyComponents(
-				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 			keyPEM, err := cdxtest.TestData(tt.keyFixture)
 			require.NoError(t, err)
@@ -546,7 +546,7 @@ func TestPublicKeyComponents_PQCKeysAreDistinct(t *testing.T) {
 		require.Nil(t, cert.PublicKey, "%s: expected an unparseable PQC key", f)
 		require.NotEmpty(t, cert.RawSubjectPublicKeyInfo, "%s: no SPKI to fall back to", f)
 
-		_, key := conv.publicKeyComponents(t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+		_, key := conv.publicKeyComponents(t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 		require.False(t, strings.HasSuffix(key.BOMRef, "@"),
 			"%s: bom-ref %q has an empty digest", f, key.BOMRef)
@@ -632,7 +632,7 @@ func TestPublicKeyComponents_CertificateGarbageSPKIYieldsNoKey(t *testing.T) {
 				"the branch under test is the one Go's parser leaves empty")
 
 			algo, key := NewConverter().publicKeyComponents(
-				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 			require.Nil(t, key,
 				"a body that cannot be this algorithm's public key must not be "+
@@ -748,7 +748,7 @@ func TestPublicKeyComponents_RealPQCCertificatesStillYieldTheirKey(t *testing.T)
 				"this fixture reaches the guarded branch because Go cannot parse its key")
 
 			algo, key := NewConverter().publicKeyComponents(
-				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 			require.Equal(t, tt.algo, key.Name)
 			require.True(t, strings.HasPrefix(key.BOMRef,
@@ -809,7 +809,7 @@ func TestPublicKeyComponents_DSACertificateStillYieldsItsKey(t *testing.T) {
 		"a DSA certificate must still take the cert!=nil fallback, or this proves nothing")
 
 	algo, key := c.publicKeyComponents(
-		t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+		t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 	require.Equal(t, "DSA-2048", algo.Name)
 	require.Equal(t, "DSA-2048", key.Name)
@@ -837,7 +837,7 @@ func TestPublicKeyComponents_UnknownAlgorithmCertificateStillYieldsItsKey(t *tes
 	require.Nil(t, cert.PublicKey)
 
 	algo, key := NewConverter().publicKeyComponents(
-		t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+		t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 	require.Equal(t, "Unknown", algo.Name,
 		"the registry does not carry X25519, so this is the name the code gives it")
@@ -896,13 +896,13 @@ func TestPublicKeyComponents_CertificateEmptySPKIBodyYieldsNoKey(t *testing.T) {
 			require.Nil(t, cert.PublicKey,
 				"the branch under test is the one Go's parser leaves empty")
 
-			spki, ok := certSPKI(cert)
+			spki, ok := spkiFromRaw(cert.RawSubjectPublicKeyInfo)
 			require.True(t, ok)
 			require.Empty(t, spki.PublicKey.Bytes,
 				"precondition: Go really did hand on a certificate with no key in it")
 
 			algo, key := NewConverter().publicKeyComponents(
-				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 			require.Nil(t, key,
 				"an empty body cannot hold a key of any algorithm, sized or not")
@@ -949,7 +949,7 @@ func TestPublicKeyComponents_UnsizedAlgorithmCertificateStillYieldsItsKey(t *tes
 			require.Nil(t, cert.PublicKey)
 
 			algo, key := NewConverter().publicKeyComponents(
-				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 			require.Equal(t, "XMSS", key.Name)
 			require.True(t, strings.HasPrefix(key.BOMRef, "crypto/key/xmss@sha256:"),
@@ -964,17 +964,17 @@ func TestPublicKeyComponents_UnsizedAlgorithmCertificateStillYieldsItsKey(t *tes
 }
 
 // TestPublicKeyComponents_UndecodableCertificateSPKIYieldsNoKeyAndSaysWhy pins
-// the branch above the body check: the one where certSPKI could not decode the
+// the branch above the body check: the one where spkiFromRaw could not decode the
 // subjectPublicKeyInfo at all.
 //
 // Nothing that reaches this function through x509.ParseCertificate can trigger
 // it -- the parser reads the same field with cryptobyte before handing the
 // certificate on -- so the only way to state the claim is to corrupt
-// RawSubjectPublicKeyInfo the way Test_certSPKI already does, which is also the
+// RawSubjectPublicKeyInfo the way Test_spkiFromRaw already does, which is also the
 // shape a future caller building an x509.Certificate by hand would arrive in.
 //
 // The MESSAGE is asserted, not merely the drop. Delete this branch, or let
-// certSPKI return its half-filled struct with ok=true, and the key is still
+// spkiFromRaw return its half-filled struct with ok=true, and the key is still
 // dropped -- the zero pkixStruct's BIT STRING is empty, so the body check
 // refuses it on the next line. What changes is the diagnosis the operator gets:
 // "these bytes are not a SubjectPublicKeyInfo" becomes "this algorithm's public
@@ -1004,7 +1004,7 @@ func TestPublicKeyComponents_UndecodableCertificateSPKIYieldsNoKeyAndSaysWhy(t *
 	t.Cleanup(func() { slog.SetDefault(restore) })
 
 	algo, key := NewConverter().publicKeyComponents(
-		t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
+		t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert.RawSubjectPublicKeyInfo)
 
 	require.Nil(t, key,
 		"bytes that are not a SubjectPublicKeyInfo are not evidence of a key")

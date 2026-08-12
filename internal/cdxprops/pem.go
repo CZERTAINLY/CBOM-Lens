@@ -235,17 +235,29 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 // certified: the algorithm, and the key material when the request establishes
 // it.
 //
-// It exists because publicKeyComponents reaches the registry only for a
-// CERTIFICATE. Its OID fallback is guarded by cert != nil -- the OID is read
-// off certSPKI(cert) -- and a request has no x509.Certificate to hang its
-// SubjectPublicKeyInfo on, so a request under a registered ML-DSA, ML-KEM or
-// SLH-DSA OID never consulted the registry at all. Go returns such a request
-// successfully with UnknownPublicKeyAlgorithm and a nil PublicKey, so the
-// algorithm fell through to the placeholder and csrToCDX suppressed it, and the
-// key was never built: a scanned post-quantum .csr contributed the request
-// component and nothing else, while the identical SubjectPublicKeyInfo in a
-// `PUBLIC KEY` block or a CERTIFICATE beside it produced a full algorithm and
-// key. The SPKI is on the request, byte for byte, in RawSubjectPublicKeyInfo.
+// It exists because a request under a registered ML-DSA, ML-KEM or SLH-DSA OID
+// never consulted the registry at all: Go returns such a request successfully
+// with UnknownPublicKeyAlgorithm and a nil PublicKey, so the algorithm fell
+// through to the placeholder and csrToCDX suppressed it, and the key was never
+// built. A scanned post-quantum .csr contributed the request component and
+// nothing else, while the identical SubjectPublicKeyInfo in a `PUBLIC KEY`
+// block or a CERTIFICATE beside it produced a full algorithm and key. The SPKI
+// is on the request, byte for byte, in RawSubjectPublicKeyInfo.
+//
+// It survives publicKeyComponents taking SPKI bytes, which looks like it should
+// retire this function: hand it csr.RawSubjectPublicKeyInfo and it consults the
+// registry itself. It must not be handed them, and the reason is the branch
+// BELOW the registry hit. On a registry MISS that function keeps the arc the
+// SPKI declares -- info.oid = oidFallback, primitive unknown -- which is right
+// for a certificate, whose asset has to exist and whose subjectPublicKeyRef has
+// to resolve. It is wrong here: it leaves algo.CryptoProperties.OID something
+// other than oidPlaceholder, so csrToCDX's suppression never fires, and the
+// unmarshallable-key fallback then hashes the request's own SPKI and publishes
+// a key for it. Passing the bytes through fails four tests --
+// CSRWithUnnameableAlgorithmIsLoggedAtWarn, CSRWarnNamesItsAttributes,
+// CSRWithUnidentifiableKeyHandsTheBuilderNothingToDrop and
+// CSRWithDSAKeyKeepsItsTruthfulAlgorithm -- which is the policy, stated: a
+// request is not a certificate, and it does not publish what nothing names.
 //
 // The recovery is unsupportedPKIX itself rather than a lookup written here.
 // That function already reads one decode of the SubjectPublicKeyInfo for both

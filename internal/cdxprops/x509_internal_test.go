@@ -19,13 +19,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_certSPKI(t *testing.T) {
+func Test_spkiFromRaw(t *testing.T) {
 	t.Parallel()
 
 	selfSigned, err := cdxtest.GenSelfSignedCert()
 	require.NoError(t, err)
 
-	spki, ok := certSPKI(selfSigned.Cert)
+	spki, ok := spkiFromRaw(selfSigned.Cert.RawSubjectPublicKeyInfo)
 	require.True(t, ok)
 	require.Equal(t, "1.2.840.113549.1.1.1", spki.Algorithm.Algorithm.String())
 	// The body is the half spkiOID could not return, and the half the guard in
@@ -34,14 +34,14 @@ func Test_certSPKI(t *testing.T) {
 	require.NotEmpty(t, spki.PublicKey.Bytes)
 
 	selfSigned.Cert.RawSubjectPublicKeyInfo = []byte("garbage")
-	spki, ok = certSPKI(selfSigned.Cert)
+	spki, ok = spkiFromRaw(selfSigned.Cert.RawSubjectPublicKeyInfo)
 	require.False(t, ok)
 	require.Equal(t, pkixStruct{}, spki,
 		"a failed decode must not hand back a half-filled structure for a "+
 			"caller to read an OID or a length out of")
 }
 
-// Test_certSPKI_RealCertificateFixturesMatchTheRegistry is the units check the
+// Test_spkiFromRaw_RealCertificateFixturesMatchTheRegistry is the units check the
 // certificate guard rests on, made a committed assertion.
 //
 // registryPublicKeyBodySize returns byte counts, and the BIT STRING inside a
@@ -60,7 +60,7 @@ func Test_certSPKI(t *testing.T) {
 // three fixtures reach the guarded branch precisely because Go did not parse
 // their keys; if a future Go learns ML-DSA, they stop exercising the branch and
 // this test would go on passing while measuring a path nothing takes.
-func Test_certSPKI_RealCertificateFixturesMatchTheRegistry(t *testing.T) {
+func Test_spkiFromRaw_RealCertificateFixturesMatchTheRegistry(t *testing.T) {
 	t.Parallel()
 
 	for name, tt := range map[string]struct {
@@ -89,7 +89,7 @@ func Test_certSPKI_RealCertificateFixturesMatchTheRegistry(t *testing.T) {
 			require.Nil(t, cert.PublicKey,
 				"this fixture is here for the branch Go's parser leaves empty")
 
-			spki, ok := certSPKI(cert)
+			spki, ok := spkiFromRaw(cert.RawSubjectPublicKeyInfo)
 			require.True(t, ok, "a certificate's SPKI decodes by construction")
 
 			info, ok := unsupportedAlgorithms[spki.Algorithm.Algorithm.String()]
@@ -163,7 +163,7 @@ func Test_rejectPublicKeyBody_BitLengthMustMatchBytes(t *testing.T) {
 // moving it silently moves documents.
 //
 // It is also copied. hash.go's unsupportedInfo carries its own "0.0.0.0"
-// literal for a hash nothing names, and Test_readSignatureAlgorithmRef below
+// literal for a hash nothing names, and Test_readSignatureAlgorithmRefFor below
 // and signature_algorithm_test.go hand the literal in by hand as an oidFallback;
 // not one of them moves with the constant. The doc comment on oidPlaceholder
 // tells the next producer to TEST for this value, so the day the copies diverge
@@ -192,40 +192,40 @@ func TestOIDPlaceholder_IsTheSentinelEveryProducerStamps(t *testing.T) {
 			"not read")
 }
 
-func Test_readSignatureAlgorithmRef(t *testing.T) {
+func Test_readSignatureAlgorithmRefFor(t *testing.T) {
 	t.Parallel()
 
 	selfSigned, err := cdxtest.GenSelfSignedCert()
 	require.NoError(t, err)
 
-	res := readSignatureAlgorithmRef(t.Context(), selfSigned.Cert, "")
+	res := readSignatureAlgorithmRefFor(t.Context(), selfSigned.Cert.SignatureAlgorithm, "")
 	exp := cdx.BOMReference("crypto/algorithm/sha-256-rsa@1.2.840.113549.1.1.11")
 	require.Equal(t, exp, res)
 
 	selfSigned.Cert.SignatureAlgorithm = -1
-	res = readSignatureAlgorithmRef(t.Context(), selfSigned.Cert, "2.16.840.1.101.3.4.3.17")
+	res = readSignatureAlgorithmRefFor(t.Context(), selfSigned.Cert.SignatureAlgorithm, "2.16.840.1.101.3.4.3.17")
 	exp = cdx.BOMReference("crypto/algorithm/ml-dsa-44@2.16.840.1.101.3.4.3.17")
 	require.Equal(t, exp, res)
 
-	res = readSignatureAlgorithmRef(t.Context(), selfSigned.Cert, "")
+	res = readSignatureAlgorithmRefFor(t.Context(), selfSigned.Cert.SignatureAlgorithm, "")
 	exp = cdx.BOMReference("crypto/algorithm/unknown@unknown")
 	require.Equal(t, exp, res)
 
-	res = readSignatureAlgorithmRef(t.Context(), selfSigned.Cert, "0.0.0.0")
+	res = readSignatureAlgorithmRefFor(t.Context(), selfSigned.Cert.SignatureAlgorithm, "0.0.0.0")
 	exp = cdx.BOMReference("crypto/algorithm/unknown@unknown")
 	require.Equal(t, exp, res)
 }
 
-func Test_sigAlgOID(t *testing.T) {
+func Test_sigAlgOIDFromRaw(t *testing.T) {
 	t.Parallel()
 	selfSigned, err := cdxtest.GenSelfSignedCert()
 	require.NoError(t, err)
 
-	res := sigAlgOID(selfSigned.Cert)
+	res := sigAlgOIDFromRaw(selfSigned.Cert.Raw)
 	require.Equal(t, "1.2.840.113549.1.1.11", res)
 
 	selfSigned.Cert.Raw = []byte("broken")
-	res = sigAlgOID(selfSigned.Cert)
+	res = sigAlgOIDFromRaw(selfSigned.Cert.Raw)
 	require.Equal(t, "", res)
 
 }

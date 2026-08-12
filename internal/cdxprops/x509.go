@@ -72,12 +72,6 @@ type pkcs8Struct struct {
 	PrivateKey []byte
 }
 
-// sigAlgOID returns oid of a signature algorithm for x509 Certificate
-// or empty string if it fails
-func sigAlgOID(cert *x509.Certificate) string {
-	return sigAlgOIDFromRaw(cert.Raw)
-}
-
 // sigAlgOIDFromRaw returns the signature algorithm OID declared in the DER of a
 // signed PKIX structure, or "" when the bytes do not have that shape.
 //
@@ -94,30 +88,26 @@ func sigAlgOIDFromRaw(raw []byte) string {
 	return outer.SigAlg.Algorithm.String()
 }
 
-// certSPKI decodes a certificate's subjectPublicKeyInfo into the two things
-// this package reads from it: the algorithm OID, which names the key when Go's
-// own enum could not, and the publicKey BIT STRING, which is the only evidence
-// that a key of that algorithm is present at all. ok is false when those bytes
-// are not a SubjectPublicKeyInfo.
+// spkiFromRaw decodes a SubjectPublicKeyInfo into the two things this package
+// reads from it: the algorithm OID, which names the key when Go's own enum
+// could not, and the publicKey BIT STRING, which is the only evidence that a
+// key of that algorithm is present at all. ok is false when those bytes are not
+// a SubjectPublicKeyInfo.
 //
-// It returns the whole structure rather than just the OID -- which is all its
-// predecessor spkiOID returned -- so that publicKeyComponents decodes this
-// field ONCE and reads it twice. Two decodes of one field are two chances to
-// disagree about what it holds, and a body check reading a different decode
-// from the OID lookup beside it is the shape of the defect the body check
-// exists to close.
+// It takes bytes, not an x509.Certificate. A certificate request carries the
+// same structure with no certificate to hang it on, and the predecessor that
+// took one made the SPKI fallback a property of callers that happened to have
+// a certificate.
+//
+// It returns the whole structure rather than just the OID, so that
+// publicKeyComponents decodes this field ONCE and reads it twice. Two decodes
+// of one field are two chances to disagree about what it holds, and a body
+// check reading a different decode from the OID lookup beside it is the shape
+// of the defect the body check exists to close.
 //
 // asn1.BitString.Bytes excludes the leading unused-bits octet, so the length of
 // PublicKey.Bytes is directly comparable to the byte counts
 // registryPublicKeyBodySize returns. rejectPublicKeyBody does the comparing.
-func certSPKI(cert *x509.Certificate) (pkixStruct, bool) {
-	return spkiFromRaw(cert.RawSubjectPublicKeyInfo)
-}
-
-// spkiFromRaw decodes a SubjectPublicKeyInfo that is not attached to a parsed
-// certificate. A certificate request carries the same structure and no
-// x509.Certificate to hang it on, so the decode has to be reachable from the
-// bytes alone.
 func spkiFromRaw(raw []byte) (pkixStruct, bool) {
 	var info pkixStruct
 	if _, err := asn1.Unmarshal(raw, &info); err != nil {
@@ -127,9 +117,9 @@ func spkiFromRaw(raw []byte) (pkixStruct, bool) {
 }
 
 // spkiOIDFromRaw names the algorithm a SubjectPublicKeyInfo declares, or "" if
-// the structure does not decode. It reads the OID off the same decode certSPKI
-// performs rather than repeating the unmarshal, which is what keeps a rule
-// enforced on one path from going missing on the other.
+// the structure does not decode. It reads the OID off the same decode
+// spkiFromRaw performs rather than repeating the unmarshal, which is what keeps
+// a rule enforced on one path from going missing on the other.
 func spkiOIDFromRaw(raw []byte) string {
 	info, ok := spkiFromRaw(raw)
 	if !ok {
@@ -138,14 +128,11 @@ func spkiOIDFromRaw(raw []byte) string {
 	return info.Algorithm.Algorithm.String()
 }
 
-func readSignatureAlgorithmRef(ctx context.Context, cert *x509.Certificate, oidFallback string) cdx.BOMReference {
-	return readSignatureAlgorithmRefFor(ctx, cert.SignatureAlgorithm, oidFallback)
-}
-
-// readSignatureAlgorithmRefFor is readSignatureAlgorithmRef over the one field
-// it ever read. x509.RevocationList carries a SignatureAlgorithm of the same
-// type and no certificate, so the lookup is reachable for a CRL only once the
-// parameter is the enum rather than the structure that happens to hold it.
+// readSignatureAlgorithmRefFor names the algorithm asset a signed PKIX
+// structure's signature belongs to. It takes the enum rather than the
+// certificate that happens to hold it, because x509.RevocationList carries a
+// SignatureAlgorithm of the same type and no certificate, so a CRL can reach
+// the lookup only this way.
 func readSignatureAlgorithmRefFor(ctx context.Context, sigAlg x509.SignatureAlgorithm, oidFallback string) cdx.BOMReference {
 	// Prefer Go’s typed enum first (covers all classic algs cleanly).
 	if ref, ok := sigAlgRef[sigAlg]; ok {
@@ -177,7 +164,7 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 		ctx,
 		hit.Cert.PublicKeyAlgorithm,
 		hit.Cert.PublicKey,
-		hit.Cert,
+		hit.Cert.RawSubjectPublicKeyInfo,
 	)
 	mainCertCompo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef = cdx.BOMReference(signatureAlgCompo.BOMRef)
 	// The subject public key reference names the KEY, not the algorithm that
