@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
@@ -25,16 +26,18 @@ import (
 //
 // PEMBundle takes the certificates and the keypairs, and calls this for the
 // rest; the name says which half is which.
-func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle) ([]cdx.Component, []cdx.Dependency, error) {
+func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle) ([]cdx.Component, []cdx.Dependency, []cbom.Relationship, error) {
 	components := make([]cdx.Component, 0)
 	var deps []cdx.Dependency
+	var rels []cbom.Relationship
 	var errs []error
 
 	// Convert certificate requests
 	for _, csr := range bundle.CertificateRequests {
-		csrCompos, csrDeps := c.csrToCDX(ctx, csr)
+		csrCompos, csrDeps, csrRels := c.csrToCDX(ctx, csr)
 		components = append(components, csrCompos...)
 		deps = append(deps, csrDeps...)
+		rels = append(rels, csrRels...)
 	}
 
 	// Convert public keys
@@ -82,7 +85,7 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 		components = append(components, compos...)
 	}
 
-	return components, deps, errors.Join(errs...)
+	return components, deps, rels, errors.Join(errs...)
 }
 
 // csrToCDX converts a certificate signing request into the request component,
@@ -186,7 +189,7 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // block. Stating the rule over the artefact also means it stops firing by
 // itself the day an SPKI-OID fallback for requests gives that branch something
 // true to say.
-func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) ([]cdx.Component, []cdx.Dependency) {
+func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) ([]cdx.Component, []cdx.Dependency, []cbom.Relationship) {
 	name := nameOrUnknown(csr.Subject)
 	compo := cdx.Component{
 		Type:   cdx.ComponentTypeCryptographicAsset,
@@ -219,15 +222,28 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 		slog.WarnContext(ctx, "not reporting an algorithm for a certificate request: nothing maps this SPKI OID to an algorithm",
 			"subject", csr.Subject.String(),
 			"spki_oid", spkiOIDFromRaw(csr.RawSubjectPublicKeyInfo))
-		return []cdx.Component{compo}, nil
+		return []cdx.Component{compo}, nil, nil
 	}
 	if key == nil {
-		return []cdx.Component{compo, algo}, nil
+		return []cdx.Component{compo, algo}, nil, nil
 	}
+	// Two channels, because the two schema versions carry this edge in
+	// different places and neither is derivable from the other. 1.6 has no
+	// field on relatedCryptoMaterialProperties for material pointing at
+	// material, so the request-to-key edge is a document-level dependency
+	// there. 1.7 does -- relatedCryptographicAssets, with a "publicKey" type --
+	// and Builder.cryptoRels cannot recover an edge that never had a 1.6 field
+	// to be read back out of, so the relationship is stated rather than
+	// inferred.
 	return []cdx.Component{compo, algo, *key},
 		[]cdx.Dependency{{
 			Ref:          compo.BOMRef,
 			Dependencies: &[]string{key.BOMRef},
+		}},
+		[]cbom.Relationship{{
+			From: cbom.AssetRef(compo.BOMRef),
+			To:   cbom.AssetRef(key.BOMRef),
+			Kind: cbom.RelRequestedKey,
 		}}
 }
 

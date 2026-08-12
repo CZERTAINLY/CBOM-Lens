@@ -209,7 +209,7 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		compos = append(compos, pubKeyAlgo, *pubKeyCompo, privKeyAlgo, privKeyCompo)
 	}
 
-	bundleCompos, bundleDeps, err := c.restOfPEMBundleToCDX(ctx, bundle)
+	bundleCompos, bundleDeps, bundleRels, err := c.restOfPEMBundleToCDX(ctx, bundle)
 	if err != nil {
 		// This log is the error's only destination: PEMBundle has no error
 		// return and the caller gets a Detection either way. It used to name
@@ -249,6 +249,11 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		Location:     bundle.Location,
 		Components:   compos,
 		Dependencies: deps,
+		// Carried for the same reason the dependencies above are: an edge the
+		// converter built but the Detection does not carry never reaches the
+		// Builder. This one has no 1.6 field to be recovered from later, so
+		// dropping it here would lose it outright rather than degrade it.
+		Rels: bundleRels,
 	}
 }
 

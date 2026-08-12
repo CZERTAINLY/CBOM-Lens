@@ -662,7 +662,13 @@
         "assetType": "related-crypto-material",
         "relatedCryptoMaterialProperties": {
           "type": "other",
-          "format": "PEM"
+          "format": "PEM",
+          "relatedCryptographicAssets": [
+            {
+              "type": "publicKey",
+              "ref": "crypto/key/ecdsa-p-256@a79b2e41-3ac9-520d-b696-bc0f078b4a63"
+            }
+          ]
         }
       }
     },

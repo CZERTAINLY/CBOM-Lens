@@ -39,9 +39,15 @@ type Builder struct {
 	validator    Validator
 	components   map[string]*cdx.Component
 	dependencies map[string]*[]string
-	counter      *stats.Stats
-	clock        func() time.Time
-	serial       func() string
+	// rels are crypto relationships a converter stated outright, keyed by the
+	// whole edge so the same request seen at two paths contributes one. Held
+	// with the converter's raw refs; model() canonicalises them alongside the
+	// components, so an edge and its endpoints cannot end up on different
+	// sides of the safeRefs rewrite.
+	rels    map[cbom.Relationship]struct{}
+	counter *stats.Stats
+	clock   func() time.Time
+	serial  func() string
 }
 
 func NewBuilder(config model.CBOM) (*Builder, error) {
@@ -72,6 +78,7 @@ func NewBuilder(config model.CBOM) (*Builder, error) {
 		validator:    validator,
 		components:   make(map[string]*cdx.Component),
 		dependencies: make(map[string]*[]string),
+		rels:         make(map[cbom.Relationship]struct{}),
 		clock:        func() time.Time { return time.Now().UTC() },
 		serial:       func() string { return "urn:uuid:" + uuid.New().String() },
 	}, nil
@@ -141,6 +148,18 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 			continue
 		}
 		b.mergeDependsOn(ctx, dep)
+	}
+
+	for _, rel := range detection.Rels {
+		// A half-built edge is not stored. model() would drop it on the
+		// unresolvable-endpoint path anyway, with a warning naming an empty
+		// ref, which reads as a Builder fault rather than a producer one.
+		if rel.From == "" || rel.To == "" || rel.Kind == "" {
+			slog.WarnContext(ctx, "dropping crypto relationship: incomplete edge",
+				"from", string(rel.From), "to", string(rel.To), "kind", string(rel.Kind))
+			continue
+		}
+		b.rels[rel] = struct{}{}
 	}
 
 	for _, compo := range detection.Components {
@@ -352,6 +371,53 @@ func (b *Builder) model(ctx context.Context) cbom.BOMModel {
 	}
 	for _, compop := range b.components {
 		rels = append(rels, cryptoRels(ctx, sr.refs, wire, compop)...)
+	}
+
+	// Crypto relationships a converter stated outright, for edges with no 1.6
+	// field for cryptoRels to read back. Canonicalised through the same map and
+	// dropped on the same terms as everything else, with the same identity
+	// fallback for a ref that is already a wire value.
+	//
+	// Sorted before appending because b.rels is a map and its iteration order is
+	// random: the sort at the end of this function is stable by From only, so
+	// two edges out of one asset would otherwise swap places between runs and
+	// move bytes in the emitted document.
+	stated := make([]cbom.Relationship, 0, len(b.rels))
+	for rel := range b.rels {
+		stated = append(stated, rel)
+	}
+	slices.SortFunc(stated, func(a, b cbom.Relationship) int {
+		if v := strings.Compare(string(a.From), string(b.From)); v != 0 {
+			return v
+		}
+		if v := strings.Compare(string(a.To), string(b.To)); v != 0 {
+			return v
+		}
+		return strings.Compare(string(a.Kind), string(b.Kind))
+	})
+	resolve := func(raw cbom.AssetRef) (cbom.AssetRef, bool) {
+		if to, ok := sr.refs[string(raw)]; ok {
+			return cbom.AssetRef(to), true
+		}
+		if _, ok := wire[string(raw)]; ok {
+			return raw, true
+		}
+		return "", false
+	}
+	for _, rel := range stated {
+		from, ok := resolve(rel.From)
+		if !ok {
+			slog.WarnContext(ctx, "dropping crypto relationship: source has no component",
+				"from", string(rel.From), "to", string(rel.To), "kind", string(rel.Kind))
+			continue
+		}
+		to, ok := resolve(rel.To)
+		if !ok {
+			slog.WarnContext(ctx, "dropping crypto relationship: target has no component",
+				"from", string(rel.From), "to", string(rel.To), "kind", string(rel.Kind))
+			continue
+		}
+		rels = append(rels, cbom.Relationship{From: from, To: to, Kind: rel.Kind})
 	}
 
 	assets := make([]cbom.Asset, 0, len(b.components))

@@ -4199,3 +4199,126 @@ func TestMergeCertificateSourceFormat_NilComponentsAreIgnored(t *testing.T) {
 	require.Equal(t, ilmCertificateProperties("PEM"), *compo.Properties,
 		"the component that was not nil must come back untouched")
 }
+
+// TestBuilder_StatedRelationshipReachesBothVersions covers the channel a
+// converter uses for a crypto edge that has no 1.6 reference field to be
+// recovered from.
+//
+// cryptoRels rebuilds every other crypto relationship by reading
+// signatureAlgorithmRef, subjectPublicKeyRef, algorithmRef and cryptoRefArray
+// back off the stored components. A certificate request's edge to the key it
+// asks to have certified is material pointing at material, which none of those
+// fields can express, so csrToCDX states it on the Detection instead. Without
+// this channel the edge exists only in the document-level dependencies array,
+// and a 1.7 consumer walking relatedCryptographicAssets -- the native
+// mechanism, and why algorithmRef is deprecated there -- never sees it.
+//
+// Both versions are asserted from one Detection because the two carry the edge
+// in different places and dropping either is a silent loss: 1.6 has only the
+// dependency, 1.7 has both.
+func TestBuilder_StatedRelationshipReachesBothVersions(t *testing.T) {
+	t.Parallel()
+
+	const csrRef = "crypto/csr/example@sha256:aaaa"
+	const keyRef = "crypto/key/ecdsa-p-256@sha256:bbbb"
+
+	detection := func() model.Detection {
+		return model.Detection{
+			Source:   "PEM",
+			Type:     model.DetectionTypePEM,
+			Location: "/fixtures/example.csr",
+			Components: []cdx.Component{
+				{
+					BOMRef: csrRef, Name: "CSR: example",
+					Type: cdx.ComponentTypeCryptographicAsset,
+					CryptoProperties: &cdx.CryptoProperties{
+						AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+						RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+							Type: cdx.RelatedCryptoMaterialTypeOther,
+						},
+					},
+				},
+				{
+					BOMRef: keyRef, Name: "ECDSA-P-256",
+					Type: cdx.ComponentTypeCryptographicAsset,
+					CryptoProperties: &cdx.CryptoProperties{
+						AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
+						RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+							Type: cdx.RelatedCryptoMaterialTypePublicKey,
+						},
+					},
+				},
+			},
+			Dependencies: []cdx.Dependency{{Ref: csrRef, Dependencies: &[]string{keyRef}}},
+			Rels: []cbom.Relationship{{
+				From: cbom.AssetRef(csrRef),
+				To:   cbom.AssetRef(keyRef),
+				Kind: cbom.RelRequestedKey,
+			}},
+		}
+	}
+
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			b, err := NewBuilder(model.CBOM{Version: version})
+			require.NoError(t, err)
+			doc := b.AppendDetections(t.Context(), detection()).BOM(t.Context())
+
+			byRef := map[string]cdx.Component{}
+			for _, compo := range *doc.Components {
+				byRef[compo.BOMRef] = compo
+			}
+			require.Len(t, byRef, 2)
+
+			// The endpoints are the rewritten wire refs, not the converter's
+			// raw ones: an edge canonicalised on a different pass from its
+			// endpoints is a dangling ref that still validates.
+			var csrWire, keyWire string
+			for ref, compo := range byRef {
+				switch compo.Name {
+				case "CSR: example":
+					csrWire = ref
+				case "ECDSA-P-256":
+					keyWire = ref
+				}
+			}
+			require.NotEmpty(t, csrWire)
+			require.NotEmpty(t, keyWire)
+			require.NotEqual(t, csrRef, csrWire, "safeRefs rewrites the ref")
+
+			// The dependency is what 1.6 has, and 1.7 keeps it.
+			require.Contains(t, dependsOnOf(t, doc, csrWire), keyWire,
+				"the request must depend on the key it asks to have certified")
+
+			related := byRef[csrWire].CryptoProperties.RelatedCryptoMaterialProperties.RelatedCryptographicAssets
+			if version == "1.6" {
+				require.Nil(t, related,
+					"relatedCryptographicAssets is a 1.7 field and must not appear in a 1.6 document")
+				return
+			}
+			require.NotNil(t, related,
+				"a 1.7 consumer reads crypto edges here, so the request's key must be in it")
+			require.Equal(t, []cdx.RelatedCryptographicAsset{
+				{Type: "publicKey", Ref: keyWire},
+			}, *related)
+		})
+	}
+}
+
+// dependsOnOf returns the dependsOn targets of ref in doc.
+func dependsOnOf(t *testing.T, doc cdx.BOM, ref string) []string {
+	t.Helper()
+
+	if doc.Dependencies == nil {
+		return nil
+	}
+	for _, dep := range *doc.Dependencies {
+		if dep.Ref != ref || dep.Dependencies == nil {
+			continue
+		}
+		return *dep.Dependencies
+	}
+	return nil
+}

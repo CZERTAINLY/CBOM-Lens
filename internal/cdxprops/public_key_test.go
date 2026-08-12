@@ -264,7 +264,7 @@ func TestRSAAlgorithmAsset_IsOneAssetWhicheverProducerBuiltIt(t *testing.T) {
 
 	fromCertificate, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, cert.RawSubjectPublicKeyInfo)
 
-	csrCompos, _ := c.csrToCDX(t.Context(), csr)
+	csrCompos, _, _ := c.csrToCDX(t.Context(), csr)
 	fromCSR := algorithmComponentOf(t, csrCompos)
 
 	fromBarePublicKey, _ := c.publicKeyComponents(t.Context(), x509.RSA, &key.PublicKey, nil)
