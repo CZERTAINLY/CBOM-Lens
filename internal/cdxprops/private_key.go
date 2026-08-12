@@ -30,19 +30,28 @@ func (c Converter) PrivateKey(ctx context.Context, id string, key crypto.Private
 
 	bomRef := "crypto/private_key/" + strings.ToLower(algoCompo.Name) + "@" + id
 
+	relatedProps := &cdx.RelatedCryptoMaterialProperties{
+		Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
+		AlgorithmRef: cdx.BOMReference(algoCompo.BOMRef),
+	}
+	// Size only when the algorithm states one, the same guard the two other
+	// producers of this field carry. The field is in BITS and a wrong value
+	// validates, so nothing downstream distinguishes "0" from a key that is
+	// really zero bits long -- and privateKeyInfo's default arm yields keySize
+	// 0 for every key type its switch does not name.
+	if info.keySize > 0 {
+		relatedProps.Size = &info.keySize
+	}
+
 	keyCompo = cdx.Component{
 		BOMRef:      bomRef,
 		Type:        cdx.ComponentTypeCryptographicAsset,
 		Name:        info.name,
 		Description: "Private Key",
 		CryptoProperties: &cdx.CryptoProperties{
-			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
-			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
-				Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
-				AlgorithmRef: cdx.BOMReference(algoCompo.BOMRef),
-				Size:         &info.keySize,
-			},
-			OID: info.oid,
+			AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,
+			RelatedCryptoMaterialProperties: relatedProps,
+			OID:                             info.oid,
 		},
 	}
 	return
