@@ -16,8 +16,21 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 
-// publicKeyAlgComponent creates a CycloneDX component for a public key algorithm
-func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate) (algo, key cdx.Component) {
+// publicKeyComponents describes a public key: the algorithm asset, and the key
+// material when the input establishes one.
+//
+// The key is a POINTER, and nil is the answer when nothing here establishes
+// that a key exists -- an unmarshallable key with no SPKI to fall back on, an
+// SPKI that does not decode, a body that cannot be this algorithm's public key.
+// The algorithm still stands in every one of those cases, because the input
+// named it whatever the body turned out to hold.
+//
+// It used to return the zero Component for that, which every caller then had to
+// recognise by testing .BOMRef == "" -- a sentinel each of them re-derived, and
+// one of them (Converter.PEMBundle) read through strings.Cut before testing
+// anything. A pointer says the same thing in the type, and the compiler stops
+// caring whether a given call site remembered.
+func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.PublicKeyAlgorithm, pubKey crypto.PublicKey, cert *x509.Certificate) (algo cdx.Component, key *cdx.Component) {
 	info := publicKeyAlgorithmInfo(pubKeyAlg, pubKey)
 
 	// One decode of the certificate's subjectPublicKeyInfo, read in two places
@@ -150,7 +163,7 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 			slog.WarnContext(ctx, "not reporting a public key: the certificate's subjectPublicKeyInfo could not be decoded",
 				"algorithm", info.name,
 				"oid", info.oid)
-			return algo, cdx.Component{}
+			return algo, nil
 		}
 		if reason := rejectPublicKeyBody(info, spki.PublicKey); reason != "" {
 			slog.WarnContext(ctx, "not reporting a public key: the certificate's SPKI body is not this algorithm's public key",
@@ -158,7 +171,7 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 				"oid", info.oid,
 				"body_bytes", len(spki.PublicKey.Bytes),
 				"reason", reason)
-			return algo, cdx.Component{}
+			return algo, nil
 		}
 
 		pubKeyValue, pubKeyHash = c.hashRawPublicKey(cert.RawSubjectPublicKeyInfo)
@@ -167,7 +180,7 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		// this key with every other key of the same algorithm.
 		slog.WarnContext(ctx, "cannot identify public key: omitting key component",
 			"algorithm", info.name, "error", err.Error())
-		return algo, cdx.Component{}
+		return algo, nil
 	}
 	// public key properties
 	var bomRef = fmt.Sprintf(
@@ -186,7 +199,7 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 		relatedProps.Size = &info.keySize
 	}
 
-	key = cdx.Component{
+	key = &cdx.Component{
 		Type:   cdx.ComponentTypeCryptographicAsset,
 		Name:   info.name,
 		BOMRef: bomRef,

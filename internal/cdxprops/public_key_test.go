@@ -634,7 +634,7 @@ func TestPublicKeyComponents_CertificateGarbageSPKIYieldsNoKey(t *testing.T) {
 			algo, key := NewConverter().publicKeyComponents(
 				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
 
-			require.Equal(t, cdx.Component{}, key,
+			require.Nil(t, key,
 				"a body that cannot be this algorithm's public key must not be "+
 					"reported as one")
 
@@ -904,7 +904,7 @@ func TestPublicKeyComponents_CertificateEmptySPKIBodyYieldsNoKey(t *testing.T) {
 			algo, key := NewConverter().publicKeyComponents(
 				t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
 
-			require.Equal(t, cdx.Component{}, key,
+			require.Nil(t, key,
 				"an empty body cannot hold a key of any algorithm, sized or not")
 
 			require.Equal(t, tt.algo, algo.Name,
@@ -1006,7 +1006,7 @@ func TestPublicKeyComponents_UndecodableCertificateSPKIYieldsNoKeyAndSaysWhy(t *
 	algo, key := NewConverter().publicKeyComponents(
 		t.Context(), cert.PublicKeyAlgorithm, cert.PublicKey, cert)
 
-	require.Equal(t, cdx.Component{}, key,
+	require.Nil(t, key,
 		"bytes that are not a SubjectPublicKeyInfo are not evidence of a key")
 	require.Equal(t, "DSA-2048", algo.Name,
 		"the algorithm is established by the parsed key, not by the raw field")

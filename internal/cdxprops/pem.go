@@ -44,16 +44,16 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 		// publicKeyComponents yields no key component when the key cannot be
 		// identified — a DSA PUBLIC KEY block parses via ParsePKIXPublicKey but
 		// MarshalPKIXPublicKey refuses *dsa.PublicKey, and with no certificate
-		// there is no SPKI to hash instead. Appending the zero Component here
-		// and setting Format on it dereferenced a nil CryptoProperties and took
-		// the whole scan down, which is why the assignment stays out of the
+		// there is no SPKI to hash instead. Appending that absent key and
+		// setting Format on it dereferenced a nil CryptoProperties and took the
+		// whole scan down, which is why the assignment stays out of the
 		// producers. The Format assignment was redundant anyway: PEMBundle's
 		// central setPEMFormat applies it to every component whose asset type is
 		// related-crypto-material, and only those (#213).
-		if pubKeyCompo.BOMRef == "" {
+		if pubKeyCompo == nil {
 			continue
 		}
-		components = append(components, pubKeyCompo)
+		components = append(components, *pubKeyCompo)
 	}
 
 	// Convert CRLs
@@ -125,8 +125,8 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // registry misses too, and what follows is about those requests: the ones
 // nothing names.
 //
-// The key goes because publicKeyComponents yields a zero Component for it, and
-// appending that would hand the Builder a refless component to drop while the
+// The key goes because publicKeyComponents yields nil for it, and appending an
+// absent key would hand the Builder a refless component to drop while the
 // dependency edge below pointed at a ref present nowhere in the document. Same
 // guard, same reason, as the standalone public keys in restOfPEMBundleToCDX.
 //
@@ -150,8 +150,7 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // That branch discards the KEY as well, which is today a distinction without a
 // difference: the only way a request reaches the placeholder is
 // UnknownPublicKeyAlgorithm, whose PublicKey is nil, so hashPublicKey has
-// already failed and key is the zero Component the guard below would drop
-// anyway. It stops being one the day Go grows a PublicKeyAlgorithm value
+// already failed and key is nil, which the guard below would drop anyway. It stops being one the day Go grows a PublicKeyAlgorithm value
 // publicKeyAlgorithmInfo's switch has no case for -- publicKeyComponents would
 // then hand over a real, marshallable key while the algorithm still fell
 // through to the placeholder, and this branch would drop a key it could have
@@ -212,8 +211,8 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 	// that into a relationship generically. Adding a second one would emit the
 	// same edge twice.
 	algo, key := c.requestedKeyComponents(ctx, csr)
-	// The placeholder case satisfies key.BOMRef == "" too, so it has to be
-	// tested first or the branch below emits the component this one exists to
+	// The placeholder case satisfies key == nil too, so it has to be tested
+	// first or the branch below emits the component this one exists to
 	// suppress. CryptoProperties is never nil: componentWOBomRef allocates it
 	// unconditionally.
 	if algo.CryptoProperties.OID == oidPlaceholder {
@@ -222,10 +221,10 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 			"spki_oid", spkiOIDFromRaw(csr.RawSubjectPublicKeyInfo))
 		return []cdx.Component{compo}, nil
 	}
-	if key.BOMRef == "" {
+	if key == nil {
 		return []cdx.Component{compo, algo}, nil
 	}
-	return []cdx.Component{compo, algo, key},
+	return []cdx.Component{compo, algo, *key},
 		[]cdx.Dependency{{
 			Ref:          compo.BOMRef,
 			Dependencies: &[]string{key.BOMRef},
@@ -292,12 +291,13 @@ func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) (
 // TestPQCPipeline_CSRSPKIRejectedBodyYieldsAlgorithmNotKey pins the rejected
 // body, where unsupportedPKIX returns no error and no key: the algorithm
 // survives, the key does not.
-func (c Converter) requestedKeyComponents(ctx context.Context, csr *x509.CertificateRequest) (algo, key cdx.Component) {
+func (c Converter) requestedKeyComponents(ctx context.Context, csr *x509.CertificateRequest) (algo cdx.Component, key *cdx.Component) {
 	if csr.PublicKeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
 		// NOTE the return order: unsupportedPKIX yields (key, algo, err) and
-		// publicKeyComponents yields (algo, key). Both are cdx.Component, so
-		// swapping them compiles and publishes the key material as the
-		// algorithm.
+		// publicKeyComponents yields (algo, key). The key is a *cdx.Component
+		// and the algorithm a value, so swapping them no longer compiles -- but
+		// the orders still disagree, and the reason to read this twice is that
+		// they did once publish the key material as the algorithm.
 		if recoveredKey, recoveredAlgo, err := c.unsupportedPKIX(ctx, csr.RawSubjectPublicKeyInfo); err == nil {
 			return recoveredAlgo, recoveredKey
 		}
@@ -434,20 +434,14 @@ func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, 
 		// describes yields no key: unsupportedPKCS8PrivateKey returns nil for
 		// it, and the algorithm stands on the OID alone.
 		//
-		// The empty-BOMRef sentinel restOfPEMBundleToCDX uses above expresses the
-		// same decision and is deliberately left alone. publicKeyComponents has
-		// four production callers -- that loop, Converter.PEMBundle's keypair
-		// loop, certHitToComponents, and requestedKeyComponents on the
-		// certificate-request path -- and each reads .BOMRef off its result
-		// through a field selector, which Go applies to a pointer just as happily
-		// as to a value, so the same conversion there would compile silently at
-		// all four. PEMBundle does that read through strings.Cut before it guards
-		// on anything, so it would trade an inert sentinel for a nil dereference.
-		//
-		// unsupportedPKIX still hands its key back as a value, and that is not
-		// an endorsement of the sentinel: a no-key branch added there owes this
-		// caller the same pointer rather than another empty component to
-		// recognise.
+		// Every producer of key material in this package now says "no key" this
+		// way. It used to be split -- nil here, a zero Component from
+		// unsupportedPKIX and publicKeyComponents -- so each of the six call
+		// sites re-derived which sentinel its producer spoke, and one of them
+		// (Converter.PEMBundle) read the ref out with strings.Cut before testing
+		// anything, which is what made the conversion delicate rather than
+		// mechanical. With one representation the compiler decides, not the
+		// reader.
 		if key == nil {
 			return []cdx.Component{algo}, nil
 		}
@@ -458,16 +452,13 @@ func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, 
 			return nil, errors.Join(origErr, err)
 		}
 		// unsupportedPKIX yields the algorithm alone when the PKIX body is not
-		// exactly the size the registry states for this algorithm's public
-		// key. The zero Component must not be appended: it has neither ref nor
-		// crypto properties, so the Builder would drop it with a warning and
-		// setPEMFormat would walk it for nothing. Same guard, same reason, as
-		// the PRIVATE KEY branch above and the zero public-key component in
-		// restOfPEMBundleToCDX.
-		if key.BOMRef == "" {
+		// exactly the size the registry states for this algorithm's public key.
+		// Same guard, same reason, and now the same shape as the PRIVATE KEY
+		// branch above.
+		if key == nil {
 			return []cdx.Component{algo}, nil
 		}
-		return []cdx.Component{key, algo}, nil
+		return []cdx.Component{*key, algo}, nil
 	}
 	return nil, origErr
 }
@@ -833,7 +824,7 @@ func derSeedAndExpandedOf(body []byte, wantSeed, wantExpanded int) bool {
 // the guard that closed exactly this on the private half was never written for
 // this one, so the same four bytes were refused under a PKCS#8 wrapper and
 // accepted under a SubjectPublicKeyInfo.
-func (c Converter) unsupportedPKIX(ctx context.Context, der []byte) (key, algo cdx.Component, err error) {
+func (c Converter) unsupportedPKIX(ctx context.Context, der []byte) (key *cdx.Component, algo cdx.Component, err error) {
 	var pubKey pkixStruct
 	rest, uerr := asn1.Unmarshal(der, &pubKey)
 	if uerr != nil {
@@ -900,7 +891,7 @@ func (c Converter) unsupportedPKIX(ctx context.Context, der []byte) (key, algo c
 		relatedProps.Size = &info.keySize
 	}
 
-	key = cdx.Component{
+	key = &cdx.Component{
 		Type:   cdx.ComponentTypeCryptographicAsset,
 		Name:   info.name,
 		BOMRef: bomRef,

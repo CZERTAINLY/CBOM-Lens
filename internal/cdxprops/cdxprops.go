@@ -187,7 +187,18 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		// and post-quantum private keys land in ParseErrors, so neither enters
 		// bundle.PrivateKeys. Guarded because the pem.go crash was also
 		// unreachable until a change elsewhere made it reachable.
-		_, pubKeyID, _ := strings.Cut(pubKeyCompo.BOMRef, "@")
+		//
+		// The nil test has to come first, and this is the call site that made
+		// the sentinel worth replacing: the digest is read out with strings.Cut
+		// BEFORE anything is tested, so the old zero Component yielded an inert
+		// empty string here while a nil pointer read the same way would take the
+		// scan down. Both conditions answer the same question -- is there a
+		// public key to hang this private key's identity on -- so they share the
+		// branch rather than inviting a second opinion.
+		var pubKeyID string
+		if pubKeyCompo != nil {
+			_, pubKeyID, _ = strings.Cut(pubKeyCompo.BOMRef, "@")
+		}
 		if pubKeyID == "" {
 			slog.WarnContext(ctx, "skipping private key: its public key could not be identified",
 				"bundle.location", bundle.Location)
@@ -195,7 +206,7 @@ func (c Converter) PEMBundle(ctx context.Context, bundle model.PEMBundle) *model
 		}
 		privKeyAlgo, privKeyCompo := c.PrivateKey(ctx, pubKeyID, privKey)
 
-		compos = append(compos, pubKeyAlgo, pubKeyCompo, privKeyAlgo, privKeyCompo)
+		compos = append(compos, pubKeyAlgo, *pubKeyCompo, privKeyAlgo, privKeyCompo)
 	}
 
 	bundleCompos, bundleDeps, err := c.restOfPEMBundleToCDX(ctx, bundle)
@@ -304,12 +315,12 @@ func setAlgorithmPrimitive(compo *cdx.Component, primitive cdx.CryptoPrimitive) 
 // build it, so a future related-crypto-material producer that leaves it nil
 // would silently lose its format.
 //
-// CryptoProperties is deliberately NOT created. publicKeyComponents returns a
-// zero Component for a key it cannot identify, and inventing an assetType-less
-// cryptoProperties on it is worse than leaving it for Builder.appendDetection
-// to drop. This stays central rather than moving into the producers: the
-// assignment lived in restOfPEMBundleToCDX once and dereferenced exactly that
-// nil, taking the whole scan down (see pem.go).
+// CryptoProperties is deliberately NOT created. A component can reach here
+// without one, and inventing an assetType-less cryptoProperties on it is worse
+// than leaving it for Builder.appendDetection to drop. This stays central
+// rather than moving into the producers: the assignment lived in
+// restOfPEMBundleToCDX once and dereferenced exactly that nil, taking the whole
+// scan down (see pem.go).
 func setPEMFormat(compo *cdx.Component) {
 	if compo == nil || compo.CryptoProperties == nil {
 		return

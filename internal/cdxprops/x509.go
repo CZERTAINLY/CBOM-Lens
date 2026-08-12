@@ -186,7 +186,7 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	// "publicKey", and those are different assets. Pointing this at the
 	// algorithm component collapsed the two into one kind, so a consumer
 	// walking certificate-to-key edges landed on an algorithm.
-	if publicKeyCompo.BOMRef != "" {
+	if publicKeyCompo != nil {
 		mainCertCompo.CryptoProperties.CertificateProperties.SubjectPublicKeyRef = cdx.BOMReference(publicKeyCompo.BOMRef)
 	}
 
@@ -202,14 +202,11 @@ func (c Converter) certHitToComponents(ctx context.Context, hit model.CertHit) (
 	// -- reporting a keyEncipherment RSA key as a signature scheme and an
 	// ML-KEM key as a signature rather than a kem.
 	compos := []cdx.Component{mainCertCompo, signatureAlgCompo}
-	// publicKeyComponents yields the zero Component when the certificate's SPKI
-	// body cannot be this algorithm's public key. Appending it would hand
-	// Builder.appendDetection a component with no ref and no name to drop with a
-	// warning that reads as a Builder failure, which is why csrToCDX and
-	// restOfPEMBundleToCDX already filter it at the call site. Nothing is left
-	// dangling: SubjectPublicKeyRef above is conditional on the same emptiness.
-	if publicKeyCompo.BOMRef != "" {
-		compos = append(compos, publicKeyCompo)
+	// publicKeyComponents yields no key when the certificate's SPKI body cannot
+	// be this algorithm's public key. Nothing is left dangling:
+	// SubjectPublicKeyRef above is conditional on the same nil.
+	if publicKeyCompo != nil {
+		compos = append(compos, *publicKeyCompo)
 	}
 	compos = append(compos, publicKeyAlgCompo)
 
