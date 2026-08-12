@@ -2021,6 +2021,14 @@ func TestPEMBundle_CRLWithUnrecognisedSignatureAlgorithm(t *testing.T) {
 	require.Equal(t, "1.2.840.10045.4.3.99", algo.CryptoProperties.OID,
 		"the OID must be the one in the list's own DER, which is all that is "+
 			"left to identify the algorithm by once the enum has missed")
+	// x509.SignatureAlgorithm.String() falls through to strconv.Itoa for a
+	// value its table does not carry, so the unknown algorithm stringifies to
+	// "0". A component named "0" passes every guard downstream -- the Builder's
+	// missingIdentity only rejects an EMPTY name -- so nothing but this
+	// assertion stands between the enum's integer and the document.
+	require.Equal(t, "Unknown", algo.Name,
+		"an algorithm the enum and the registry both miss is named Unknown, "+
+			"which is what its ref already says")
 
 	// No hash: this is the branch that exists so the nil second return is not
 	// dereferenced, and so no edge names a component that was never built.

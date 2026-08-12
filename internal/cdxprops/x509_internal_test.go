@@ -574,11 +574,13 @@ func TestSignatureAlgorithmComponents_PinsAlgorithmAndHash(t *testing.T) {
 // the tree reaches: the OID misses the registry entirely, and the OID hits an
 // entry that is not a signature scheme at all.
 //
-// A miss leaves the Name as the string x509.SignatureAlgorithm(0) prints for
-// itself, "0". That is a poor name for an algorithm and it is pinned as one
-// deliberately: it is produced one line above the assignment this commit
-// changed, and the value it could drift to is the empty string -- which Builder
-// drops, leaving the signed structure's algorithm ref pointing at a component
+// A miss leaves nothing to name the algorithm by, so it is named "Unknown" --
+// which is what its ref already says, since readSignatureAlgorithmRefFor
+// returned refUnknownAlgorithm. The name is pinned because both values it could
+// drift to are worse: x509.SignatureAlgorithm(0).String() is the enum's own
+// integer, "0", which passes every guard downstream and publishes an asset
+// named after a Go implementation detail; and the empty string is dropped by
+// Builder, leaving the signed structure's algorithm ref pointing at a component
 // that is not in the document.
 //
 // The three ML-KEM OIDs are keys in the registry the fallback reads, so a
@@ -606,7 +608,7 @@ func TestSignatureAlgorithmComponents_OIDOnlyEdgeCases(t *testing.T) {
 			// unsupportedAlgorithms.
 			sigAlgOID: []byte{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x63},
 			want: wantSignatureAlg{
-				name:    "0",
+				name:    "Unknown",
 				refName: "crypto/algorithm/unknown",
 				oid:     "2.16.840.1.101.3.4.3.99",
 				hash:    "",

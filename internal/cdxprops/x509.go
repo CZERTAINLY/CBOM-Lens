@@ -318,10 +318,24 @@ func (c Converter) signatureAlgorithmComponents(ctx context.Context, sigAlg x509
 	}
 
 	cryptoProps, props, hashName := c.getAlgorithmProperties(sigAlg, oid)
-	if algName == "0" {
-		info, ok := unsupportedAlgorithms[oid]
-		if ok {
+	// x509.SignatureAlgorithm.String() is a table lookup that falls through to
+	// strconv.Itoa for a value the table does not carry, so an algorithm Go
+	// could not identify stringifies to "0" -- the enum's integer, published as
+	// the name of a cryptographic asset. Nothing downstream catches it: the
+	// Builder's missingIdentity rejects an empty name and this one is not
+	// empty, and algorithmFamily17 simply finds no family for it.
+	//
+	// The registry answers for a post-quantum OID, which is the case worth
+	// recovering. Past that there is nothing left to name the algorithm by, and
+	// the ref already says as much -- readSignatureAlgorithmRefFor returned
+	// refUnknownAlgorithm -- so the name is made to agree with the ref rather
+	// than to invent an identity. The OID stays on the component either way,
+	// which is the part a reader can act on.
+	if sigAlg == x509.UnknownSignatureAlgorithm {
+		if info, ok := unsupportedAlgorithms[oid]; ok {
 			algName = info.name
+		} else {
+			algName = "Unknown"
 		}
 	}
 
