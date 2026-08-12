@@ -33,7 +33,8 @@ The supervisor process and the internal `_scan` command cooperate to support the
 The output of CBOM-Lens is a **CycloneDX 1.6 CBOM** enriched for cryptographic inventory:
 
 - Each cryptographic asset has a stable `bom-ref` derived from its content.
-- Private keys use a hash of the corresponding public key to avoid leaking private key material.
+- Classical private keys use a hash of the corresponding public key, so no secret material is hashed into the reference.
+- Post-quantum private keys are the exception: their public half cannot be recovered from the PKCS#8 block, so the reference hashes the private DER. The document carries a digest and never the key, but anyone already holding a candidate key can confirm from the document that it was scanned. See [Private-key references](pqc-support.md#private-key-references).
 - Algorithm components use a hash of their CycloneDX JSON representation (excluding `bom-ref` and `evidence`).
 
 See the [CBOM output format](cbom-format.md) documentation for a detailed explanation and examples.
