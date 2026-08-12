@@ -3,6 +3,7 @@ package cdxprops
 import (
 	"context"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/base64"
 	"errors"
@@ -99,8 +100,8 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // The bom-ref is content-addressed over the request's own DER, mirroring
 // crypto/certificate/<name>@<hash(cert.Raw)>. Without a bom-ref at all
 // Builder.appendDetection dropped the component, so scanning a .csr reported
-// nothing and exited 0; an empty Name would have done the same, hence the
-// csrSubjectName fallback.
+// nothing and exited 0; an empty Name would have done the same, hence
+// nameOrUnknown's fallback.
 //
 // It deliberately does NOT use Converter.BOMRefHash. That hashes the
 // component's JSON, and nothing in this component distinguishes one requested
@@ -187,7 +188,7 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 // itself the day an SPKI-OID fallback for requests gives that branch something
 // true to say.
 func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) ([]cdx.Component, []cdx.Dependency) {
-	name := csrSubjectName(csr)
+	name := nameOrUnknown(csr.Subject)
 	compo := cdx.Component{
 		Type:   cdx.ComponentTypeCryptographicAsset,
 		Name:   "CSR: " + name,
@@ -346,7 +347,7 @@ func (c Converter) requestedKeyComponents(ctx context.Context, csr *x509.Certifi
 // design, it silently made every CRL indistinguishable from a CSR to anything
 // reading properties instead of guessing from the Name string.
 func (c Converter) crlToCDX(ctx context.Context, crl *x509.RevocationList) ([]cdx.Component, []cdx.Dependency) {
-	name := crlIssuerName(crl)
+	name := nameOrUnknown(crl.Issuer)
 	props := []cdx.Property{
 		{Name: "pem_type", Value: "CRL"},
 		{Name: "issuer", Value: crl.Issuer.String()},
@@ -400,26 +401,25 @@ func (c Converter) crlToCDX(ctx context.Context, crl *x509.RevocationList) ([]cd
 		}}
 }
 
-// csrSubjectName names a certificate request for its bom-ref and Name, the way
-// formatCertificateName names a certificate: CN if there is one, else the full
-// subject DN. A request has no serial number to fall back on, so an entirely
-// empty subject yields "unknown".
+// nameOrUnknown names a PEM object that has no serial number to fall back on,
+// for its bom-ref and its Name: a request by its subject, a list by its issuer.
+// It follows formatCertificateName as far as a certificate does -- CN if there
+// is one, else the full DN -- and stops at "unknown" where a certificate would
+// go on to its serial.
 //
-// That fallback is about the REF, not about the drop. It does not exist to
-// keep Builder.appendDetection from discarding an empty Name -- the "CSR: "
-// prefix already guarantees the Name is non-empty whatever this returns. It
-// exists because the ref is crypto/csr/<name>@<digest>, and without it an
-// empty subject produces "crypto/csr/@sha256:..." -- a ref a reader cannot
-// tell from a truncation or a formatting bug.
-func csrSubjectName(csr *x509.CertificateRequest) string {
-	return nameOrFallback(csr.Subject, func() string { return "unknown" })
-}
-
-// crlIssuerName names a revocation list for its bom-ref and Name. A CRL has no
-// subject, so it is named after its issuer, otherwise following
-// csrSubjectName -- including why the "unknown" fallback is there.
-func crlIssuerName(crl *x509.RevocationList) string {
-	return nameOrFallback(crl.Issuer, func() string { return "unknown" })
+// That fallback is about the REF, not about the drop. It does not exist to keep
+// Builder.appendDetection from discarding an empty Name -- the "CSR: " and
+// "CRL: " prefixes already guarantee the Name is non-empty whatever this
+// returns. It exists because the ref is crypto/csr/<name>@<digest>, and without
+// it an empty subject produces "crypto/csr/@sha256:..." -- a ref a reader
+// cannot tell from a truncation or a formatting bug.
+//
+// One function rather than one per object: the two differed only in which
+// pkix.Name they read, and each restated the fallback literal, so a change to
+// what an unnamed object is called could land on one ref namespace and miss the
+// other.
+func nameOrUnknown(name pkix.Name) string {
+	return nameOrFallback(name, func() string { return "unknown" })
 }
 
 // Helper functions

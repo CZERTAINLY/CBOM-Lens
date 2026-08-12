@@ -369,9 +369,9 @@ func (c Converter) signatureAlgorithmComponents(ctx context.Context, sigAlg x509
 // formatCertificateName's serial-number fallback -- an fmt.Sprintf plus a
 // big.Int-to-decimal conversion -- runs only for the rare certificate whose
 // subject is entirely empty, not for every certificate this is called for.
-// csrSubjectName and crlIssuerName pay nothing extra for the indirection: a
-// func literal that captures nothing compiles to the same zero-cost value as
-// the string literal it returns.
+// nameOrUnknown, which is the CSR and CRL path, pays nothing extra for the
+// indirection: a func literal that captures nothing compiles to the same
+// zero-cost value as the string literal it returns.
 func nameOrFallback(name pkix.Name, fallback func() string) string {
 	if name.CommonName != "" {
 		return name.CommonName

@@ -1453,13 +1453,13 @@ func TestPEMBundle_TwoCRLsSameIssuerStayDistinct(t *testing.T) {
 	require.NotEqual(t, refs[0], refs[1])
 }
 
-// TestPEMBundle_EmptyDNFallsBackToUnknown pins the "unknown" fallbacks in
-// csrSubjectName and crlIssuerName, which nothing exercised -- deleting either
+// TestPEMBundle_EmptyDNFallsBackToUnknown pins nameOrUnknown's "unknown"
+// fallback on both objects that use it, which nothing exercised -- deleting it
 // broke no test.
 //
-// They are not there to stop Builder.appendDetection dropping an empty Name,
-// which is what their comment used to claim: the "CSR: " and "CRL: " prefixes
-// make Name non-empty regardless. They are there for the ref, which is
+// It is not there to stop Builder.appendDetection dropping an empty Name,
+// which is what its comment used to claim: the "CSR: " and "CRL: " prefixes
+// make Name non-empty regardless. It is there for the ref, which is
 // crypto/csr/<name>@<digest>; without them an empty DN yields
 // "crypto/csr/@sha256:..." -- indistinguishable from a truncation.
 //
