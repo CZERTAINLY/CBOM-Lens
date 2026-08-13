@@ -269,10 +269,11 @@ func assertNoDanglingRefs(t *testing.T, bom *cdx.BOM) {
 // TestBOMReferentialIntegrity_1_6 requires a fully resolving 1.6 document.
 //
 // A document with no ref uses resolves perfectly and proves nothing, so the
-// corpus is also required to still exercise the two shapes issue #205 was
-// about. Naming the shapes beats a count floor: dropping the whole TLS
-// protocol component would take all seven of those uses with it while leaving
-// a count comfortably above any round number.
+// corpus is also required to still exercise the two slice-held shapes,
+// cipherSuites[].algorithms and cryptoRefArray. Naming the shapes beats a
+// count floor: they all live on the one TLS protocol component, so dropping it
+// removes every one of them while leaving a total comfortably above any round
+// number.
 func TestBOMReferentialIntegrity_1_6(t *testing.T) {
 	ctx := t.Context()
 	bom := goldenBuilder(t).AppendDetections(ctx, fixtureDetections(t)...).BOM(ctx)
@@ -442,8 +443,7 @@ func TestDanglingBOMRefs(t *testing.T) {
 		want []refSite
 	}{
 		{
-			// The shape that hid issue #205 from the rewriter for so long:
-			// a ref inside a []cdx.BOMReference, with no struct field of its
+			// A ref inside a []cdx.BOMReference has no struct field of its
 			// own. The path walker must report it like any other use.
 			name: "dangling []BOMReference element is caught",
 			bom: cdx.BOM{
@@ -686,11 +686,10 @@ const maxPlantDepth = 12
 // production rewriter. It plants a sentinel in every cdx.BOMReference slot
 // reachable from a cdx.Component, rewrites, and names any slot that survived.
 //
-// Issue #205 was one such slot — cipherSuites[].algorithms — going unrewritten
-// unnoticed. A cyclonedx-go release adding a BOMReference field, or moving one
-// behind a shape reflection cannot set, fails here rather than shipping
-// dangling refs. Unlike TestCycloneDXRefFieldInventory, which pins the field
-// list, this asserts the rewriter can actually write each field.
+// A cyclonedx-go release adding a BOMReference field, or moving one behind a
+// shape reflection cannot set, fails here rather than shipping dangling refs.
+// Unlike TestCycloneDXRefFieldInventory, which pins the field list, this
+// asserts the rewriter can actually write each field.
 func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
 	const sentinel = "crypto/algorithm/sentinel@raw"
 
@@ -699,7 +698,7 @@ func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
 	t.Logf("planted %d sentinel refs", planted)
 
 	// Anti-vacuity: the walk must reach a useful number of slots, and at
-	// minimum the two shapes #205 was about, or a planting bug would make the
+	// minimum the two slice-held shapes, or a planting bug would make the
 	// assertion below trivially true. The floor is deliberately well below
 	// today's count -- a cyclonedx-go upgrade may legitimately move it.
 	require.Greater(t, planted, 25,

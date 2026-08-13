@@ -334,12 +334,10 @@ func TestGolden_1_7(t *testing.T) {
 // against each other. They canonicalize cipherSuites[].algorithms through
 // independent code paths -- 1.6 through the Builder's reflection rewriter, 1.7
 // through canonicalizeSuiteAlgorithms -- so agreement is evidence the values
-// are right, not merely self-consistent. They disagreed before issue #205,
-// when the rewriter left the 1.6 side holding pre-canonical refs.
+// are right, not merely self-consistent.
 //
-// A legitimate divergence would mean one emitter names a different asset than
-// the other for the same cipher suite, which is a defect in whichever one is
-// wrong.
+// A divergence means one emitter names a different asset than the other for
+// the same cipher suite, which is a defect in whichever one is wrong.
 func TestGoldens_AgreeOnSuiteAlgorithmRefs(t *testing.T) {
 	read := func(name string) map[string][]cdx.BOMReference {
 		raw, err := os.ReadFile(filepath.Join("testdata", "golden", name))
