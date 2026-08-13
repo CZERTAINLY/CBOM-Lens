@@ -2741,9 +2741,11 @@ func TestPEMBundle_CSRAndItsCertificateShareOneKeyAsset(t *testing.T) {
 // a composite or hybrid arc wrapping a classical key is the obvious candidate,
 // and it is the direction the drafts are going -- an ungated recovery takes
 // over a request whose key Go PARSED. It would then be described from the OID
-// alone: no keySize off the parsed key, and none of publicKeyComponents'
-// KeyUsage logic, which is the only thing that reports an RSA key as pke
-// rather than signature. The document would still look well formed. Nothing
+// alone: no keySize off the parsed key, and none of the per-type detail
+// publicKeyAlgorithmInfo derives from it -- an RSA key's size, its
+// rsaEncryption OID and its pke primitive all come from the parsed key's
+// type, not from the registry entry the recovery would use. The document
+// would still look well formed. Nothing
 // would say the tool had stopped reading the key it was handed.
 //
 // The fixture is deliberately one x509.ParseCertificateRequest cannot produce.

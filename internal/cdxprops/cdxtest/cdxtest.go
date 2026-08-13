@@ -26,10 +26,11 @@ const MLDSA65MalformedPrivateKey = "testdata/ml-dsa-65-malformed-private-key.pem
 // of seed [0] (32 bytes), expandedKey, or both, and calls the seed the
 // RECOMMENDED form; ML-KEM has the same shape with a 64-byte (d, z) seed.
 //
-// Every other post-quantum fixture here is OpenSSL's default "both" encoding,
-// so the expanded and seed lengths differ by two orders of magnitude and a
-// size check calibrated on the expanded form rejects these while passing all
-// the others. Generated with
+// Every other ML-DSA and ML-KEM fixture here is OpenSSL's default "both"
+// encoding, and SLH-DSA has no seed alternative at all -- it stores the raw
+// key, whose length is its expanded size. So the expanded and seed lengths
+// differ by two orders of magnitude and a size check calibrated on the
+// expanded form rejects these while passing all the others. Generated with
 // `openssl genpkey -algorithm ML-DSA-65 -provparam ml-dsa.output_formats=seed-only`
 // on OpenSSL 3.5.3; Node.js exports this form by default.
 const MLDSA65SeedOnlyPrivateKey = "testdata/ml-dsa-65-seed-only-private-key.pem"

@@ -188,15 +188,21 @@ halves of one keypair correlatable within the document.
 
 A post-quantum private key cannot do that. The PKCS#8 block yields the version,
 the `privateKeyAlgorithm` and the body; recovering the public half from a seed
-means running key generation, which Go has no post-quantum support for. So the
+means running key generation, which Go's standard library supports only for
+ML-KEM-768 and ML-KEM-1024 (`crypto/mlkem`), not for ML-DSA or SLH-DSA, and not
+from the expanded-key form at all. So the
 reference hashes the private DER instead, and a post-quantum private key pairs
 with its public counterpart through `algorithmRef` — by algorithm, not by
 keypair. Do not read the classical invariant into the shared
 `crypto/private_key/` prefix.
 
-This is a deliberate trade-off, and it is the only reference in a CBOM-Lens
-document derived from secret material. The document carries a digest and never
-the key, and it discloses nothing to anyone who does not already hold the key.
+This is a deliberate trade-off, and it is the only reference on the PEM path
+derived from secret material. It is not the only one in the document: a leaked
+secret's reference is a digest of the secret itself, and everything below
+applies there with far less entropy behind it — a password or token is short
+enough to guess offline, not merely to confirm. The document carries a digest
+and never the key, and it discloses nothing to anyone who does not already hold
+the key.
 But the derivation is reproducible, and the UUIDv5 rewrite described in
 [CBOM output format](cbom-format.md) hides the digest without breaking it, so
 someone holding a candidate key can confirm from the document that it was

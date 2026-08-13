@@ -70,6 +70,14 @@ func (c Converter) leakToComponents(ctx context.Context, location string, findin
 		return detectionType, d.Components, d.Dependencies
 	}
 
+	// The ref is a digest of the leaked secret itself, which is what lets the
+	// same secret found in two files dedupe to one asset. It also makes this
+	// the sharpest case of the derivation recorded on the private-key ref in
+	// pem.go: Builder.safeRef rewrites the digest to a UUIDv5 that is
+	// deterministic over the raw ref, so the emitted value is reproducible
+	// from a candidate secret. Unlike a post-quantum key file, a password or
+	// token is low-entropy, so the reproduction is a guessing attack rather
+	// than a confirmation of something the attacker already holds.
 	bomRef := fmt.Sprintf("crypto/%s/%s", string(cryptoType), c.bomRefHasher([]byte(finding.Secret)))
 
 	compo := cdx.Component{

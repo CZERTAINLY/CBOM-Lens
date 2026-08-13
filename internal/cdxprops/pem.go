@@ -415,8 +415,9 @@ func (c Converter) crlToCDX(ctx context.Context, crl *x509.RevocationList) ([]cd
 	// one, Ed25519 included, because RFC 8032 builds it on SHA-512 and
 	// getAlgorithmProperties says so. The nil is reached through
 	// UnknownSignatureAlgorithm, whose OID either misses the registry or hits an
-	// entry that maps to no hash of its own -- ML-DSA, HSS/LMS, XMSS; SLH-DSA's
-	// entries do map to SHA-256 or SHAKE-256. Dereferencing it unconditionally
+	// entry that maps to no hash of its own -- ML-DSA, ML-KEM, HSS/LMS, XMSS;
+	// only SLH-DSA's entries map to a hash, SHA-256 or SHAKE-256, and they are
+	// the sole cases getAlgorithmProperties fills in. Dereferencing it unconditionally
 	// is the crash; emitting an edge to a component that was never built is the
 	// dangling ref.
 	if hashAlgCompo == nil {
@@ -564,8 +565,10 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 	// 64-byte (d, z) seed. So one algorithm has several legal body lengths that
 	// differ by two orders of magnitude, and neither bound works alone:
 	//
-	//   - A floor at the expanded size rejected real keys. Every PQC fixture in
-	//     the corpus is OpenSSL's default "both" encoding, so 4032/2400 passed
+	//   - A floor at the expanded size rejected real keys. Every ML-DSA and
+	//     ML-KEM fixture in cdxtest/testdata is OpenSSL's default "both"
+	//     encoding -- SLH-DSA has no seed alternative and stores the raw key,
+	//     whose length equals its expanded size -- so 4032/2400 passed
 	//     all of them and looked correct, while a genuine seed-only key from
 	//     `openssl genpkey -provparam ml-dsa.output_formats=seed-only` (body 34)
 	//     was reported as no key at all. Node.js exports seed-only by default,
@@ -626,8 +629,12 @@ func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (
 		// keypair. Do not read the classical invariant into the shared
 		// crypto/private_key/ prefix.
 		//
-		// Accepted trade-off, recorded because it is the only ref in a
-		// cbom-lens document derived from secret material. Builder.safeRef
+		// Accepted trade-off, recorded because it is the only ref on the PEM
+		// path derived from secret material. It is not the only one in the
+		// document: leaks.go hashes finding.Secret itself, and everything
+		// below applies there with far less entropy behind it -- a password
+		// or token is short enough to guess offline, not merely to confirm.
+		// Builder.safeRef
 		// rewrites this to <prefix>@<uuidv5>, which hides the digest but does
 		// NOT break the derivation -- uuid.NewSHA1 is deterministic over the
 		// raw ref, so the emitted UUID is reconstructible from a candidate key

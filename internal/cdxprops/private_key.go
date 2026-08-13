@@ -20,11 +20,13 @@ func (c Converter) PrivateKey(ctx context.Context, id string, key crypto.Private
 	algoCompo = info.componentWOBomRef(c.ilm)
 	// This path stamped no primitive at all, which made the SAME key describe
 	// its algorithm differently depending on which half of the keypair the
-	// scanner found. It is visible in the committed golden corpus: one scan of
-	// one fixture directory produced crypto/algorithm/rsa-2048@0e37c10e-... from
-	// the certificate and @a11419cf-... from the private key, two components
-	// differing in nothing but the presence of this field, both named RSA-2048,
-	// both oid 1.2.840.113549.1.1.1.
+	// scanner found. It was visible in the golden corpus before this change:
+	// one scan of one fixture directory produced
+	// crypto/algorithm/rsa-2048@0e37c10e-... from the certificate and
+	// @a11419cf-... from the private key, two components differing in nothing
+	// but the presence of this field, both named RSA-2048, both oid
+	// 1.2.840.113549.1.1.1. The regenerated corpus carries one such asset,
+	// shared by the public key, the certificate and the private key.
 	setAlgorithmPrimitive(&algoCompo, algorithmPrimitive(info))
 	c.BOMRefHash(&algoCompo, info.algorithmName)
 

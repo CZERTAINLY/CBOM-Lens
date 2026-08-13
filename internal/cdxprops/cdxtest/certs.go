@@ -274,18 +274,17 @@ var oidSignatureSHA256WithRSA = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1
 
 // spkiCertificate, spkiTBSCertificate and spkiValidity mirror RFC 5280 sec.
 // 4.1's Certificate, TBSCertificate and Validity. crypto/x509 declares the same
-// three structures unexported (x509.go:174-200), so they are restated here
-// rather than reused.
+// three structures unexported (crypto/x509's certificate, tbsCertificate and
+// validity), so they are restated here rather than reused.
 //
 // Version is omitted entirely: RFC 5280 sec. 4.1.2.1 makes it DEFAULT v1, and a
 // v1 certificate is the one shape whose tbsCertificate the parser only reads
-// (processExtensions, parser.go:1054, runs inside `if cert.Version > 1`,
-// parser.go:1020).
+// (crypto/x509's processExtensions runs inside `if cert.Version > 1`).
 //
 // PublicKey is an asn1.RawValue rather than a typed SubjectPublicKeyInfo so
-// that the caller's bytes go out untouched -- encoding/asn1 emits a RawValue's
-// FullBytes verbatim (marshal.go:612-613), which is the whole point of this
-// helper.
+// that the caller's bytes go out untouched -- encoding/asn1's marshal emits a
+// RawValue's FullBytes verbatim when they are non-empty, which is the whole
+// point of this helper.
 type spkiCertificate struct {
 	TBSCertificate     spkiTBSCertificate
 	SignatureAlgorithm pkix.AlgorithmIdentifier
@@ -316,7 +315,7 @@ type spkiValidity struct {
 //
 // The signature is a placeholder over sha256WithRSAEncryption and does not
 // verify. Nothing needs it to: x509.ParseCertificate checks the structure of
-// signatureValue and never its value (parser.go:1062-1066), so a certificate
+// signatureValue and never its value, so a certificate
 // this builds parses exactly as a signed one would. The signature algorithm is
 // deliberately NOT the SPKI's, so that a test asserting on "the ML-DSA-65
 // algorithm component" cannot be satisfied by the signature algorithm's
@@ -324,7 +323,8 @@ type spkiValidity struct {
 //
 // The same pkix.AlgorithmIdentifier value fills the inner and the outer
 // signature field because the parser compares those two encodings byte for byte
-// and refuses the certificate when they differ (parser.go:949-950).
+// and refuses the certificate when they differ ("x509: inner and outer
+// signature algorithm identifiers don't match").
 //
 // It emits a v1 certificate. Extensions are the only part of tbsCertificate the
 // parser interprets rather than merely reads, and this helper exists to vary

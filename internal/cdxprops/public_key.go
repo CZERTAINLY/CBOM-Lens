@@ -138,11 +138,14 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 	// example of signature, and the specification's 1.7 certificate conformance
 	// fixture models a TLS leaf exactly this way: rsaEncryption asset with
 	// primitive pke, SHA512withRSA asset with primitive signature, two OIDs and
-	// two assets. This package already emits that second asset -- every RSA
-	// certificate here also produces crypto/algorithm/sha-256-rsa -- so "this
-	// key signs" was never lost by removing it from here; it was duplicated onto
-	// the wrong asset, and that duplicate is what made the asset's identity
-	// depend on where it was found.
+	// two assets. This package emits that second asset whenever the issuer
+	// signed with an RSA algorithm (crypto/algorithm/sha-256-rsa and its
+	// SHA-384/512 siblings). It is the ISSUER's algorithm, not the subject
+	// key's, so an RSA leaf under an ECDSA or Ed25519 CA yields no RSA
+	// signature asset at all -- which is why "this key signs" rests on the
+	// key_usage property below and not on that asset. What removing it from
+	// here did fix is the duplicate: the same claim on the wrong asset, which
+	// is what made the asset's identity depend on where it was found.
 	//
 	// What the certificate does declare about its key now travels with the
 	// certificate: certComponent publishes the keyUsage extension as a key_usage

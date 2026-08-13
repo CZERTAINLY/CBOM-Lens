@@ -183,9 +183,11 @@ func algorithmComponentOf(t *testing.T, compos []cdx.Component) cdx.Component {
 // names pke "public-key encryption schemes (pke, e.g. RSA)" and signature "e.g.
 // ECDSA"), and the specification's 1.7 certificate conformance fixture gives a
 // TLS leaf's rsaEncryption asset "pke" while carrying the signing fact on the
-// separate SHA512withRSA asset. That separate asset is why nothing is lost: this
-// package already emits crypto/algorithm/sha-256-rsa with primitive "signature"
-// for exactly the certificates whose KeyUsage the old branch was reading.
+// separate SHA512withRSA asset. This package emits that separate asset --
+// crypto/algorithm/sha-256-rsa with primitive "signature" -- for certificates
+// whose ISSUER signed with RSA, so it does not cover an RSA leaf under an
+// ECDSA CA. What carries the subject key's usage in every case is the
+// key_usage property on the certificate component.
 //
 // The zero-usage row is not filler. It is the only row that reached the "else"
 // arm of the old branch without any keyUsage extension at all, so a
@@ -657,8 +659,8 @@ func TestPublicKeyComponents_CertificateGarbageSPKIYieldsNoKey(t *testing.T) {
 // Dropping a component is the easy half; the document has to stay internally
 // consistent afterwards. Three things could go wrong and each is asserted: the
 // zero Component could be appended anyway, and Builder.appendDetection would
-// drop it with a warning that reads as a Builder failure (missingIdentity,
-// builder.go:305-316); the certificate's subjectPublicKeyRef could still name
+// drop it with a warning that reads as a Builder failure (bom.missingIdentity);
+// the certificate's subjectPublicKeyRef could still name
 // the ref of a component that is no longer there; and a dependency edge could
 // point at one.
 //

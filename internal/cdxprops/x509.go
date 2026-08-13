@@ -283,8 +283,8 @@ func (c Converter) certHitToSignatureAlgComponent(ctx context.Context, hit model
 // has one, Ed25519 included, since RFC 8032 builds it on SHA-512 and
 // getAlgorithmProperties maps it that way. A nil therefore means an
 // UnknownSignatureAlgorithm whose OID either misses the registry or hits an
-// entry that carries no hash: ML-DSA and the stateful hash-based schemes, but
-// not SLH-DSA, whose entries map to SHA-256 or SHAKE-256.
+// entry that carries no hash: ML-DSA, ML-KEM and the stateful hash-based
+// schemes, but not SLH-DSA, whose entries map to SHA-256 or SHAKE-256.
 //
 // It takes the algorithm enum and the DER rather than a certificate because
 // those two values are all the certificate ever supplied, and a CRL carries
@@ -370,7 +370,8 @@ func nameOrFallback(name pkix.Name, fallback func() string) string {
 // RFC 5280 sec. 4.2.1.3 keyUsage extension.
 //
 // It is a component property and not certificateProperties.certificateExtensions
-// -- 1.7's purpose-built home for exactly this (bom-1.7.schema.json:5692-5736)
+// -- 1.7's purpose-built home for exactly this (bom-1.7.schema.json,
+// "certificateExtensions")
 // -- because 1.6's certificateProperties is additionalProperties:false with no
 // such field, and emit16.Emit copies every component through verbatim with no
 // per-component mapping, so a producer-set CertificateExtensions would make
