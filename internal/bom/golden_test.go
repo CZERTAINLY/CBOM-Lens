@@ -329,3 +329,45 @@ func TestGolden_1_7(t *testing.T) {
 	require.NoError(t, err, "run: go test ./internal/bom -run TestGolden_1_7 -update")
 	require.Equal(t, string(want), buf.String())
 }
+
+// TestGoldens_AgreeOnSuiteAlgorithmRefs cross-checks the two spec versions
+// against each other. They canonicalize cipherSuites[].algorithms through
+// independent code paths -- 1.6 through the Builder's reflection rewriter, 1.7
+// through canonicalizeSuiteAlgorithms -- so agreement is evidence the values
+// are right, not merely self-consistent. They disagreed before issue #205,
+// when the rewriter left the 1.6 side holding pre-canonical refs.
+//
+// A legitimate divergence would mean one emitter names a different asset than
+// the other for the same cipher suite, which is a defect in whichever one is
+// wrong.
+func TestGoldens_AgreeOnSuiteAlgorithmRefs(t *testing.T) {
+	read := func(name string) map[string][]cdx.BOMReference {
+		raw, err := os.ReadFile(filepath.Join("testdata", "golden", name))
+		require.NoError(t, err)
+
+		var bom cdx.BOM
+		require.NoError(t, json.Unmarshal(raw, &bom))
+		require.NotNil(t, bom.Components)
+
+		out := map[string][]cdx.BOMReference{}
+		for _, compo := range *bom.Components {
+			if compo.CryptoProperties == nil || compo.CryptoProperties.ProtocolProperties == nil {
+				continue
+			}
+			suites := compo.CryptoProperties.ProtocolProperties.CipherSuites
+			if suites == nil {
+				continue
+			}
+			for _, suite := range *suites {
+				if suite.Algorithms != nil {
+					out[suite.Name] = *suite.Algorithms
+				}
+			}
+		}
+		return out
+	}
+
+	got16 := read("corpus-1.6.json")
+	require.NotEmpty(t, got16, "1.6 corpus exercises no cipher suites: the comparison would be vacuous")
+	require.Equal(t, got16, read("corpus-1.7.json"))
+}

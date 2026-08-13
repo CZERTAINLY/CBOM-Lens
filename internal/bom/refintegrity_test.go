@@ -35,8 +35,6 @@ const (
 	refFieldUse               // points at a bom-ref defined elsewhere
 )
 
-var bomReferenceType = reflect.TypeFor[cdx.BOMReference]()
-
 // classifyRefField decides whether a cyclonedx-go struct field defines a
 // bom-ref, uses one, or is irrelevant to referential integrity. It is shared
 // by the collectBOMRefs walker and the TestCycloneDXRefFieldInventory
@@ -270,8 +268,11 @@ func assertNoDanglingRefs(t *testing.T, bom *cdx.BOM) {
 
 // TestBOMReferentialIntegrity_1_6 requires a fully resolving 1.6 document.
 //
-// The floor assertion guards against the vacuous pass: a corpus that stopped
-// emitting refs entirely would resolve perfectly and prove nothing.
+// A document with no ref uses resolves perfectly and proves nothing, so the
+// corpus is also required to still exercise the two shapes issue #205 was
+// about. Naming the shapes beats a count floor: dropping the whole TLS
+// protocol component would take all seven of those uses with it while leaving
+// a count comfortably above any round number.
 func TestBOMReferentialIntegrity_1_6(t *testing.T) {
 	ctx := t.Context()
 	bom := goldenBuilder(t).AppendDetections(ctx, fixtureDetections(t)...).BOM(ctx)
@@ -279,8 +280,17 @@ func TestBOMReferentialIntegrity_1_6(t *testing.T) {
 	assertNoDanglingRefs(t, &bom)
 
 	_, uses := collectBOMRefs(&bom)
-	require.GreaterOrEqual(t, len(uses), 20,
-		"corpus must exercise a meaningful number of ref uses for the check above to mean anything")
+	var suiteAlgorithms, cryptoRefArray int
+	for _, use := range uses {
+		switch {
+		case strings.Contains(use.Path, "cipherSuites") && strings.Contains(use.Path, "algorithms"):
+			suiteAlgorithms++
+		case strings.Contains(use.Path, "cryptoRefArray"):
+			cryptoRefArray++
+		}
+	}
+	require.NotZero(t, suiteAlgorithms, "corpus no longer exercises cipherSuites[].algorithms refs")
+	require.NotZero(t, cryptoRefArray, "corpus no longer exercises cryptoRefArray refs")
 }
 
 // refFieldInventory walks the exported struct-type graph reachable from
@@ -688,10 +698,23 @@ func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
 	planted := plantRefSentinels(reflect.ValueOf(&compo), sentinel, 0)
 	t.Logf("planted %d sentinel refs", planted)
 
-	// Anti-vacuity: the walk must at minimum reach the two shapes #205 was
-	// about, or a planting bug would make the assertion below trivially true.
+	// Anti-vacuity: the walk must reach a useful number of slots, and at
+	// minimum the two shapes #205 was about, or a planting bug would make the
+	// assertion below trivially true. The floor is deliberately well below
+	// today's count -- a cyclonedx-go upgrade may legitimately move it.
+	require.Greater(t, planted, 25,
+		"the planting walk reached far fewer slots than expected: it, not the rewriter, is broken")
+
+	require.NotNil(t, compo.CryptoProperties)
+	require.NotNil(t, compo.CryptoProperties.ProtocolProperties)
 	pp := compo.CryptoProperties.ProtocolProperties
+	require.NotNil(t, pp.CryptoRefArray)
+	require.NotEmpty(t, *pp.CryptoRefArray)
 	require.Equal(t, cdx.BOMReference(sentinel), (*pp.CryptoRefArray)[0])
+	require.NotNil(t, pp.CipherSuites)
+	require.NotEmpty(t, *pp.CipherSuites)
+	require.NotNil(t, (*pp.CipherSuites)[0].Algorithms)
+	require.NotEmpty(t, *(*pp.CipherSuites)[0].Algorithms)
 	require.Equal(t, cdx.BOMReference(sentinel), (*(*pp.CipherSuites)[0].Algorithms)[0])
 
 	replaceBOMReferences(map[string]string{sentinel: "crypto/algorithm/sentinel@safe"},

@@ -421,6 +421,12 @@ func safeRef(bomRef string) string {
 	return before + "@" + uid.String()
 }
 
+// bomReferenceType is resolved once: replaceBOMReferences compares against it
+// on every value it visits, and the referential-integrity walker in
+// refintegrity_test.go shares it so the two cannot disagree about what a
+// bom-ref is.
+var bomReferenceType = reflect.TypeFor[cdx.BOMReference]()
+
 // replaceBOMReferences rewrites every settable cdx.BOMReference reachable from
 // v to its safe ref. A value with no entry in refs is left alone, so a
 // dangling ref stays visibly dangling instead of being blanked into an
@@ -436,12 +442,15 @@ func safeRef(bomRef string) string {
 // reflect.String, and a check reachable only from the Struct branch never
 // sees it (issue #205).
 //
-// Settability is the limit of in-place rewriting: a BOMReference held as a
-// map value, or inside an interface, cannot be set and is skipped. No such
-// field exists in cyclonedx-go, and one appearing in a future release would
-// fail loudly rather than ship dangling refs — the referential-integrity
-// walker in refintegrity_test.go reports map- and interface-held refs as
-// uses, so TestBOMReferentialIntegrity_1_6 turns red.
+// Settability is the limit of in-place rewriting, and it turns on how the
+// value is held rather than on the container: a map value or interface holding
+// a BOMReference *directly* is unsettable and skipped, as is a struct held
+// directly as a map value, but one held through a pointer or slice from the
+// same place is settable and is rewritten. cyclonedx-go has no map, interface
+// or array field at all today, so none of this is reachable; a future release
+// introducing one would fail loudly rather than ship dangling refs, because
+// the referential-integrity walker in refintegrity_test.go reports map- and
+// interface-held refs as uses and TestBOMReferentialIntegrity_1_6 turns red.
 //
 // Refs are only rewritten, never chained: refs maps raw refs to safe refs and
 // no safe ref is itself a raw key, so walking a slice shared by several
@@ -452,7 +461,7 @@ func replaceBOMReferences(refs map[string]string, v reflect.Value) {
 		return
 	}
 
-	if v.Type() == reflect.TypeFor[cdx.BOMReference]() {
+	if v.Type() == bomReferenceType {
 		// Map values and non-pointer roots are unaddressable; SetString
 		// would panic on them.
 		if !v.CanSet() {
