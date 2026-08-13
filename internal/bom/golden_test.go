@@ -248,10 +248,10 @@ func TestGolden_1_7(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, v.ValidateBytes(buf.Bytes()), "1.7 output must validate against the 1.7 schema set")
 
-	// Zero tolerance for dangling refs in 1.7 (unlike 1.6's frozen allowlist).
+	// Zero tolerance for dangling refs, the same line 1.6 holds.
 	var bom17 cdx.BOM
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &bom17))
-	assertRefIntegrity(t, &bom17, nil)
+	assertNoDanglingRefs(t, &bom17)
 
 	// Parsing coverage (#175 acceptance): the document must round-trip
 	// through the library decoder, not just encoding/json.

@@ -421,15 +421,32 @@ func safeRef(bomRef string) string {
 	return before + "@" + uid.String()
 }
 
-// replaceBOMReferences rewrites every cdx.BOMReference reachable from v to its
-// safe ref, leaving values with no entry in refs untouched so a dangling ref
-// stays visibly dangling rather than being blanked.
+// replaceBOMReferences rewrites every settable cdx.BOMReference reachable from
+// v to its safe ref. A value with no entry in refs is left alone, so a
+// dangling ref stays visibly dangling instead of being blanked into an
+// invisible one.
 //
-// The type check sits at the entry, before the Kind switch, because
-// cdx.BOMReference is a string type: an element of a []cdx.BOMReference —
-// cryptoRefArray, cipherSuites[].algorithms — arrives here as a bare
-// reflect.String with no enclosing struct field to match on, and a
-// type check placed only in the Struct branch would never see it (issue #205).
+// v must be a pointer or otherwise addressable: the walker rewrites in place,
+// and a struct passed by value yields unsettable fields it skips silently.
+//
+// The type check sits outside the Kind switch because cdx.BOMReference is a
+// string type. A BOMReference that is not directly a struct field — an
+// element of a []cdx.BOMReference such as cryptoRefArray or
+// cipherSuites[].algorithms, or a *cdx.BOMReference — arrives here as a bare
+// reflect.String, and a check reachable only from the Struct branch never
+// sees it (issue #205).
+//
+// Settability is the limit of in-place rewriting: a BOMReference held as a
+// map value, or inside an interface, cannot be set and is skipped. No such
+// field exists in cyclonedx-go, and one appearing in a future release would
+// fail loudly rather than ship dangling refs — the referential-integrity
+// walker in refintegrity_test.go reports map- and interface-held refs as
+// uses, so TestBOMReferentialIntegrity_1_6 turns red.
+//
+// Refs are only rewritten, never chained: refs maps raw refs to safe refs and
+// no safe ref is itself a raw key, so walking a slice shared by several
+// components (nmap hands one cryptoRefArray to every protocol component on a
+// port) is idempotent. TestBuilder_RepeatedEmitIsStable pins that.
 func replaceBOMReferences(refs map[string]string, v reflect.Value) {
 	if !v.IsValid() {
 		return

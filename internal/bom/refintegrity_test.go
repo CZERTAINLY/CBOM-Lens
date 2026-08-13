@@ -234,14 +234,16 @@ func danglingBOMRefs(bom *cdx.BOM) []refSite {
 	return dangling
 }
 
-// assertRefIntegrity fails the test unless the dangling (ref, site) pairs in
-// bom match allowlist exactly, in both directions. Occurrences are pinned,
-// not just distinct values: a new dangling site that reuses an already
-// allowlisted value still fails. Non-fatal by design — it reports every
-// violation in both directions before failing (hence assert*, not the
-// package-usual require*). A nil allowlist requires a fully resolving
-// document.
-func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]string) {
+// assertNoDanglingRefs fails the test unless every ref-shaped use in bom
+// resolves to a bom-ref defined in the same document. Occurrences are
+// reported, not just distinct values, so two sites sharing one unresolvable
+// value are two findings. Non-fatal by design — it reports every violation
+// before failing (hence assert*, not the package-usual require*).
+//
+// There is deliberately no allowlist parameter. Both spec versions hold the
+// same line, and a document that cannot meet it is a rewriter or emitter bug
+// to fix rather than a set of sites to pin (issues #180, #205).
+func assertNoDanglingRefs(t *testing.T, bom *cdx.BOM) {
 	t.Helper()
 
 	actual := make(map[string][]string)
@@ -257,36 +259,28 @@ func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]strin
 	var unexpected strings.Builder
 	for _, ref := range slices.Sorted(maps.Keys(actual)) {
 		for _, path := range actual[ref] {
-			if !slices.Contains(allowlist[ref], path) {
-				fmt.Fprintf(&unexpected, "  %s\n    at %s\n", ref, path)
-			}
+			fmt.Fprintf(&unexpected, "  %s\n    at %s\n", ref, path)
 		}
 	}
 	if unexpected.Len() > 0 {
-		t.Errorf("BOM contains dangling ref sites not on the allowlist:\n%s"+
-			"fix the rewriter/emitter, do not extend the allowlist", unexpected.String())
-	}
-
-	for _, ref := range slices.Sorted(maps.Keys(allowlist)) {
-		for _, path := range allowlist[ref] {
-			if !slices.Contains(actual[ref], path) {
-				t.Errorf("allowlisted ref no longer dangles at %s: %s\nremove it from the allowlist", path, ref)
-			}
-		}
+		t.Errorf("BOM contains dangling ref sites:\n%s"+
+			"fix the rewriter/emitter", unexpected.String())
 	}
 }
 
-// TestBOMReferentialIntegrity_1_6 requires a fully resolving document: the
-// allowlist is nil, as it is for 1.7.
+// TestBOMReferentialIntegrity_1_6 requires a fully resolving 1.6 document.
 //
-// It carried seven entries until issue #205 — the cipherSuites[*].algorithms
-// and cryptoRefArray sites replaceBOMReferences left holding pre-rewrite
-// content-hash refs. Rewriting them moved those refs in the 1.6 golden, which
-// was the maintainer call the issue existed to make.
+// The floor assertion guards against the vacuous pass: a corpus that stopped
+// emitting refs entirely would resolve perfectly and prove nothing.
 func TestBOMReferentialIntegrity_1_6(t *testing.T) {
 	ctx := t.Context()
 	bom := goldenBuilder(t).AppendDetections(ctx, fixtureDetections(t)...).BOM(ctx)
-	assertRefIntegrity(t, &bom, nil)
+
+	assertNoDanglingRefs(t, &bom)
+
+	_, uses := collectBOMRefs(&bom)
+	require.GreaterOrEqual(t, len(uses), 20,
+		"corpus must exercise a meaningful number of ref uses for the check above to mean anything")
 }
 
 // refFieldInventory walks the exported struct-type graph reachable from
@@ -438,10 +432,9 @@ func TestDanglingBOMRefs(t *testing.T) {
 		want []refSite
 	}{
 		{
-			// THE bug class of issue #180: replaceBOMReferences recurses into
-			// slices element-by-element, but its BOMReference check only fires
-			// on struct fields, so elements of a []cdx.BOMReference are never
-			// rewritten and dangle.
+			// The shape that hid issue #205 from the rewriter for so long:
+			// a ref inside a []cdx.BOMReference, with no struct field of its
+			// own. The path walker must report it like any other use.
 			name: "dangling []BOMReference element is caught",
 			bom: cdx.BOM{
 				Components: &[]cdx.Component{{
@@ -671,4 +664,98 @@ func TestWalkBOMRefs_BOMReferenceHoist(t *testing.T) {
 
 	require.Empty(t, defs)
 	require.Equal(t, []refSite{{Path: "extra[key]", Ref: "crypto/algorithm/missing@1"}}, uses)
+}
+
+// maxPlantDepth bounds the sentinel-planting walk. cdx.Component is
+// self-referential (Components, Pedigree.Ancestors, ...), so the value graph
+// is infinite; this depth reaches every ref-bearing shape the emitters use,
+// cipherSuites[].algorithms[] included.
+const maxPlantDepth = 12
+
+// TestReplaceBOMReferences_ReachesEveryRefSlot is the upgrade tripwire for the
+// production rewriter. It plants a sentinel in every cdx.BOMReference slot
+// reachable from a cdx.Component, rewrites, and names any slot that survived.
+//
+// Issue #205 was one such slot — cipherSuites[].algorithms — going unrewritten
+// unnoticed. A cyclonedx-go release adding a BOMReference field, or moving one
+// behind a shape reflection cannot set, fails here rather than shipping
+// dangling refs. Unlike TestCycloneDXRefFieldInventory, which pins the field
+// list, this asserts the rewriter can actually write each field.
+func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
+	const sentinel = "crypto/algorithm/sentinel@raw"
+
+	var compo cdx.Component
+	planted := plantRefSentinels(reflect.ValueOf(&compo), sentinel, 0)
+	t.Logf("planted %d sentinel refs", planted)
+
+	// Anti-vacuity: the walk must at minimum reach the two shapes #205 was
+	// about, or a planting bug would make the assertion below trivially true.
+	pp := compo.CryptoProperties.ProtocolProperties
+	require.Equal(t, cdx.BOMReference(sentinel), (*pp.CryptoRefArray)[0])
+	require.Equal(t, cdx.BOMReference(sentinel), (*(*pp.CipherSuites)[0].Algorithms)[0])
+
+	replaceBOMReferences(map[string]string{sentinel: "crypto/algorithm/sentinel@safe"},
+		reflect.ValueOf(&compo))
+
+	bom := cdx.BOM{Components: &[]cdx.Component{compo}}
+	_, uses := collectBOMRefs(&bom)
+	var missed []string
+	for _, use := range uses {
+		if use.Ref == sentinel {
+			missed = append(missed, use.Path)
+		}
+	}
+
+	require.Empty(t, missed,
+		"replaceBOMReferences could not rewrite %d of %d planted refs", len(missed), planted)
+}
+
+// plantRefSentinels sets every settable cdx.BOMReference reachable from v to
+// ref, allocating nil pointers and one-element slices on the way down, and
+// returns how many it planted.
+func plantRefSentinels(v reflect.Value, ref string, depth int) int {
+	if !v.IsValid() || depth > maxPlantDepth {
+		return 0
+	}
+
+	if v.Type() == bomReferenceType {
+		if !v.CanSet() {
+			return 0
+		}
+		v.SetString(ref)
+		return 1
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			if !v.CanSet() {
+				return 0
+			}
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		return plantRefSentinels(v.Elem(), ref, depth+1)
+
+	case reflect.Struct:
+		planted := 0
+		for i := range v.NumField() {
+			planted += plantRefSentinels(v.Field(i), ref, depth+1)
+		}
+		return planted
+
+	case reflect.Slice:
+		if v.IsNil() {
+			if !v.CanSet() {
+				return 0
+			}
+			v.Set(reflect.MakeSlice(v.Type(), 1, 1))
+		}
+		planted := 0
+		for i := range v.Len() {
+			planted += plantRefSentinels(v.Index(i), ref, depth+1)
+		}
+		return planted
+	}
+
+	return 0
 }
