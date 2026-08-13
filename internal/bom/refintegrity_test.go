@@ -276,45 +276,17 @@ func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]strin
 	}
 }
 
-// tlsProtoPath locates the TLS protocol component holding all dangling sites
-// pinned by testdata/golden/corpus-1.6.json.
-const tlsProtoPath = "components[24].cryptoProperties.protocolProperties"
-
-// knownDanglingRefs16 pins every dangling occurrence (ref -> exact sites) in
-// testdata/golden/corpus-1.6.json. Root cause: replaceBOMReferences in
-// builder.go skips []cdx.BOMReference elements, so cipherSuites[*].algorithms
-// and cryptoRefArray keep the original content-hash refs while the components
-// they point at are rewritten to safe refs (issue #180). Whether 1.6 output
-// should be canonicalized to fix them is a pending maintainer decision.
+// TestBOMReferentialIntegrity_1_6 requires a fully resolving document: the
+// allowlist is nil, as it is for 1.7.
 //
-// Do NOT add entries here: a new dangling ref — or a new site reusing one of
-// these values — means a rewriter/emitter bug.
-var knownDanglingRefs16 = map[string][]string{
-	"crypto/algorithm/SHA256@sha256:692805caccd5d10a24c5f2607f1b2f92365d45637bbffb19327571938ff523f1": {
-		tlsProtoPath + ".cipherSuites[0].algorithms[1]",
-		tlsProtoPath + ".cipherSuites[2].algorithms[1]",
-	},
-	"crypto/algorithm/SHA384@sha256:a8e74cac63b436f2f31be1f23f252e84d4f5549731e6a71907ecc9dbaa37335c": {
-		tlsProtoPath + ".cipherSuites[1].algorithms[1]",
-	},
-	"crypto/algorithm/aes-128-gcm@sha256:eba74aba1360630b92c4fa07d5920b01dca555dae748eb1a4671b76f61763dee": {
-		tlsProtoPath + ".cipherSuites[0].algorithms[0]",
-	},
-	"crypto/algorithm/aes-256-gcm@sha256:fae137f8ede9ab0261320d5b0beb9495a96cccdbb0a2c9927069a97a5c5c47a1": {
-		tlsProtoPath + ".cipherSuites[1].algorithms[0]",
-	},
-	"crypto/algorithm/chacha20-poly1305@sha256:0412f91c044da1c8efc045a41876c2b7fe44c30aff1bd9023b0493c9f8d46181": {
-		tlsProtoPath + ".cipherSuites[2].algorithms[0]",
-	},
-	"crypto/certificate/www.ssllabs.com@sha256:9c4ae7bf5170ee7598b8de289e1be7fe54c254d440c24a587958000c2e1a82bb": {
-		tlsProtoPath + ".cryptoRefArray[0]",
-	},
-}
-
+// It carried seven entries until issue #205 — the cipherSuites[*].algorithms
+// and cryptoRefArray sites replaceBOMReferences left holding pre-rewrite
+// content-hash refs. Rewriting them moved those refs in the 1.6 golden, which
+// was the maintainer call the issue existed to make.
 func TestBOMReferentialIntegrity_1_6(t *testing.T) {
 	ctx := t.Context()
 	bom := goldenBuilder(t).AppendDetections(ctx, fixtureDetections(t)...).BOM(ctx)
-	assertRefIntegrity(t, &bom, knownDanglingRefs16)
+	assertRefIntegrity(t, &bom, nil)
 }
 
 // refFieldInventory walks the exported struct-type graph reachable from

@@ -553,6 +553,82 @@ func TestReplaceBOMReferences(t *testing.T) {
 			replaceBOMReferences(refs, reflect.Value{})
 		})
 	})
+
+	t.Run("replace BOMReference slice elements", func(t *testing.T) {
+		// cdx.BOMReference is a string type, so an element of a
+		// []cdx.BOMReference reaches the walker as a bare reflect.String
+		// with no enclosing struct field to match on. cryptoRefArray is
+		// the only such site the 1.6 emitter fills directly.
+		refs := map[string]string{
+			"cert@raw": "crypto/certificate/host@safe",
+		}
+
+		array := []cdx.BOMReference{"cert@raw"}
+		compo := cdx.Component{
+			CryptoProperties: &cdx.CryptoProperties{
+				ProtocolProperties: &cdx.CryptoProtocolProperties{CryptoRefArray: &array},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		require.Equal(t, []cdx.BOMReference{"crypto/certificate/host@safe"},
+			*compo.CryptoProperties.ProtocolProperties.CryptoRefArray)
+	})
+
+	t.Run("replace BOMReference elements nested in cipher suites", func(t *testing.T) {
+		// Two pointer-slice hops below the component: cipherSuites is a
+		// *[]CipherSuite whose Algorithms is itself a *[]BOMReference.
+		refs := map[string]string{
+			"aes@raw":    "crypto/algorithm/aes-128-gcm@safe",
+			"sha256@raw": "crypto/algorithm/SHA256@safe",
+		}
+
+		algorithms := []cdx.BOMReference{"aes@raw", "sha256@raw"}
+		suites := []cdx.CipherSuite{{Name: "TLS_AES_128_GCM_SHA256", Algorithms: &algorithms}}
+		compo := cdx.Component{
+			CryptoProperties: &cdx.CryptoProperties{
+				ProtocolProperties: &cdx.CryptoProtocolProperties{CipherSuites: &suites},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		got := *(*compo.CryptoProperties.ProtocolProperties.CipherSuites)[0].Algorithms
+		require.Equal(t, []cdx.BOMReference{
+			"crypto/algorithm/aes-128-gcm@safe",
+			"crypto/algorithm/SHA256@safe",
+		}, got)
+	})
+
+	t.Run("leave unknown slice elements untouched", func(t *testing.T) {
+		// A ref with no component keeps its original value rather than
+		// being blanked, so refintegrity still reports it as dangling.
+		refs := map[string]string{"known@raw": "known@safe"}
+
+		array := []cdx.BOMReference{"known@raw", "ghost@raw", ""}
+		compo := cdx.Component{
+			CryptoProperties: &cdx.CryptoProperties{
+				ProtocolProperties: &cdx.CryptoProtocolProperties{CryptoRefArray: &array},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		require.Equal(t, []cdx.BOMReference{"known@safe", "ghost@raw", ""},
+			*compo.CryptoProperties.ProtocolProperties.CryptoRefArray)
+	})
+
+	t.Run("handle unaddressable BOMReference", func(t *testing.T) {
+		// Map values and non-pointer roots arrive unaddressable; the
+		// walker must skip them instead of panicking in SetString.
+		refs := map[string]string{"old-ref": "new-ref"}
+
+		require.NotPanics(t, func() {
+			replaceBOMReferences(refs, reflect.ValueOf(cdx.BOMReference("old-ref")))
+			replaceBOMReferences(refs, reflect.ValueOf(map[string]cdx.BOMReference{"k": "old-ref"}))
+		})
+	})
 }
 
 func TestBuilder_SafeRefs(t *testing.T) {

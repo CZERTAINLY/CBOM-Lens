@@ -421,8 +421,31 @@ func safeRef(bomRef string) string {
 	return before + "@" + uid.String()
 }
 
+// replaceBOMReferences rewrites every cdx.BOMReference reachable from v to its
+// safe ref, leaving values with no entry in refs untouched so a dangling ref
+// stays visibly dangling rather than being blanked.
+//
+// The type check sits at the entry, before the Kind switch, because
+// cdx.BOMReference is a string type: an element of a []cdx.BOMReference —
+// cryptoRefArray, cipherSuites[].algorithms — arrives here as a bare
+// reflect.String with no enclosing struct field to match on, and a
+// type check placed only in the Struct branch would never see it (issue #205).
 func replaceBOMReferences(refs map[string]string, v reflect.Value) {
 	if !v.IsValid() {
+		return
+	}
+
+	if v.Type() == reflect.TypeFor[cdx.BOMReference]() {
+		// Map values and non-pointer roots are unaddressable; SetString
+		// would panic on them.
+		if !v.CanSet() {
+			return
+		}
+		if old := v.String(); old != "" {
+			if safe, ok := refs[old]; ok {
+				v.SetString(safe)
+			}
+		}
 		return
 	}
 
@@ -445,18 +468,7 @@ func replaceBOMReferences(refs map[string]string, v reflect.Value) {
 			if !field.CanSet() {
 				continue
 			}
-
-			// Check if this field is a BOMReference
-			if field.Type() == reflect.TypeFor[cdx.BOMReference]() {
-				oldRef := field.Interface().(cdx.BOMReference)
-				if oldRef != "" {
-					if safeRef, ok := refs[string(oldRef)]; ok {
-						field.SetString(safeRef)
-					}
-				}
-			} else {
-				replaceBOMReferences(refs, field)
-			}
+			replaceBOMReferences(refs, field)
 		}
 
 	case reflect.Slice, reflect.Array:
