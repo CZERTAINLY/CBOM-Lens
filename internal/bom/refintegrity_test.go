@@ -238,9 +238,9 @@ func danglingBOMRefs(bom *cdx.BOM) []refSite {
 // value are two findings. Non-fatal by design — it reports every violation
 // before failing (hence assert*, not the package-usual require*).
 //
-// There is deliberately no allowlist parameter. Both spec versions hold the
-// same line, and a document that cannot meet it is a rewriter or emitter bug
-// to fix rather than a set of sites to pin (issues #180, #205).
+// Every emitted document must fully resolve, in both spec versions: one that
+// cannot is a rewriter or emitter bug to fix rather than a set of sites to pin
+// (issues #180, #205).
 func assertNoDanglingRefs(t *testing.T, bom *cdx.BOM) {
 	t.Helper()
 
@@ -678,18 +678,22 @@ func TestWalkBOMRefs_BOMReferenceHoist(t *testing.T) {
 
 // maxPlantDepth bounds the sentinel-planting walk. cdx.Component is
 // self-referential (Components, Pedigree.Ancestors, ...), so the value graph
-// is infinite; this depth reaches every ref-bearing shape the emitters use,
-// cipherSuites[].algorithms[] included.
+// is infinite. 12 clears the deepest ref-bearing shape the emitters use --
+// protocolProperties.ikev2TransformTypes.encr[].BOMRef, at depth 11 -- with
+// one hop to spare. Raising it grows the planted count; a shape landing deeper
+// than this is planted nowhere and silently uncovered.
 const maxPlantDepth = 12
 
 // TestReplaceBOMReferences_ReachesEveryRefSlot is the upgrade tripwire for the
 // production rewriter. It plants a sentinel in every cdx.BOMReference slot
-// reachable from a cdx.Component, rewrites, and names any slot that survived.
+// plantRefSentinels can reach -- through pointers, structs and slices, to
+// maxPlantDepth -- rewrites, and names any slot that survived.
 //
-// A cyclonedx-go release adding a BOMReference field, or moving one behind a
-// shape reflection cannot set, fails here rather than shipping dangling refs.
-// Unlike TestCycloneDXRefFieldInventory, which pins the field list, this
-// asserts the rewriter can actually write each field.
+// It complements TestCycloneDXRefFieldInventory rather than duplicating it:
+// that test fires when the ref field set changes, this one fires when a field
+// the planter can write the rewriter cannot. Neither catches a ref moved
+// behind a map or an interface, because the planter cannot reach those either;
+// that shows up as an inventory diff for a human to read.
 func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
 	const sentinel = "crypto/algorithm/sentinel@raw"
 
@@ -699,8 +703,10 @@ func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
 
 	// Anti-vacuity: the walk must reach a useful number of slots, and at
 	// minimum the two slice-held shapes, or a planting bug would make the
-	// assertion below trivially true. The floor is deliberately well below
-	// today's count -- a cyclonedx-go upgrade may legitimately move it.
+	// assertion below trivially true. The count is of slots, not fields --
+	// Component is self-referential, so the same field is planted again in
+	// each nested subtree. The floor is deliberately well below today's count:
+	// a cyclonedx-go upgrade may legitimately move it.
 	require.Greater(t, planted, 25,
 		"the planting walk reached far fewer slots than expected: it, not the rewriter, is broken")
 
@@ -732,9 +738,10 @@ func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
 		"replaceBOMReferences could not rewrite %d of %d planted refs", len(missed), planted)
 }
 
-// plantRefSentinels sets every settable cdx.BOMReference reachable from v to
-// ref, allocating nil pointers and one-element slices on the way down, and
-// returns how many it planted.
+// plantRefSentinels sets every settable cdx.BOMReference reachable from v
+// through pointers, structs and slices within maxPlantDepth to ref,
+// allocating nil pointers and one-element slices on the way down, and returns
+// how many slots it planted. Map, interface and array shapes are not walked.
 func plantRefSentinels(v reflect.Value, ref string, depth int) int {
 	if !v.IsValid() || depth > maxPlantDepth {
 		return 0

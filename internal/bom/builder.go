@@ -421,10 +421,12 @@ func safeRef(bomRef string) string {
 	return before + "@" + uid.String()
 }
 
-// bomReferenceType is resolved once: replaceBOMReferences compares against it
-// on every value it visits, and the referential-integrity walker in
-// refintegrity_test.go shares it so the two cannot disagree about what a
-// bom-ref is.
+// bomReferenceType is the Go type both replaceBOMReferences and the
+// referential-integrity walker in refintegrity_test.go treat as a bom-ref, so
+// they cannot disagree about the type. They are not otherwise symmetric: the
+// walker also classifies name-shaped plain-string fields (ref, dependsOn,
+// *Ref) as uses, and the rewriter never touches those -- they are populated
+// after canonicalization or handled separately in model.
 var bomReferenceType = reflect.TypeFor[cdx.BOMReference]()
 
 // replaceBOMReferences rewrites every settable cdx.BOMReference reachable from
@@ -447,10 +449,11 @@ var bomReferenceType = reflect.TypeFor[cdx.BOMReference]()
 // a BOMReference *directly* is unsettable and skipped, as is a struct held
 // directly as a map value, but one held through a pointer or slice from the
 // same place is settable and is rewritten. cyclonedx-go has no map, interface
-// or array field at all today, so none of this is reachable; a future release
-// introducing one would fail loudly rather than ship dangling refs, because
-// the referential-integrity walker in refintegrity_test.go reports map- and
-// interface-held refs as uses and TestBOMReferentialIntegrity_1_6 turns red.
+// or array field at all today, so none of this is reachable. A release
+// introducing one fails TestCycloneDXRefFieldInventory, which pins the ref
+// field types; and any such ref the corpus populates is reported as a use by
+// the walker in refintegrity_test.go, turning TestBOMReferentialIntegrity_1_6
+// red rather than shipping a dangling ref.
 //
 // Refs are only rewritten, never chained: refs maps raw refs to safe refs and
 // no safe ref is itself a raw key, so walking a slice shared by several

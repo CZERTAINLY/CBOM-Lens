@@ -330,14 +330,17 @@ func TestGolden_1_7(t *testing.T) {
 	require.Equal(t, string(want), buf.String())
 }
 
-// TestGoldens_AgreeOnSuiteAlgorithmRefs cross-checks the two spec versions
-// against each other. They canonicalize cipherSuites[].algorithms through
-// independent code paths -- 1.6 through the Builder's reflection rewriter, 1.7
-// through canonicalizeSuiteAlgorithms -- so agreement is evidence the values
-// are right, not merely self-consistent.
+// TestGoldens_AgreeOnSuiteAlgorithmRefs pins that the 1.7 emitter neither
+// rewrites nor drops the cipherSuites[].algorithms refs the Builder produced.
+// Builder.model runs the reflection rewriter for both spec versions, so the
+// two emitters start from the same refs; canonicalizeSuiteAlgorithms then
+// keeps each one through its already-an-asset branch.
 //
 // A divergence means one emitter names a different asset than the other for
-// the same cipher suite, which is a defect in whichever one is wrong.
+// the same cipher suite, which is a defect in whichever one is wrong. Note the
+// limit: both goldens are read from disk and both descend from that one
+// rewriter, so this catches emitter divergence, not a rewriter bug that
+// regenerates the two files consistently.
 func TestGoldens_AgreeOnSuiteAlgorithmRefs(t *testing.T) {
 	read := func(name string) map[string][]cdx.BOMReference {
 		raw, err := os.ReadFile(filepath.Join("testdata", "golden", name))
@@ -347,6 +350,9 @@ func TestGoldens_AgreeOnSuiteAlgorithmRefs(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &bom))
 		require.NotNil(t, bom.Components)
 
+		// Keyed by suite name: the corpus has a single protocol component, so
+		// names are unique. A second one would collapse same-named suites and
+		// quietly narrow the comparison.
 		out := map[string][]cdx.BOMReference{}
 		for _, compo := range *bom.Components {
 			if compo.CryptoProperties == nil || compo.CryptoProperties.ProtocolProperties == nil {

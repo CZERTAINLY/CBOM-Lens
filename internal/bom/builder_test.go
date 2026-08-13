@@ -558,9 +558,9 @@ func TestReplaceBOMReferences(t *testing.T) {
 		// cdx.BOMReference is a string type, so an element of a
 		// []cdx.BOMReference reaches the walker as a bare reflect.String
 		// with no enclosing struct field to match on. cryptoRefArray is
-		// one of the two such sites the nmap converter fills
-		// (internal/cdxprops/nmap.go:273-274); cipherSuites[].algorithms,
-		// covered by the next subtest, is the other.
+		// one of the two such sites the nmap converter fills (see cdxprops'
+		// tlsCipherToCompos); cipherSuites[].algorithms, covered by the next
+		// subtest, is the other.
 		refs := map[string]string{
 			"cert@raw": "crypto/certificate/host@safe",
 		}
@@ -1113,11 +1113,11 @@ func TestValidateAs_RejectsUnreadableSpecVersion(t *testing.T) {
 // TestBuilder_RepeatedEmitIsStable pins that emitting twice yields identical
 // bytes when ref-holding slices are shared between components.
 //
-// The rewriter mutates in place, and the nmap converter hands ONE
-// *[]cdx.BOMReference to every protocol component on a port
-// (internal/cdxprops/nmap.go:113-116), so a shared array is walked once per
-// sharer. That is safe only while rewriting cannot chain — no safe ref may be
-// a raw ref key — which TestBuilder_SafeRefsAreAFixedPoint states directly.
+// The rewriter mutates in place, and cdxprops' per-port loop passes ONE
+// *[]cdx.BOMReference to every tlsCipherToCompos call, so a shared array is
+// walked once per sharing component. That is safe only while rewriting cannot
+// chain — no safe ref may be a raw ref key — which
+// TestBuilder_SafeRefsAreAFixedPoint states directly.
 func TestBuilder_RepeatedEmitIsStable(t *testing.T) {
 	for _, version := range []string{"1.6", "1.7"} {
 		t.Run(version, func(t *testing.T) {

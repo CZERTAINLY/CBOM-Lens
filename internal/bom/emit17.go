@@ -257,10 +257,10 @@ func mapComponent17(ctx context.Context, c *cdx.Component, rels []cdx.RelatedCry
 // with a warning.
 //
 // The Builder's reflection rewriter canonicalizes these elements before a
-// model built by it reaches the emitter, so the safeRef branch is defence in
-// depth for a model that arrives some other way — a converter emitting Rels
-// natively, or a caller assembling a cbom.BOMModel directly. Both branches
-// are exercised by TestCanonicalizeSuiteAlgorithms.
+// model built by it reaches the emitter, so the safeRef branch is unreachable
+// on that path. It is kept so the function is total for any cbom.BOMModel
+// rather than only for the one the Builder produces;
+// TestCanonicalizeSuiteAlgorithms exercises it directly.
 func canonicalizeSuiteAlgorithms(ctx context.Context, suite *cdx.CipherSuite, assetRefs map[string]struct{}) {
 	if suite.Algorithms == nil {
 		return
