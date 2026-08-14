@@ -1084,15 +1084,57 @@ type safeRefs struct {
 	refs refs
 }
 
+// safeRefs maps every stored component's raw bom-ref to its safe one, such that
+// no safe ref is also a raw ref of some component in the same document.
+//
+// That property is what makes the rewrite idempotent, and the rewrite has to be
+// idempotent because safeRefs.component walks each stored component on every
+// render and rewrites through the pointers it holds -- so the second render
+// walks values the first already rewrote. Were a safe ref S also component B's
+// raw ref, a value already rewritten to S would be rewritten again on the next
+// pass, to B's safe ref: a reference silently repointed at the wrong component.
+//
+// safeRef alone does not give the property. It is derived, not chosen: nothing
+// stops a producer from emitting a raw ref that happens to equal another ref's
+// UUIDv5 form -- feeding an already-canonicalised document back through the
+// Builder is the mundane way to get there. So collisions are resolved here
+// instead of assumed away: a safe ref that lands on a raw ref, or on a safe ref
+// already handed out, is re-derived over its own previous value until it lands
+// clear. Re-derivation is deterministic and the loop terminates because each
+// step hashes a different input out of a 2^122 space with at most len(raw)
+// values excluded.
+//
+// Iteration is over sorted refs, not the components map, so the assignment does
+// not depend on Go's map order: with a collision to resolve, whichever ref is
+// visited first keeps the unsuffixed form, and that has to be the same ref on
+// every run or two renders of one Builder would disagree.
 func (b Builder) safeRefs() safeRefs {
-	var refs = make(map[string]string, len(b.components))
+	raw := make(map[string]struct{}, len(b.components))
 	for _, compop := range b.components {
 		if compop == nil {
 			continue
 		}
-		if _, ok := refs[compop.BOMRef]; !ok {
-			refs[compop.BOMRef] = safeRef(compop.BOMRef)
+		raw[compop.BOMRef] = struct{}{}
+	}
+
+	var refs = make(map[string]string, len(raw))
+	taken := make(map[string]struct{}, len(raw))
+	for _, bomRef := range slices.Sorted(maps.Keys(raw)) {
+		safe := safeRef(bomRef)
+		// A safe ref equal to its own raw ref is already a fixed point and is
+		// not a collision: rewriting it is a no-op, not a chain.
+		for safe != bomRef {
+			if _, isRaw := raw[safe]; !isRaw {
+				if _, isTaken := taken[safe]; !isTaken {
+					break
+				}
+			}
+			slog.Warn("bom-ref collides with another component's ref: re-deriving",
+				"ref", bomRef, "collision", safe)
+			safe = safeRef(safe)
 		}
+		refs[bomRef] = safe
+		taken[safe] = struct{}{}
 	}
 	return safeRefs{refs: refs}
 }
@@ -1150,10 +1192,14 @@ var bomReferenceType = reflect.TypeFor[cdx.BOMReference]()
 // the walker in refintegrity_test.go, turning TestBOMReferentialIntegrity_1_6
 // red rather than shipping a dangling ref.
 //
-// Refs are only rewritten, never chained: refs maps raw refs to safe refs and
-// no safe ref is itself a raw key, so walking a slice shared by several
-// components (nmap hands one cryptoRefArray to every protocol component on a
-// port) is idempotent. TestBuilder_RepeatedEmitIsStable pins that.
+// Refs are only rewritten, never chained: no safe ref is itself a raw key, so
+// re-walking a value this already rewrote is a no-op. That is what makes
+// rewriting safe across renders, since safeRefs.component walks the stored
+// components in place every time. Builder.safeRefs enforces the property rather
+// than assuming it, by re-deriving a safe ref that collides;
+// TestBuilder_SafeRefsAreAFixedPoint states it over the map and
+// TestBuilder_SafeRefsSurviveRawRefCollision drives the collision itself.
+// TestBuilder_RepeatedEmitIsStable pins the emitted bytes.
 func replaceBOMReferences(refs map[string]string, v reflect.Value) {
 	if !v.IsValid() {
 		return

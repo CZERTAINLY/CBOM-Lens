@@ -4488,6 +4488,65 @@ func TestBuilder_SafeRefsAreAFixedPoint(t *testing.T) {
 	}
 }
 
+// TestBuilder_SafeRefsSurviveRawRefCollision drives the collision the fixed-point
+// property above rules out, which the corpus cannot reach on its own.
+//
+// The setup is the adversarial one: component B's raw bom-ref IS the safe ref
+// component A's raw ref derives to. Left unresolved, A's ref rewrites to that
+// value and the next pass -- and safeRefs.component walks the stored components
+// again on every render -- rewrites it once more, to B's safe ref, silently
+// repointing every reference to A at B.
+//
+// It asserts the invariant rather than the specific re-derived string, because
+// which value the resolution lands on is an implementation detail and pinning it
+// would make the test a change-detector. What must hold is that no safe ref is a
+// raw ref, that the two components still get different safe refs, and that
+// emitting twice yields the same bytes.
+func TestBuilder_SafeRefsSurviveRawRefCollision(t *testing.T) {
+	const rawA = "crypto/algorithm/aes@raw"
+	collision := safeRef(rawA)
+
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+
+	compo := func(ref, name string) *cdx.Component {
+		return &cdx.Component{
+			BOMRef: ref, Name: name, Type: cdx.ComponentTypeCryptographicAsset,
+			CryptoProperties: &cdx.CryptoProperties{AssetType: cdx.CryptoAssetTypeAlgorithm},
+		}
+	}
+	b.components[rawA] = compo(rawA, "AES-128")
+	b.components[collision] = compo(collision, "collider")
+	b = b.WithClock(func() time.Time { return time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC) }).
+		WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" })
+
+	refs := b.safeRefs()
+
+	// The property the rewrite rests on, over the colliding map.
+	for raw, safe := range refs.refs {
+		require.NotContains(t, refs.refs, safe,
+			"safe ref %q (from %q) is itself a raw ref key: rewriting would chain", safe, raw)
+	}
+
+	// Both components remain addressable and distinct: a resolution that
+	// collapsed them would merge two assets into one.
+	require.NotEqual(t, refs.refs[rawA], refs.refs[collision])
+	require.Len(t, refs.refs, 2)
+
+	// The collision is resolved by moving the ref that is ALSO a raw ref, so the
+	// component that owns that raw ref keeps a ref of its own.
+	require.NotEqual(t, collision, refs.refs[rawA],
+		"rawA must not keep a safe ref that is another component's raw ref")
+
+	// Same map twice: the resolution cannot depend on Go's map iteration order.
+	require.Equal(t, refs.refs, b.safeRefs().refs)
+
+	var first, second bytes.Buffer
+	require.NoError(t, b.AsJSON(t.Context(), &first))
+	require.NoError(t, b.AsJSON(t.Context(), &second))
+	require.Equal(t, first.String(), second.String())
+}
+
 // sharedRefArrayBuilder returns a Builder whose two protocol components share
 // one cryptoRefArray backing slice, mirroring what the nmap converter builds
 // for a port offering two TLS versions.
