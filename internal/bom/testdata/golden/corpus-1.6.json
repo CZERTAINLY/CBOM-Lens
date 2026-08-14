@@ -780,8 +780,8 @@
             {
               "name": "TLS_AKE_WITH_AES_128_GCM_SHA256",
               "algorithms": [
-                "crypto/algorithm/aes-128-gcm@sha256:eba74aba1360630b92c4fa07d5920b01dca555dae748eb1a4671b76f61763dee",
-                "crypto/algorithm/SHA256@sha256:692805caccd5d10a24c5f2607f1b2f92365d45637bbffb19327571938ff523f1"
+                "crypto/algorithm/aes-128-gcm@b0c6374d-6ab0-5cdd-a10a-412060f21e16",
+                "crypto/algorithm/SHA256@9009abfe-c0cd-599f-95a5-4b7c65f570d8"
               ],
               "identifiers": [
                 "0x13",
@@ -791,8 +791,8 @@
             {
               "name": "TLS_AKE_WITH_AES_256_GCM_SHA384",
               "algorithms": [
-                "crypto/algorithm/aes-256-gcm@sha256:fae137f8ede9ab0261320d5b0beb9495a96cccdbb0a2c9927069a97a5c5c47a1",
-                "crypto/algorithm/SHA384@sha256:a8e74cac63b436f2f31be1f23f252e84d4f5549731e6a71907ecc9dbaa37335c"
+                "crypto/algorithm/aes-256-gcm@c8f92754-5ea7-515c-b5c4-392f1c485015",
+                "crypto/algorithm/SHA384@b659ddf2-124c-5dde-b2ba-43851968b66a"
               ],
               "identifiers": [
                 "0x13",
@@ -802,8 +802,8 @@
             {
               "name": "TLS_AKE_WITH_CHACHA20_POLY1305_SHA256",
               "algorithms": [
-                "crypto/algorithm/chacha20-poly1305@sha256:0412f91c044da1c8efc045a41876c2b7fe44c30aff1bd9023b0493c9f8d46181",
-                "crypto/algorithm/SHA256@sha256:692805caccd5d10a24c5f2607f1b2f92365d45637bbffb19327571938ff523f1"
+                "crypto/algorithm/chacha20-poly1305@fbfdaa89-9547-56e3-b63a-63194d00154a",
+                "crypto/algorithm/SHA256@9009abfe-c0cd-599f-95a5-4b7c65f570d8"
               ],
               "identifiers": [
                 "0x13",
@@ -812,7 +812,7 @@
             }
           ],
           "cryptoRefArray": [
-            "crypto/certificate/www.ssllabs.com@sha256:9c4ae7bf5170ee7598b8de289e1be7fe54c254d440c24a587958000c2e1a82bb"
+            "crypto/certificate/www.ssllabs.com@b59efab1-b010-5368-a919-058e7246d835"
           ]
         },
         "oid": "1.3.6.1.5.5.7.6.2"

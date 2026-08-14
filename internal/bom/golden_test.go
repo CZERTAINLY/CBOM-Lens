@@ -566,10 +566,10 @@ func TestGolden_1_7(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, v.ValidateBytes(buf.Bytes()), "1.7 output must validate against the 1.7 schema set")
 
-	// Zero tolerance for dangling refs in 1.7 (unlike 1.6's frozen allowlist).
+	// Zero tolerance for dangling refs, the same line 1.6 holds.
 	var bom17 cdx.BOM
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &bom17))
-	assertRefIntegrity(t, &bom17, nil)
+	assertNoDanglingRefs(t, &bom17)
 
 	// Parsing coverage (#175 acceptance): the document must round-trip
 	// through the library decoder, not just encoding/json.
@@ -646,4 +646,50 @@ func TestGolden_1_7(t *testing.T) {
 	want, err := os.ReadFile(path)
 	require.NoError(t, err, "run: go test ./internal/bom -run TestGolden_1_7 -update")
 	require.Equal(t, string(want), buf.String())
+}
+
+// TestGoldens_AgreeOnSuiteAlgorithmRefs pins that the 1.7 emitter neither
+// rewrites nor drops the cipherSuites[].algorithms refs the Builder produced.
+// Builder.model runs the reflection rewriter for both spec versions, so the
+// two emitters start from the same refs; canonicalizeSuiteAlgorithms then
+// keeps each one through its already-an-asset branch.
+//
+// A divergence means one emitter names a different asset than the other for
+// the same cipher suite, which is a defect in whichever one is wrong. Note the
+// limit: both goldens are read from disk and both descend from that one
+// rewriter, so this catches emitter divergence, not a rewriter bug that
+// regenerates the two files consistently.
+func TestGoldens_AgreeOnSuiteAlgorithmRefs(t *testing.T) {
+	read := func(name string) map[string][]cdx.BOMReference {
+		raw, err := os.ReadFile(filepath.Join("testdata", "golden", name))
+		require.NoError(t, err)
+
+		var bom cdx.BOM
+		require.NoError(t, json.Unmarshal(raw, &bom))
+		require.NotNil(t, bom.Components)
+
+		// Keyed by suite name: the corpus has a single protocol component, so
+		// names are unique. A second one would collapse same-named suites and
+		// quietly narrow the comparison.
+		out := map[string][]cdx.BOMReference{}
+		for _, compo := range *bom.Components {
+			if compo.CryptoProperties == nil || compo.CryptoProperties.ProtocolProperties == nil {
+				continue
+			}
+			suites := compo.CryptoProperties.ProtocolProperties.CipherSuites
+			if suites == nil {
+				continue
+			}
+			for _, suite := range *suites {
+				if suite.Algorithms != nil {
+					out[suite.Name] = *suite.Algorithms
+				}
+			}
+		}
+		return out
+	}
+
+	got16 := read("corpus-1.6.json")
+	require.NotEmpty(t, got16, "1.6 corpus exercises no cipher suites: the comparison would be vacuous")
+	require.Equal(t, got16, read("corpus-1.7.json"))
 }

@@ -252,12 +252,16 @@ func mapComponent17(ctx context.Context, c *cdx.Component, rels []cdx.RelatedCry
 	}
 }
 
-// canonicalizeSuiteAlgorithms repairs cipherSuites[].algorithms entries: the
-// production reflection rewriter misses []cdx.BOMReference elements (known
-// 1.6 defect, frozen there for byte-compat), so raw pre-canonical refs reach
-// the emitter. Keep entries that are already asset refs, canonicalize raw
-// ones whose safeRef form resolves, drop the rest with a warning — 1.7
-// output must have zero dangling refs.
+// canonicalizeSuiteAlgorithms holds cipherSuites[].algorithms to 1.7's
+// requirement of zero dangling refs: keep an entry that already names an
+// asset, canonicalize one whose safeRef form names an asset, drop the rest
+// with a warning.
+//
+// The Builder's reflection rewriter canonicalizes these elements before a
+// model built by it reaches the emitter, so the safeRef branch is unreachable
+// on that path. It is kept so the function is total for any cbom.BOMModel
+// rather than only for the one the Builder produces;
+// TestCanonicalizeSuiteAlgorithms exercises it directly.
 func canonicalizeSuiteAlgorithms(ctx context.Context, suite *cdx.CipherSuite, assetRefs map[string]struct{}) {
 	if suite.Algorithms == nil {
 		return

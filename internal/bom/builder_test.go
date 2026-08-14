@@ -1414,6 +1414,132 @@ func TestReplaceBOMReferences(t *testing.T) {
 			replaceBOMReferences(refs, reflect.Value{})
 		})
 	})
+
+	t.Run("replace BOMReference slice elements", func(t *testing.T) {
+		// cdx.BOMReference is a string type, so an element of a
+		// []cdx.BOMReference reaches the walker as a bare reflect.String
+		// with no enclosing struct field to match on. cryptoRefArray is
+		// one of the two such sites the nmap converter fills (see cdxprops'
+		// tlsCipherToCompos); cipherSuites[].algorithms, covered by the next
+		// subtest, is the other.
+		refs := map[string]string{
+			"cert@raw": "crypto/certificate/host@safe",
+		}
+
+		array := []cdx.BOMReference{"cert@raw"}
+		compo := cdx.Component{
+			CryptoProperties: &cdx.CryptoProperties{
+				ProtocolProperties: &cdx.CryptoProtocolProperties{CryptoRefArray: &array},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		require.Equal(t, []cdx.BOMReference{"crypto/certificate/host@safe"},
+			*compo.CryptoProperties.ProtocolProperties.CryptoRefArray)
+	})
+
+	t.Run("replace BOMReference elements nested in cipher suites", func(t *testing.T) {
+		// Two pointer-slice hops below the component: cipherSuites is a
+		// *[]CipherSuite whose Algorithms is itself a *[]BOMReference.
+		refs := map[string]string{
+			"aes@raw":    "crypto/algorithm/aes-128-gcm@safe",
+			"sha256@raw": "crypto/algorithm/SHA256@safe",
+		}
+
+		algorithms := []cdx.BOMReference{"aes@raw", "sha256@raw"}
+		suites := []cdx.CipherSuite{{Name: "TLS_AES_128_GCM_SHA256", Algorithms: &algorithms}}
+		compo := cdx.Component{
+			CryptoProperties: &cdx.CryptoProperties{
+				ProtocolProperties: &cdx.CryptoProtocolProperties{CipherSuites: &suites},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		got := *(*compo.CryptoProperties.ProtocolProperties.CipherSuites)[0].Algorithms
+		require.Equal(t, []cdx.BOMReference{
+			"crypto/algorithm/aes-128-gcm@safe",
+			"crypto/algorithm/SHA256@safe",
+		}, got)
+	})
+
+	t.Run("leave unknown slice elements untouched", func(t *testing.T) {
+		// A ref with no component keeps its original value rather than
+		// being blanked, so refintegrity still reports it as dangling.
+		refs := map[string]string{"known@raw": "known@safe"}
+
+		array := []cdx.BOMReference{"known@raw", "ghost@raw", ""}
+		compo := cdx.Component{
+			CryptoProperties: &cdx.CryptoProperties{
+				ProtocolProperties: &cdx.CryptoProtocolProperties{CryptoRefArray: &array},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		require.Equal(t, []cdx.BOMReference{"known@safe", "ghost@raw", ""},
+			*compo.CryptoProperties.ProtocolProperties.CryptoRefArray)
+	})
+
+	t.Run("empty ref is never rewritten", func(t *testing.T) {
+		// safeRefs() maps every component's BOMRef unconditionally, so a
+		// component with an empty BOMRef puts "" in the map. Without the
+		// empty-string guard every unset BOMReference in the document would
+		// be rewritten to point at that component.
+		refs := map[string]string{"": "crypto/algorithm/ghost@safe"}
+
+		array := []cdx.BOMReference{""}
+		compo := cdx.Component{
+			CryptoProperties: &cdx.CryptoProperties{
+				CertificateProperties: &cdx.CertificateProperties{SignatureAlgorithmRef: ""},
+				ProtocolProperties:    &cdx.CryptoProtocolProperties{CryptoRefArray: &array},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		require.Equal(t, []cdx.BOMReference{""}, *compo.CryptoProperties.ProtocolProperties.CryptoRefArray)
+		require.Empty(t, compo.CryptoProperties.CertificateProperties.SignatureAlgorithmRef)
+	})
+
+	t.Run("rewrite only BOMReference, not every string", func(t *testing.T) {
+		// The walker matches on type identity, not reflect.String kind. A
+		// plain string field that happens to equal a raw ref — a component
+		// name, a property value — must survive untouched.
+		refs := map[string]string{"aes@raw": "crypto/algorithm/aes@safe"}
+
+		props := []cdx.Property{{Name: "ilm:source", Value: "aes@raw"}}
+		compo := cdx.Component{
+			Name:       "aes@raw",
+			Version:    "aes@raw",
+			Properties: &props,
+			CryptoProperties: &cdx.CryptoProperties{
+				RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
+					AlgorithmRef: "aes@raw",
+				},
+			},
+		}
+
+		replaceBOMReferences(refs, reflect.ValueOf(&compo))
+
+		require.Equal(t, "aes@raw", compo.Name)
+		require.Equal(t, "aes@raw", compo.Version)
+		require.Equal(t, "aes@raw", (*compo.Properties)[0].Value)
+		require.Equal(t, cdx.BOMReference("crypto/algorithm/aes@safe"),
+			compo.CryptoProperties.RelatedCryptoMaterialProperties.AlgorithmRef)
+	})
+
+	t.Run("handle unaddressable BOMReference", func(t *testing.T) {
+		// Map values and non-pointer roots arrive unaddressable; the
+		// walker must skip them instead of panicking in SetString.
+		refs := map[string]string{"old-ref": "new-ref"}
+
+		require.NotPanics(t, func() {
+			replaceBOMReferences(refs, reflect.ValueOf(cdx.BOMReference("old-ref")))
+			replaceBOMReferences(refs, reflect.ValueOf(map[string]cdx.BOMReference{"k": "old-ref"}))
+		})
+	})
 }
 
 func TestBuilder_SafeRefs(t *testing.T) {
@@ -2595,11 +2721,11 @@ func TestAppendDetection_DoesNotMutateCollidingDetection(t *testing.T) {
 }
 
 // TestAppendDetection_CloneLeavesTransformSlicesAsTheyCame pins the one thing
-// cloneTransforms must not do: change the value it is copying.
+// cloneBackingArray must not do: change the value it is copying.
 //
 // The three shapes a *[]T arrives in are not interchangeable in the emitted
 // document. A nil POINTER omits the field, a non-nil pointer to a NIL slice
-// emits null, and a non-nil pointer to an EMPTY slice emits []. cloneTransforms
+// emits null, and a non-nil pointer to an EMPTY slice emits []. cloneBackingArray
 // has to detach the backing array of a populated slice without promoting either
 // of the other two, and its guard returns both untouched precisely because
 // there is no backing array to protect.
@@ -2651,7 +2777,7 @@ func TestAppendDetection_CloneLeavesTransformSlicesAsTheyCame(t *testing.T) {
 
 	// The populated slice is the one the clone must detach; that half is pinned
 	// by TestBuilder_BOMDoesNotMutateCallerRefs. Here it only has to still hold
-	// its element, so a cloneTransforms that dropped content would be caught.
+	// its element, so a cloneBackingArray that dropped content would be caught.
 	require.NotNil(t, emitted.Encr)
 	require.Len(t, *emitted.Encr, 1)
 	require.Equal(t, cdx.BOMReference(safeRef(algRef)), (*emitted.Encr)[0].BOMRef)
@@ -4321,4 +4447,143 @@ func dependsOnOf(t *testing.T, doc cdx.BOM, ref string) []string {
 		return *dep.Dependencies
 	}
 	return nil
+}
+
+// TestBuilder_RepeatedEmitIsStable pins that emitting twice yields identical
+// bytes when ref-holding slices are shared between components.
+//
+// The rewriter mutates in place, and cdxprops' per-port loop passes ONE
+// *[]cdx.BOMReference to every tlsCipherToCompos call, so a shared array is
+// walked once per sharing component. That is safe only while rewriting cannot
+// chain — no safe ref may be a raw ref key — which
+// TestBuilder_SafeRefsAreAFixedPoint states directly.
+func TestBuilder_RepeatedEmitIsStable(t *testing.T) {
+	for _, version := range []string{"1.6", "1.7"} {
+		t.Run(version, func(t *testing.T) {
+			b := sharedRefArrayBuilder(t, version)
+
+			var first, second bytes.Buffer
+			require.NoError(t, b.AsJSON(t.Context(), &first))
+			require.NoError(t, b.AsJSON(t.Context(), &second))
+
+			require.Equal(t, first.String(), second.String())
+			// Guard against both emissions being equally empty.
+			require.Contains(t, first.String(), "TLS_AKE_WITH_AES_128_GCM_SHA256")
+		})
+	}
+}
+
+// TestBuilder_SafeRefsAreAFixedPoint is the invariant the in-place rewrite of
+// shared slices rests on: applying the rewrite to its own output must be a
+// no-op, which holds only while no generated safe ref is also a raw ref key.
+func TestBuilder_SafeRefsAreAFixedPoint(t *testing.T) {
+	b := sharedRefArrayBuilder(t, "1.6")
+
+	refs := b.safeRefs()
+
+	require.NotEmpty(t, refs.refs)
+	for raw, safe := range refs.refs {
+		require.NotContains(t, refs.refs, safe,
+			"safe ref %q (from %q) is itself a raw ref key: rewriting would chain", safe, raw)
+	}
+}
+
+// TestBuilder_SafeRefsSurviveRawRefCollision drives the collision the fixed-point
+// property above rules out, which the corpus cannot reach on its own.
+//
+// The setup is the adversarial one: component B's raw bom-ref IS the safe ref
+// component A's raw ref derives to. Left unresolved, A's ref rewrites to that
+// value and the next pass -- and safeRefs.component walks the stored components
+// again on every render -- rewrites it once more, to B's safe ref, silently
+// repointing every reference to A at B.
+//
+// It asserts the invariant rather than the specific re-derived string, because
+// which value the resolution lands on is an implementation detail and pinning it
+// would make the test a change-detector. What must hold is that no safe ref is a
+// raw ref, that the two components still get different safe refs, and that
+// emitting twice yields the same bytes.
+func TestBuilder_SafeRefsSurviveRawRefCollision(t *testing.T) {
+	const rawA = "crypto/algorithm/aes@raw"
+	collision := safeRef(rawA)
+
+	b, err := NewBuilder(model.CBOM{Version: "1.6"})
+	require.NoError(t, err)
+
+	compo := func(ref, name string) *cdx.Component {
+		return &cdx.Component{
+			BOMRef: ref, Name: name, Type: cdx.ComponentTypeCryptographicAsset,
+			CryptoProperties: &cdx.CryptoProperties{AssetType: cdx.CryptoAssetTypeAlgorithm},
+		}
+	}
+	b.components[rawA] = compo(rawA, "AES-128")
+	b.components[collision] = compo(collision, "collider")
+	b = b.WithClock(func() time.Time { return time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC) }).
+		WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" })
+
+	refs := b.safeRefs()
+
+	// The property the rewrite rests on, over the colliding map.
+	for raw, safe := range refs.refs {
+		require.NotContains(t, refs.refs, safe,
+			"safe ref %q (from %q) is itself a raw ref key: rewriting would chain", safe, raw)
+	}
+
+	// Both components remain addressable and distinct: a resolution that
+	// collapsed them would merge two assets into one.
+	require.NotEqual(t, refs.refs[rawA], refs.refs[collision])
+	require.Len(t, refs.refs, 2)
+
+	// The collision is resolved by moving the ref that is ALSO a raw ref, so the
+	// component that owns that raw ref keeps a ref of its own.
+	require.NotEqual(t, collision, refs.refs[rawA],
+		"rawA must not keep a safe ref that is another component's raw ref")
+
+	// Same map twice: the resolution cannot depend on Go's map iteration order.
+	require.Equal(t, refs.refs, b.safeRefs().refs)
+
+	var first, second bytes.Buffer
+	require.NoError(t, b.AsJSON(t.Context(), &first))
+	require.NoError(t, b.AsJSON(t.Context(), &second))
+	require.Equal(t, first.String(), second.String())
+}
+
+// sharedRefArrayBuilder returns a Builder whose two protocol components share
+// one cryptoRefArray backing slice, mirroring what the nmap converter builds
+// for a port offering two TLS versions.
+func sharedRefArrayBuilder(t *testing.T, version string) *Builder {
+	t.Helper()
+
+	b, err := NewBuilder(model.CBOM{Version: version})
+	require.NoError(t, err)
+
+	b.components["cert@raw"] = &cdx.Component{
+		BOMRef: "cert@raw", Name: "cert", Type: cdx.ComponentTypeCryptographicAsset,
+		CryptoProperties: &cdx.CryptoProperties{AssetType: cdx.CryptoAssetTypeCertificate},
+	}
+	b.components["aes@raw"] = &cdx.Component{
+		BOMRef: "aes@raw", Name: "aes-128-gcm", Type: cdx.ComponentTypeCryptographicAsset,
+		CryptoProperties: &cdx.CryptoProperties{AssetType: cdx.CryptoAssetTypeAlgorithm},
+	}
+
+	shared := []cdx.BOMReference{"cert@raw"}
+	for _, name := range []string{"tls@1.2", "tls@1.3"} {
+		suites := []cdx.CipherSuite{{
+			Name:       "TLS_AKE_WITH_AES_128_GCM_SHA256",
+			Algorithms: &[]cdx.BOMReference{"aes@raw"},
+		}}
+		b.components[name] = &cdx.Component{
+			BOMRef: name, Name: "tls", Type: cdx.ComponentTypeCryptographicAsset,
+			CryptoProperties: &cdx.CryptoProperties{
+				AssetType: cdx.CryptoAssetTypeProtocol,
+				ProtocolProperties: &cdx.CryptoProtocolProperties{
+					Type:           cdx.CryptoProtocolTypeTLS,
+					CryptoRefArray: &shared, // one slice, both components
+					CipherSuites:   &suites,
+				},
+			},
+		}
+	}
+
+	return b.WithClock(func() time.Time { return time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC) }).
+		WithSerial(func() string { return "urn:uuid:11111111-1111-1111-1111-111111111111" })
 }

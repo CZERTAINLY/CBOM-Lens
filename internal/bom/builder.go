@@ -236,23 +236,28 @@ func (b *Builder) appendDetection(ctx context.Context, detection model.Detection
 // RelatedCryptoMaterialProperties, because mergeRelatedCryptoMaterialFormat
 // writes format into it and, on the arm where the stored component has none,
 // hangs a freshly allocated one off cryptoProperties. CertificateProperties,
-// RelatedCryptoMaterialProperties.SecuredBy and the five transform slices under
-// ProtocolProperties.IKEv2TransformTypes, because replaceBOMReferences is a
-// reflect walk that rewrites every cdx.BOMReference-typed struct field in
-// place, on every stored component, on every render. Those nine fields are the
-// walk's entire reach within one component; the ikev2 ones had nothing watching
-// them, since no producer here emits ikev2TransformTypes.
+// RelatedCryptoMaterialProperties.SecuredBy, the five transform slices under
+// ProtocolProperties.IKEv2TransformTypes, ProtocolProperties.CryptoRefArray and
+// the Algorithms slice inside each ProtocolProperties.CipherSuites entry,
+// because replaceBOMReferences is a reflect walk that rewrites every
+// cdx.BOMReference it can reach in place, on every stored component, on every
+// render. That is the walk's entire reach within one component; the ikev2 ones
+// had nothing watching them, since no producer here emits ikev2TransformTypes.
 //
-// Deliberately not copied, and why that is safe. AlgorithmProperties,
-// ProtocolProperties.CipherSuites and ProtocolProperties.CryptoRefArray: no
-// Builder code writes any of them, and emit17's mapComponent17, which does,
-// takes its own copy in emit17.cloneComponent first. That is why the two helpers
-// stay separate and differently shaped -- one shared helper would over-copy at
-// both call sites and would falsify emit17's promise to clone only what
-// mapComponent17 writes. CipherSuites.Algorithms and CryptoRefArray also survive
-// the reflect walk for a structural reason worth knowing: both are
-// []cdx.BOMReference, and the walk substitutes BOMReference-typed FIELDS OF A
-// STRUCT, never elements of a slice of them. Component.Components and
+// The last two are here because the walk grew (#205). It used to substitute
+// BOMReference-typed FIELDS OF A STRUCT and never elements of a slice of them,
+// which is what let cryptoRefArray and cipherSuites[].algorithms -- both
+// []cdx.BOMReference -- be left aliased to the caller. Now that those elements
+// are rewritten too, not copying them writes the Builder's safe refs back into
+// the detection the caller still holds.
+//
+// Deliberately not copied, and why that is safe. AlgorithmProperties, and the
+// CipherSuites fields other than Algorithms: no Builder code writes any of them,
+// and emit17's mapComponent17, which does, takes its own copy in
+// emit17.cloneComponent first. That is why the two helpers stay separate and
+// differently shaped -- one shared helper would over-copy at both call sites and
+// would falsify emit17's promise to clone only what mapComponent17 writes.
+// Component.Components and
 // Component.Pedigree are the one place the walk could still reach caller memory
 // -- a nested component re-exposes all nine paths -- but nothing in this repo
 // ever builds a nested component or a pedigree, so the walk never descends
@@ -283,13 +288,15 @@ func cloneOnStore(compo cdx.Component) cdx.Component {
 	}
 	if cp.ProtocolProperties != nil {
 		pp := *cp.ProtocolProperties
+		pp.CryptoRefArray = cloneBackingArray(pp.CryptoRefArray)
+		pp.CipherSuites = cloneCipherSuites(pp.CipherSuites)
 		if pp.IKEv2TransformTypes != nil {
 			tt := *pp.IKEv2TransformTypes
-			tt.Encr = cloneTransforms(tt.Encr)
-			tt.PRF = cloneTransforms(tt.PRF)
-			tt.Integ = cloneTransforms(tt.Integ)
-			tt.KE = cloneTransforms(tt.KE)
-			tt.Auth = cloneTransforms(tt.Auth)
+			tt.Encr = cloneBackingArray(tt.Encr)
+			tt.PRF = cloneBackingArray(tt.PRF)
+			tt.Integ = cloneBackingArray(tt.Integ)
+			tt.KE = cloneBackingArray(tt.KE)
+			tt.Auth = cloneBackingArray(tt.Auth)
 			pp.IKEv2TransformTypes = &tt
 		}
 		cp.ProtocolProperties = &pp
@@ -299,22 +306,41 @@ func cloneOnStore(compo cdx.Component) cdx.Component {
 	return compo
 }
 
-// cloneTransforms copies the backing array behind one IKEv2 transform-type
-// slice, so replaceBOMReferences rewrites the Builder's elements and not the
-// caller's. Copying the IKEv2TransformTypes struct alone would not do it: its
-// fields are slice pointers, and the BOMRefs the walk writes live in the
-// elements.
+// cloneBackingArray copies the array behind one ref-holding slice -- an IKEv2
+// transform-type slice, a cryptoRefArray, or one suite's algorithms -- so
+// replaceBOMReferences rewrites the Builder's elements and not the caller's.
+// Copying the enclosing struct alone would not do it: these fields are slice
+// pointers, and the BOMRefs the walk writes live in the elements.
 //
 // A nil pointer, and a non-nil pointer to a nil slice, are returned as they
 // came: there is no backing array to protect, and replacing the latter with an
 // allocated empty slice would turn a null into a [] in the emitted document.
-func cloneTransforms[T any](p *[]T) *[]T {
+func cloneBackingArray[T any](p *[]T) *[]T {
 	if p == nil || *p == nil {
 		return p
 	}
 	out := make([]T, len(*p))
 	copy(out, *p)
 	return &out
+}
+
+// cloneCipherSuites detaches the refs the walk rewrites inside a cipher-suite
+// slice: the suite array itself, and the algorithms array within each suite.
+//
+// Both hops are needed. Copying only the outer array leaves every suite's
+// Algorithms pointer aliased to the caller's, and that inner slice is where the
+// BOMRefs live; copying only the inner arrays would mean writing the new
+// pointers into the caller's suite structs. The other suite fields are shared
+// on purpose -- nothing in the Builder writes them.
+func cloneCipherSuites(p *[]cdx.CipherSuite) *[]cdx.CipherSuite {
+	suites := cloneBackingArray(p)
+	if suites == nil {
+		return suites
+	}
+	for i := range *suites {
+		(*suites)[i].Algorithms = cloneBackingArray((*suites)[i].Algorithms)
+	}
+	return suites
 }
 
 // missingIdentity reports whether a component lacks the bom-ref and/or name
@@ -1058,15 +1084,57 @@ type safeRefs struct {
 	refs refs
 }
 
+// safeRefs maps every stored component's raw bom-ref to its safe one, such that
+// no safe ref is also a raw ref of some component in the same document.
+//
+// That property is what makes the rewrite idempotent, and the rewrite has to be
+// idempotent because safeRefs.component walks each stored component on every
+// render and rewrites through the pointers it holds -- so the second render
+// walks values the first already rewrote. Were a safe ref S also component B's
+// raw ref, a value already rewritten to S would be rewritten again on the next
+// pass, to B's safe ref: a reference silently repointed at the wrong component.
+//
+// safeRef alone does not give the property. It is derived, not chosen: nothing
+// stops a producer from emitting a raw ref that happens to equal another ref's
+// UUIDv5 form -- feeding an already-canonicalised document back through the
+// Builder is the mundane way to get there. So collisions are resolved here
+// instead of assumed away: a safe ref that lands on a raw ref, or on a safe ref
+// already handed out, is re-derived over its own previous value until it lands
+// clear. Re-derivation is deterministic and the loop terminates because each
+// step hashes a different input out of a 2^122 space with at most len(raw)
+// values excluded.
+//
+// Iteration is over sorted refs, not the components map, so the assignment does
+// not depend on Go's map order: with a collision to resolve, whichever ref is
+// visited first keeps the unsuffixed form, and that has to be the same ref on
+// every run or two renders of one Builder would disagree.
 func (b Builder) safeRefs() safeRefs {
-	var refs = make(map[string]string, len(b.components))
+	raw := make(map[string]struct{}, len(b.components))
 	for _, compop := range b.components {
 		if compop == nil {
 			continue
 		}
-		if _, ok := refs[compop.BOMRef]; !ok {
-			refs[compop.BOMRef] = safeRef(compop.BOMRef)
+		raw[compop.BOMRef] = struct{}{}
+	}
+
+	var refs = make(map[string]string, len(raw))
+	taken := make(map[string]struct{}, len(raw))
+	for _, bomRef := range slices.Sorted(maps.Keys(raw)) {
+		safe := safeRef(bomRef)
+		// A safe ref equal to its own raw ref is already a fixed point and is
+		// not a collision: rewriting it is a no-op, not a chain.
+		for safe != bomRef {
+			if _, isRaw := raw[safe]; !isRaw {
+				if _, isTaken := taken[safe]; !isTaken {
+					break
+				}
+			}
+			slog.Warn("bom-ref collides with another component's ref: re-deriving",
+				"ref", bomRef, "collision", safe)
+			safe = safeRef(safe)
 		}
+		refs[bomRef] = safe
+		taken[safe] = struct{}{}
 	}
 	return safeRefs{refs: refs}
 }
@@ -1090,8 +1158,64 @@ func safeRef(bomRef string) string {
 	return before + "@" + uid.String()
 }
 
+// bomReferenceType is the Go type both replaceBOMReferences and the
+// referential-integrity walker in refintegrity_test.go treat as a bom-ref, so
+// they cannot disagree about the type. They are not otherwise symmetric: the
+// walker also classifies name-shaped plain-string fields (ref, dependsOn,
+// *Ref) as uses, and the rewriter never touches those -- they are populated
+// after canonicalization or handled separately in model.
+var bomReferenceType = reflect.TypeFor[cdx.BOMReference]()
+
+// replaceBOMReferences rewrites every settable cdx.BOMReference reachable from
+// v to its safe ref. A value with no entry in refs is left alone, so a
+// dangling ref stays visibly dangling instead of being blanked into an
+// invisible one.
+//
+// v must be a pointer or otherwise addressable: the walker rewrites in place,
+// and a struct passed by value yields unsettable fields it skips silently.
+//
+// The type check sits outside the Kind switch because cdx.BOMReference is a
+// string type. A BOMReference that is not directly a struct field — an
+// element of a []cdx.BOMReference such as cryptoRefArray or
+// cipherSuites[].algorithms, or a *cdx.BOMReference — arrives here as a bare
+// reflect.String, and a check reachable only from the Struct branch never
+// sees it (issue #205).
+//
+// Settability is the limit of in-place rewriting, and it turns on how the
+// value is held rather than on the container: a map value or interface holding
+// a BOMReference *directly* is unsettable and skipped, as is a struct held
+// directly as a map value, but one held through a pointer or slice from the
+// same place is settable and is rewritten. cyclonedx-go has no map, interface
+// or array field at all today, so none of this is reachable. A release
+// introducing one fails TestCycloneDXRefFieldInventory, which pins the ref
+// field types; and any such ref the corpus populates is reported as a use by
+// the walker in refintegrity_test.go, turning TestBOMReferentialIntegrity_1_6
+// red rather than shipping a dangling ref.
+//
+// Refs are only rewritten, never chained: no safe ref is itself a raw key, so
+// re-walking a value this already rewrote is a no-op. That is what makes
+// rewriting safe across renders, since safeRefs.component walks the stored
+// components in place every time. Builder.safeRefs enforces the property rather
+// than assuming it, by re-deriving a safe ref that collides;
+// TestBuilder_SafeRefsAreAFixedPoint states it over the map and
+// TestBuilder_SafeRefsSurviveRawRefCollision drives the collision itself.
+// TestBuilder_RepeatedEmitIsStable pins the emitted bytes.
 func replaceBOMReferences(refs map[string]string, v reflect.Value) {
 	if !v.IsValid() {
+		return
+	}
+
+	if v.Type() == bomReferenceType {
+		// Map values and non-pointer roots are unaddressable; SetString
+		// would panic on them.
+		if !v.CanSet() {
+			return
+		}
+		if old := v.String(); old != "" {
+			if safe, ok := refs[old]; ok {
+				v.SetString(safe)
+			}
+		}
 		return
 	}
 
@@ -1114,18 +1238,7 @@ func replaceBOMReferences(refs map[string]string, v reflect.Value) {
 			if !field.CanSet() {
 				continue
 			}
-
-			// Check if this field is a BOMReference
-			if field.Type() == reflect.TypeFor[cdx.BOMReference]() {
-				oldRef := field.Interface().(cdx.BOMReference)
-				if oldRef != "" {
-					if safeRef, ok := refs[string(oldRef)]; ok {
-						field.SetString(safeRef)
-					}
-				}
-			} else {
-				replaceBOMReferences(refs, field)
-			}
+			replaceBOMReferences(refs, field)
 		}
 
 	case reflect.Slice, reflect.Array:

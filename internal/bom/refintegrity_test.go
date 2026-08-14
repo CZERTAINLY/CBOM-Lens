@@ -35,8 +35,6 @@ const (
 	refFieldUse               // points at a bom-ref defined elsewhere
 )
 
-var bomReferenceType = reflect.TypeFor[cdx.BOMReference]()
-
 // classifyRefField decides whether a cyclonedx-go struct field defines a
 // bom-ref, uses one, or is irrelevant to referential integrity. It is shared
 // by the collectBOMRefs walker and the TestCycloneDXRefFieldInventory
@@ -234,14 +232,16 @@ func danglingBOMRefs(bom *cdx.BOM) []refSite {
 	return dangling
 }
 
-// assertRefIntegrity fails the test unless the dangling (ref, site) pairs in
-// bom match allowlist exactly, in both directions. Occurrences are pinned,
-// not just distinct values: a new dangling site that reuses an already
-// allowlisted value still fails. Non-fatal by design — it reports every
-// violation in both directions before failing (hence assert*, not the
-// package-usual require*). A nil allowlist requires a fully resolving
-// document.
-func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]string) {
+// assertNoDanglingRefs fails the test unless every ref-shaped use in bom
+// resolves to a bom-ref defined in the same document. Occurrences are
+// reported, not just distinct values, so two sites sharing one unresolvable
+// value are two findings. Non-fatal by design — it reports every violation
+// before failing (hence assert*, not the package-usual require*).
+//
+// Every emitted document must fully resolve, in both spec versions: one that
+// cannot is a rewriter or emitter bug to fix rather than a set of sites to pin
+// (issues #180, #205).
+func assertNoDanglingRefs(t *testing.T, bom *cdx.BOM) {
 	t.Helper()
 
 	actual := make(map[string][]string)
@@ -257,169 +257,41 @@ func assertRefIntegrity(t *testing.T, bom *cdx.BOM, allowlist map[string][]strin
 	var unexpected strings.Builder
 	for _, ref := range slices.Sorted(maps.Keys(actual)) {
 		for _, path := range actual[ref] {
-			if !slices.Contains(allowlist[ref], path) {
-				fmt.Fprintf(&unexpected, "  %s\n    at %s\n", ref, path)
-			}
+			fmt.Fprintf(&unexpected, "  %s\n    at %s\n", ref, path)
 		}
 	}
 	if unexpected.Len() > 0 {
-		t.Errorf("BOM contains dangling ref sites not on the allowlist:\n%s"+
-			"fix the rewriter/emitter, do not extend the allowlist", unexpected.String())
-	}
-
-	for _, ref := range slices.Sorted(maps.Keys(allowlist)) {
-		for _, path := range allowlist[ref] {
-			if !slices.Contains(actual[ref], path) {
-				t.Errorf("allowlisted ref no longer dangles at %s: %s\nremove it from the allowlist", path, ref)
-			}
-		}
+		t.Errorf("BOM contains dangling ref sites:\n%s"+
+			"fix the rewriter/emitter", unexpected.String())
 	}
 }
 
-// tlsProtocolPath locates the TLS protocol component holding all dangling
-// sites pinned by testdata/golden/corpus-1.6.json, and returns the path to
-// its protocolProperties field.
+// TestBOMReferentialIntegrity_1_6 requires a fully resolving 1.6 document.
 //
-// This used to be a hand-maintained positional index into bom.Components:
-// assets sort by ref, so anything added to the corpus that sorts before
-// crypto/protocol/tls shifted it. It was 24 until the CSR and CRL entries
-// landed -- crypto/crl/... and crypto/csr/... sort between
-// crypto/certificate/... and crypto/key/... -- and the same drift was bound
-// to repeat with every future addition. Locating the component by its own
-// identifying properties instead -- asset type "protocol" plus a
-// "crypto/protocol/tls@" bom-ref prefix -- removes the dependency on sibling
-// component ordering entirely.
-func tlsProtocolPath(t *testing.T, bom *cdx.BOM) string {
-	t.Helper()
-
-	const bomRefPrefix = "crypto/protocol/tls@"
-	idx := -1
-	if bom.Components != nil {
-		for i, c := range *bom.Components {
-			if c.CryptoProperties == nil || c.CryptoProperties.AssetType != cdx.CryptoAssetTypeProtocol {
-				continue
-			}
-			if !strings.HasPrefix(c.BOMRef, bomRefPrefix) {
-				continue
-			}
-			if idx != -1 {
-				t.Fatalf("multiple TLS protocol components found in bom: components[%d] and components[%d] both have "+
-					"asset type %q and bom-ref prefix %q", idx, i, cdx.CryptoAssetTypeProtocol, bomRefPrefix)
-			}
-			idx = i
-		}
-	}
-	if idx == -1 {
-		t.Fatalf("no TLS protocol component found in bom: expected exactly one component with "+
-			"asset type %q and bom-ref prefix %q", cdx.CryptoAssetTypeProtocol, bomRefPrefix)
-	}
-	return fmt.Sprintf("components[%d].cryptoProperties.protocolProperties", idx)
-}
-
-// knownDanglingRefs16 pins every dangling occurrence (ref -> exact sites) in
-// testdata/golden/corpus-1.6.json. Root cause: replaceBOMReferences in
-// builder.go skips []cdx.BOMReference elements, so cipherSuites[*].algorithms
-// and cryptoRefArray keep the original content-hash refs while the components
-// they point at are rewritten to safe refs (issue #180). Whether 1.6 output
-// should be canonicalized to fix them is a pending maintainer decision.
-//
-// Do NOT add entries here: a new dangling ref — or a new site reusing one of
-// these values — means a rewriter/emitter bug.
-func knownDanglingRefs16(t *testing.T, bom *cdx.BOM) map[string][]string {
-	t.Helper()
-	tlsProtoPath := tlsProtocolPath(t, bom)
-	return map[string][]string{
-		"crypto/algorithm/SHA256@sha256:692805caccd5d10a24c5f2607f1b2f92365d45637bbffb19327571938ff523f1": {
-			tlsProtoPath + ".cipherSuites[0].algorithms[1]",
-			tlsProtoPath + ".cipherSuites[2].algorithms[1]",
-		},
-		"crypto/algorithm/SHA384@sha256:a8e74cac63b436f2f31be1f23f252e84d4f5549731e6a71907ecc9dbaa37335c": {
-			tlsProtoPath + ".cipherSuites[1].algorithms[1]",
-		},
-		"crypto/algorithm/aes-128-gcm@sha256:eba74aba1360630b92c4fa07d5920b01dca555dae748eb1a4671b76f61763dee": {
-			tlsProtoPath + ".cipherSuites[0].algorithms[0]",
-		},
-		"crypto/algorithm/aes-256-gcm@sha256:fae137f8ede9ab0261320d5b0beb9495a96cccdbb0a2c9927069a97a5c5c47a1": {
-			tlsProtoPath + ".cipherSuites[1].algorithms[0]",
-		},
-		"crypto/algorithm/chacha20-poly1305@sha256:0412f91c044da1c8efc045a41876c2b7fe44c30aff1bd9023b0493c9f8d46181": {
-			tlsProtoPath + ".cipherSuites[2].algorithms[0]",
-		},
-		"crypto/certificate/www.ssllabs.com@sha256:9c4ae7bf5170ee7598b8de289e1be7fe54c254d440c24a587958000c2e1a82bb": {
-			tlsProtoPath + ".cryptoRefArray[0]",
-		},
-	}
-}
-
+// A document with no ref uses resolves perfectly and proves nothing, so the
+// corpus is also required to still exercise the two slice-held shapes,
+// cipherSuites[].algorithms and cryptoRefArray. Naming the shapes beats a
+// count floor: they all live on the one TLS protocol component, so dropping it
+// removes every one of them while leaving a total comfortably above any round
+// number.
 func TestBOMReferentialIntegrity_1_6(t *testing.T) {
 	ctx := t.Context()
 	bom := goldenBuilder(t).AppendDetections(ctx, fixtureDetections(t)...).BOM(ctx)
-	assertRefIntegrity(t, &bom, knownDanglingRefs16(t, &bom))
-}
 
-// TestTLSProtocolPath_SurvivesCorpusGrowth reproduces the exact regression
-// tlsProtocolPath replaced a hardcoded index to prevent: a new corpus fixture
-// whose bom-ref sorts before "crypto/protocol/tls@" (as crypto/crl/... and
-// crypto/csr/... did, shifting the TLS component from index 24 to 26) used
-// to silently repoint the old hardcoded tlsProtoPath constant at whatever
-// component happened to land at that index.
-//
-// It builds two synthetic BOMs -- "before" and "after" a growth event -- and
-// shows tlsProtocolPath tracks the protocol component's real position in
-// both, while a stale index carried over from "before" (mimicking the old
-// approach) resolves to the wrong component in "after".
-func TestTLSProtocolPath_SurvivesCorpusGrowth(t *testing.T) {
-	protoComponent := cdx.Component{
-		BOMRef: "crypto/protocol/tls@1",
-		CryptoProperties: &cdx.CryptoProperties{
-			AssetType: cdx.CryptoAssetTypeProtocol,
-		},
-	}
-	certComponent := func(ref string) cdx.Component {
-		return cdx.Component{
-			BOMRef: ref,
-			CryptoProperties: &cdx.CryptoProperties{
-				AssetType: cdx.CryptoAssetTypeCertificate,
-			},
+	assertNoDanglingRefs(t, &bom)
+
+	_, uses := collectBOMRefs(&bom)
+	var suiteAlgorithms, cryptoRefArray int
+	for _, use := range uses {
+		switch {
+		case strings.Contains(use.Path, "cipherSuites") && strings.Contains(use.Path, "algorithms"):
+			suiteAlgorithms++
+		case strings.Contains(use.Path, "cryptoRefArray"):
+			cryptoRefArray++
 		}
 	}
-
-	// "Before growth": the TLS protocol component sits at index 2. A
-	// maintainer using the old approach would have hardcoded that index.
-	before := cdx.BOM{Components: &[]cdx.Component{
-		certComponent("crypto/certificate/a@1"),
-		certComponent("crypto/certificate/b@1"),
-		protoComponent,
-	}}
-	const oldHardcodedIndex = 2
-
-	gotBefore := tlsProtocolPath(t, &before)
-	require.Equal(t, fmt.Sprintf("components[%d].cryptoProperties.protocolProperties", oldHardcodedIndex), gotBefore)
-
-	// "After growth": a new fixture (e.g. a CRL or CSR entry) sorts before
-	// crypto/protocol/tls@, shifting the protocol component's index without
-	// changing anything about the protocol component itself.
-	after := cdx.BOM{Components: &[]cdx.Component{
-		certComponent("crypto/certificate/a@1"),
-		certComponent("crypto/crl/new@1"), // newly added; sorts before crypto/protocol/tls@
-		certComponent("crypto/certificate/b@1"),
-		protoComponent,
-	}}
-	const wantIndex = 3
-
-	gotAfter := tlsProtocolPath(t, &after)
-	require.Equal(t, fmt.Sprintf("components[%d].cryptoProperties.protocolProperties", wantIndex), gotAfter,
-		"tlsProtocolPath must track the protocol component even after corpus growth shifts its index")
-
-	// Contrast: applying the stale hardcoded index from "before" to "after"
-	// resolves to the wrong component entirely -- this is exactly how the
-	// old positional-index approach broke under corpus growth.
-	oldResolved := (*after.Components)[oldHardcodedIndex]
-	require.NotEqual(t, protoComponent.BOMRef, oldResolved.BOMRef,
-		"sanity check: the stale hardcoded index must no longer point at the TLS protocol component")
-	require.Equal(t, "crypto/certificate/b@1", oldResolved.BOMRef,
-		"with the old hardcoded-index approach, this corpus growth would have silently repointed "+
-			"tlsProtoPath at %q instead of the TLS protocol component", oldResolved.BOMRef)
+	require.NotZero(t, suiteAlgorithms, "corpus no longer exercises cipherSuites[].algorithms refs")
+	require.NotZero(t, cryptoRefArray, "corpus no longer exercises cryptoRefArray refs")
 }
 
 // refFieldInventory walks the exported struct-type graph reachable from
@@ -571,10 +443,8 @@ func TestDanglingBOMRefs(t *testing.T) {
 		want []refSite
 	}{
 		{
-			// THE bug class of issue #180: replaceBOMReferences recurses into
-			// slices element-by-element, but its BOMReference check only fires
-			// on struct fields, so elements of a []cdx.BOMReference are never
-			// rewritten and dangle.
+			// A ref inside a []cdx.BOMReference has no struct field of its
+			// own. The path walker must report it like any other use.
 			name: "dangling []BOMReference element is caught",
 			bom: cdx.BOM{
 				Components: &[]cdx.Component{{
@@ -804,4 +674,117 @@ func TestWalkBOMRefs_BOMReferenceHoist(t *testing.T) {
 
 	require.Empty(t, defs)
 	require.Equal(t, []refSite{{Path: "extra[key]", Ref: "crypto/algorithm/missing@1"}}, uses)
+}
+
+// maxPlantDepth bounds the sentinel-planting walk. cdx.Component is
+// self-referential (Components, Pedigree.Ancestors, ...), so the value graph
+// is infinite. 12 clears the deepest ref-bearing shape the emitters use --
+// protocolProperties.ikev2TransformTypes.encr[].BOMRef, at depth 11 -- with
+// one hop to spare. Raising it grows the planted count; a shape landing deeper
+// than this is planted nowhere and silently uncovered.
+const maxPlantDepth = 12
+
+// TestReplaceBOMReferences_ReachesEveryRefSlot is the upgrade tripwire for the
+// production rewriter. It plants a sentinel in every cdx.BOMReference slot
+// plantRefSentinels can reach -- through pointers, structs and slices, to
+// maxPlantDepth -- rewrites, and names any slot that survived.
+//
+// It complements TestCycloneDXRefFieldInventory rather than duplicating it:
+// that test fires when the ref field set changes, this one fires when a field
+// the planter can write the rewriter cannot. Neither catches a ref moved
+// behind a map or an interface, because the planter cannot reach those either;
+// that shows up as an inventory diff for a human to read.
+func TestReplaceBOMReferences_ReachesEveryRefSlot(t *testing.T) {
+	const sentinel = "crypto/algorithm/sentinel@raw"
+
+	var compo cdx.Component
+	planted := plantRefSentinels(reflect.ValueOf(&compo), sentinel, 0)
+	t.Logf("planted %d sentinel refs", planted)
+
+	// Anti-vacuity: the walk must reach a useful number of slots, and at
+	// minimum the two slice-held shapes, or a planting bug would make the
+	// assertion below trivially true. The count is of slots, not fields --
+	// Component is self-referential, so the same field is planted again in
+	// each nested subtree. The floor is deliberately well below today's count:
+	// a cyclonedx-go upgrade may legitimately move it.
+	require.Greater(t, planted, 25,
+		"the planting walk reached far fewer slots than expected: it, not the rewriter, is broken")
+
+	require.NotNil(t, compo.CryptoProperties)
+	require.NotNil(t, compo.CryptoProperties.ProtocolProperties)
+	pp := compo.CryptoProperties.ProtocolProperties
+	require.NotNil(t, pp.CryptoRefArray)
+	require.NotEmpty(t, *pp.CryptoRefArray)
+	require.Equal(t, cdx.BOMReference(sentinel), (*pp.CryptoRefArray)[0])
+	require.NotNil(t, pp.CipherSuites)
+	require.NotEmpty(t, *pp.CipherSuites)
+	require.NotNil(t, (*pp.CipherSuites)[0].Algorithms)
+	require.NotEmpty(t, *(*pp.CipherSuites)[0].Algorithms)
+	require.Equal(t, cdx.BOMReference(sentinel), (*(*pp.CipherSuites)[0].Algorithms)[0])
+
+	replaceBOMReferences(map[string]string{sentinel: "crypto/algorithm/sentinel@safe"},
+		reflect.ValueOf(&compo))
+
+	bom := cdx.BOM{Components: &[]cdx.Component{compo}}
+	_, uses := collectBOMRefs(&bom)
+	var missed []string
+	for _, use := range uses {
+		if use.Ref == sentinel {
+			missed = append(missed, use.Path)
+		}
+	}
+
+	require.Empty(t, missed,
+		"replaceBOMReferences could not rewrite %d of %d planted refs", len(missed), planted)
+}
+
+// plantRefSentinels sets every settable cdx.BOMReference reachable from v
+// through pointers, structs and slices within maxPlantDepth to ref,
+// allocating nil pointers and one-element slices on the way down, and returns
+// how many slots it planted. Map, interface and array shapes are not walked.
+func plantRefSentinels(v reflect.Value, ref string, depth int) int {
+	if !v.IsValid() || depth > maxPlantDepth {
+		return 0
+	}
+
+	if v.Type() == bomReferenceType {
+		if !v.CanSet() {
+			return 0
+		}
+		v.SetString(ref)
+		return 1
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			if !v.CanSet() {
+				return 0
+			}
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		return plantRefSentinels(v.Elem(), ref, depth+1)
+
+	case reflect.Struct:
+		planted := 0
+		for i := range v.NumField() {
+			planted += plantRefSentinels(v.Field(i), ref, depth+1)
+		}
+		return planted
+
+	case reflect.Slice:
+		if v.IsNil() {
+			if !v.CanSet() {
+				return 0
+			}
+			v.Set(reflect.MakeSlice(v.Type(), 1, 1))
+		}
+		planted := 0
+		for i := range v.Len() {
+			planted += plantRefSentinels(v.Index(i), ref, depth+1)
+		}
+		return planted
+	}
+
+	return 0
 }

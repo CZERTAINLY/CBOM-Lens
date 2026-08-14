@@ -267,3 +267,62 @@ func TestEmit17_RepeatedEmitIsStable(t *testing.T) {
 	// cannot pass by both emissions being equally empty.
 	require.Contains(t, first.String(), "relatedCryptographicAssets")
 }
+
+// TestCanonicalizeSuiteAlgorithms covers both repair branches directly. The
+// Builder canonicalizes cipherSuites[].algorithms before the emitter sees
+// them, so a model built through the Builder never reaches the safeRef
+// branch — only a direct test keeps that path honest.
+func TestCanonicalizeSuiteAlgorithms(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []cdx.BOMReference
+		want  []cdx.BOMReference // nil: the field must be omitted, not emitted empty
+	}{
+		{
+			name:  "already-canonical ref is kept verbatim",
+			input: []cdx.BOMReference{cdx.BOMReference(safeRef("alg@raw"))},
+			want:  []cdx.BOMReference{cdx.BOMReference(safeRef("alg@raw"))},
+		},
+		{
+			name:  "raw ref is canonicalized to its safeRef form",
+			input: []cdx.BOMReference{"alg@raw"},
+			want:  []cdx.BOMReference{cdx.BOMReference(safeRef("alg@raw"))},
+		},
+		{
+			name:  "ref naming no asset is dropped",
+			input: []cdx.BOMReference{"ghost@raw"},
+			want:  nil,
+		},
+		{
+			name:  "a dropped ref does not disturb its neighbours",
+			input: []cdx.BOMReference{"ghost@raw", "alg@raw"},
+			want:  []cdx.BOMReference{cdx.BOMReference(safeRef("alg@raw"))},
+		},
+	}
+
+	assetRefs := map[string]struct{}{safeRef("alg@raw"): {}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suite := cdx.CipherSuite{Name: "TLS_X", Algorithms: &tt.input}
+
+			canonicalizeSuiteAlgorithms(t.Context(), &suite, assetRefs)
+
+			if tt.want == nil {
+				require.Nil(t, suite.Algorithms, "an empty result must omit algorithms, not emit []")
+				return
+			}
+			require.NotNil(t, suite.Algorithms)
+			require.Equal(t, tt.want, *suite.Algorithms)
+		})
+	}
+}
+
+func TestCanonicalizeSuiteAlgorithms_NilAlgorithms(t *testing.T) {
+	suite := cdx.CipherSuite{Name: "TLS_X"}
+
+	require.NotPanics(t, func() {
+		canonicalizeSuiteAlgorithms(t.Context(), &suite, map[string]struct{}{})
+	})
+	require.Nil(t, suite.Algorithms)
+}
