@@ -11,6 +11,7 @@ import (
 	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -263,6 +264,101 @@ func GenCRL(cert *x509.Certificate, priv crypto.Signer) (*x509.RevocationList, [
 		return nil, nil, fmt.Errorf("failed to parse generated CRL: %w", err)
 	}
 	return crl, der, nil
+}
+
+// oidSignatureSHA256WithRSA is sha256WithRSAEncryption, RFC 4055 sec. 5. It is
+// the signature algorithm CertWithSPKI stamps on every certificate it builds,
+// and it is deliberately an algorithm no subjectPublicKeyInfo under test will
+// ever carry.
+var oidSignatureSHA256WithRSA = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
+
+// spkiCertificate, spkiTBSCertificate and spkiValidity mirror RFC 5280 sec.
+// 4.1's Certificate, TBSCertificate and Validity. crypto/x509 declares the same
+// three structures unexported (crypto/x509's certificate, tbsCertificate and
+// validity), so they are restated here rather than reused.
+//
+// Version is omitted entirely: RFC 5280 sec. 4.1.2.1 makes it DEFAULT v1, and a
+// v1 certificate is the one shape whose tbsCertificate the parser only reads
+// (crypto/x509's processExtensions runs inside `if cert.Version > 1`).
+//
+// PublicKey is an asn1.RawValue rather than a typed SubjectPublicKeyInfo so
+// that the caller's bytes go out untouched -- encoding/asn1's marshal emits a
+// RawValue's FullBytes verbatim when they are non-empty, which is the whole
+// point of this helper.
+type spkiCertificate struct {
+	TBSCertificate     spkiTBSCertificate
+	SignatureAlgorithm pkix.AlgorithmIdentifier
+	SignatureValue     asn1.BitString
+}
+
+type spkiTBSCertificate struct {
+	SerialNumber       *big.Int
+	SignatureAlgorithm pkix.AlgorithmIdentifier
+	Issuer             asn1.RawValue
+	Validity           spkiValidity
+	Subject            asn1.RawValue
+	PublicKey          asn1.RawValue
+}
+
+type spkiValidity struct {
+	NotBefore, NotAfter time.Time
+}
+
+// CertWithSPKI assembles a DER certificate whose subjectPublicKeyInfo is spki
+// verbatim, so a test can put an algorithm Go does not know -- or a body that is
+// not a key at all -- exactly where a real certificate carries its public key.
+//
+// CertBuilder cannot do this and no template can. x509.CreateCertificate
+// marshals the public key through x509.MarshalPKIXPublicKey, which knows four
+// algorithms and refuses everything else, so the DER is assembled field by field
+// from RFC 5280 sec. 4.1's Certificate instead.
+//
+// The signature is a placeholder over sha256WithRSAEncryption and does not
+// verify. Nothing needs it to: x509.ParseCertificate checks the structure of
+// signatureValue and never its value, so a certificate
+// this builds parses exactly as a signed one would. The signature algorithm is
+// deliberately NOT the SPKI's, so that a test asserting on "the ML-DSA-65
+// algorithm component" cannot be satisfied by the signature algorithm's
+// component instead.
+//
+// The same pkix.AlgorithmIdentifier value fills the inner and the outer
+// signature field because the parser compares those two encodings byte for byte
+// and refuses the certificate when they differ ("x509: inner and outer
+// signature algorithm identifiers don't match").
+//
+// It emits a v1 certificate. Extensions are the only part of tbsCertificate the
+// parser interprets rather than merely reads, and this helper exists to vary
+// exactly one field.
+func CertWithSPKI(spki []byte) ([]byte, error) {
+	name, err := asn1.Marshal(pkix.Name{CommonName: "spki.example"}.ToRDNSequence())
+	if err != nil {
+		return nil, fmt.Errorf("marshaling the subject name: %w", err)
+	}
+
+	sigAlg := pkix.AlgorithmIdentifier{Algorithm: oidSignatureSHA256WithRSA}
+
+	// Both instants sit inside 1950-2049 so encoding/asn1 writes them as
+	// UTCTime, which is what RFC 5280 sec. 4.1.2.5 requires for those years.
+	der, err := asn1.Marshal(spkiCertificate{
+		TBSCertificate: spkiTBSCertificate{
+			SerialNumber:       big.NewInt(1),
+			SignatureAlgorithm: sigAlg,
+			Issuer:             asn1.RawValue{FullBytes: name},
+			Validity: spkiValidity{
+				NotBefore: time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
+				NotAfter:  time.Date(2040, time.January, 1, 0, 0, 0, 0, time.UTC),
+			},
+			Subject:   asn1.RawValue{FullBytes: name},
+			PublicKey: asn1.RawValue{FullBytes: spki},
+		},
+		SignatureAlgorithm: sigAlg,
+		SignatureValue:     asn1.BitString{Bytes: []byte{0}, BitLength: 8},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling the certificate: %w", err)
+	}
+
+	return der, nil
 }
 
 // GenOpenSSHPrivateKey generates an OpenSSH format private key for testing

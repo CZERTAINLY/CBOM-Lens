@@ -192,7 +192,7 @@ func (c Converter) getAlgorithmProperties(sigAlg x509.SignatureAlgorithm, oidFal
 	if oidFallback != "" && algorithmFamily == "Unknown" {
 		info, ok := unsupportedAlgorithms[oidFallback]
 		if ok {
-			primitive = registryPrimitive(info)
+			primitive = algorithmPrimitive(info)
 			algorithmFamily = info.name
 			paramSetID = info.paramSetID
 			if info.classicalSecurityLevel != nil {

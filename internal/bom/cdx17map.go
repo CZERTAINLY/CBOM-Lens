@@ -134,11 +134,6 @@ var familyExact = map[string]string{
 	// scheme is unknowable from rsaEncryption.
 	"ECDSA": "ECDSA",
 	"DSA":   "DSA",
-	// x509 sig-alg components for PQC carry the fallback algorithmName as
-	// their Name (x509.go: sigAlg.String()=="0" branch) — map those forms.
-	"crypto/algorithm/xmss":    "XMSS",
-	"crypto/algorithm/xmss-mt": "XMSS",
-	"crypto/algorithm/hss-lms": "LMS",
 }
 
 var familyPrefix = []struct{ prefix, family string }{
@@ -150,8 +145,6 @@ var familyPrefix = []struct{ prefix, family string }{
 	{"ML-DSA-", "ML-DSA"},
 	{"ML-KEM-", "ML-KEM"},
 	{"SLH-DSA-", "SLH-DSA"},
-	{"crypto/algorithm/ml-dsa-", "ML-DSA"},   // PQC sig-alg fallback name form
-	{"crypto/algorithm/slh-dsa-", "SLH-DSA"}, // (crypto/algorithm/hqc-* stays unmapped)
 	{"ECDSA-", "ECDSA"},
 	{"DSA-", "DSA"},
 	{"ECDHE-", "ECDH"},

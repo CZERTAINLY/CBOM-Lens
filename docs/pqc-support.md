@@ -3,11 +3,18 @@
 Go's standard library does not parse post-quantum keys, so CBOM-Lens falls back
 to reading the ASN.1 `AlgorithmIdentifier` directly and looking the OID up in a
 hand-maintained registry (`internal/cdxprops/algorithm.go`). This works for PEM
-files (`PUBLIC KEY`, `PRIVATE KEY`) and for X.509 certificates.
+files (`PUBLIC KEY`, `PRIVATE KEY`), for X.509 certificates, and for certificate
+requests — a request's `subjectPublicKeyInfo` is the same structure, and Go
+parses such a request successfully while leaving its key nil.
 
 Because the identifier is all we get, **everything reported comes from the OID
 alone**. Where a property is a function of a parameter set carried inside the
 key rather than of the OID, CBOM-Lens omits it rather than guessing.
+
+That governs what is reported, not whether a key is reported at all: the OID
+establishes that the algorithm is referenced here, and the key body has to hold
+up on its own before a key asset is emitted. See
+[Key body validation](#key-body-validation).
 
 Every value in the registry is transcribed from a primary source and pinned by
 `internal/cdxprops/algorithm_registry_test.go`, whose expectation table is
@@ -126,6 +133,87 @@ BOMRef, which is what lets a reference describe its own contents.
 `TestCertHitToComponents_BOMRefsMatchContents` enforces that generally: it
 re-hashes every emitted `crypto/algorithm/` component and requires the result to
 reproduce its BOMRef, so mutating a component after hashing fails immediately.
+
+## Key body validation
+
+An OID says which algorithm is present. It does not say that the bytes under it
+are a key of that algorithm, and nothing downstream can tell afterwards: a
+component built from an OID and twenty-four bytes of noise validates against the
+schema and reads as a confident report. So a body that cannot be a key of the
+algorithm its OID names yields the algorithm component and **no key component**,
+with a `Warn` line naming the algorithm, the OID, the body length and the
+reason.
+
+**Private keys (PKCS#8).** The block must parse with nothing trailing the
+`PrivateKeyInfo`, and its version must be 0 (RFC 5208) or 1 (RFC 5958's
+`OneAsymmetricKey`, which is what carries a `publicKey`). The `privateKey` body
+is then matched against the CHOICE that RFC 9881 §6 (ML-DSA) and RFC 9935 §6
+(ML-KEM) define, rather than against a length bound — one algorithm has several
+legal body lengths two orders of magnitude apart, so no single bound accepts all
+of them without also accepting noise:
+
+| Encoding | ML-DSA-65 body, header ‖ content (total) | Applies to |
+| --- | --- | --- |
+| `[0] OCTET STRING` of the seed | `80 20` ‖ 32 (34) | ML-DSA, ML-KEM |
+| `SEQUENCE { OCTET STRING seed, OCTET STRING expandedKey }`, two elements and no third | `30 82 0F E6` ‖ 4070 (4074) | ML-DSA, ML-KEM |
+| `OCTET STRING` of the expanded key | `04 82 0F C0` ‖ 4032 (4036) | all sized schemes |
+| the expanded key raw, with no wrapper | — ‖ 4032 (4032) | all sized schemes |
+
+Seed-only is the RECOMMENDED form, and is what `openssl genpkey -provparam
+ml-dsa.output_formats=seed-only` and Node.js write, so a floor at the expanded
+size would drop real keys; a floor at the seed size would accept 32 bytes of
+noise as a full ML-DSA-65 key. The raw alternative is not in the RFC, but a
+producer that skips the wrapper still wrote a real key. SLH-DSA has no seed
+alternative and its private key carries no inner structure, so only the last two
+rows apply to it — a 64-byte SLH-DSA-SHA2-128S body is the whole key.
+
+**Public keys (SPKI).** The `subjectPublicKeyInfo` must parse with nothing
+trailing it; its BIT STRING must declare a `BitLength` equal to
+`len(Bytes) * 8`, since none of these schemes define a key with unused trailing
+bits; and it must hold exactly the byte count the registry states for that
+parameter set.
+
+**XMSS, XMSS-MT and HSS-LMS are exempt from both byte counts.** SP 800-208 puts
+the parameter set inside the key rather than in the OID, so there is no size to
+compare against and no defined body encoding to match. Only an empty body is
+rejected — and, for a public key, the `BitLength` check, which is a property of
+the encoding rather than of the parameter set. Dropping a real key is the worse
+error here.
+
+## Private-key references
+
+A classical private key takes its `bom-ref` from the digest of its own public
+key, which keeps secret material out of the reference and is what makes the two
+halves of one keypair correlatable within the document.
+
+A post-quantum private key cannot do that. The PKCS#8 block yields the version,
+the `privateKeyAlgorithm` and the body; recovering the public half from a seed
+means running key generation, which Go's standard library supports only for
+ML-KEM-768 and ML-KEM-1024 (`crypto/mlkem`), not for ML-DSA or SLH-DSA, and not
+from the expanded-key form at all. So the
+reference hashes the private DER instead, and a post-quantum private key pairs
+with its public counterpart through `algorithmRef` — by algorithm, not by
+keypair. Do not read the classical invariant into the shared
+`crypto/private_key/` prefix.
+
+This is a deliberate trade-off, and it is the only reference on the PEM path
+derived from secret material. It is not the only one in the document: a leaked
+secret's reference is a digest of the secret itself, and everything below
+applies there with far less entropy behind it — a password or token is short
+enough to guess offline, not merely to confirm. The document carries a digest
+and never the key, and it discloses nothing to anyone who does not already hold
+the key.
+But the derivation is reproducible, and the UUIDv5 rewrite described in
+[CBOM output format](cbom-format.md) hides the digest without breaking it, so
+someone holding a candidate key can confirm from the document that it was
+scanned and read `evidence.occurrences` for where. Content addressing is what
+buys the other side: the same key found at two paths dedupes to one asset, where
+a location-derived reference would move whenever the scan root changed.
+
+RFC 5958's optional `publicKey [1]` field would close this where a producer
+emits it — the public half is then in the block, and a `SubjectPublicKeyInfo`
+could be reconstructed from it and the algorithm. That is a possible follow-up,
+not scheduled work — no issue tracks it today.
 
 ## Test coverage
 
