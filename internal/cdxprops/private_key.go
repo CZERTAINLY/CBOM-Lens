@@ -18,9 +18,32 @@ func (c Converter) PrivateKey(ctx context.Context, id string, key crypto.Private
 	info := privateKeyInfo(key)
 
 	algoCompo = info.componentWOBomRef(c.ilm)
+	// This path stamped no primitive at all, which made the SAME key describe
+	// its algorithm differently depending on which half of the keypair the
+	// scanner found. It was visible in the golden corpus before this change:
+	// one scan of one fixture directory produced
+	// crypto/algorithm/rsa-2048@0e37c10e-... from the certificate and
+	// @a11419cf-... from the private key, two components differing in nothing
+	// but the presence of this field, both named RSA-2048, both oid
+	// 1.2.840.113549.1.1.1. The regenerated corpus carries one such asset,
+	// shared by the public key, the certificate and the private key.
+	setAlgorithmPrimitive(&algoCompo, algorithmPrimitive(info))
 	c.BOMRefHash(&algoCompo, info.algorithmName)
 
 	bomRef := "crypto/private_key/" + strings.ToLower(algoCompo.Name) + "@" + id
+
+	relatedProps := &cdx.RelatedCryptoMaterialProperties{
+		Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
+		AlgorithmRef: cdx.BOMReference(algoCompo.BOMRef),
+	}
+	// Size only when the algorithm states one, the same guard the two other
+	// producers of this field carry. The field is in BITS and a wrong value
+	// validates, so nothing downstream distinguishes "0" from a key that is
+	// really zero bits long -- and privateKeyInfo's default arm yields keySize
+	// 0 for every key type its switch does not name.
+	if info.keySize > 0 {
+		relatedProps.Size = &info.keySize
+	}
 
 	keyCompo = cdx.Component{
 		BOMRef:      bomRef,
@@ -28,13 +51,9 @@ func (c Converter) PrivateKey(ctx context.Context, id string, key crypto.Private
 		Name:        info.name,
 		Description: "Private Key",
 		CryptoProperties: &cdx.CryptoProperties{
-			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
-			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
-				Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
-				AlgorithmRef: cdx.BOMReference(algoCompo.BOMRef),
-				Size:         &info.keySize,
-			},
-			OID: info.oid,
+			AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,
+			RelatedCryptoMaterialProperties: relatedProps,
+			OID:                             info.oid,
 		},
 	}
 	return

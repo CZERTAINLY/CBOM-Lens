@@ -29,6 +29,7 @@ var relatedCryptoType = map[cbom.RelationshipKind]string{
 	cbom.RelSubjectPublicKey:   "publicKey",
 	cbom.RelMaterialAlgorithm:  "algorithm",
 	cbom.RelProtocolCrypto:     "algorithm", // overridden per target asset type
+	cbom.RelRequestedKey:       "publicKey",
 }
 
 func (emit17) Emit(ctx context.Context, m cbom.BOMModel) cdx.BOM {

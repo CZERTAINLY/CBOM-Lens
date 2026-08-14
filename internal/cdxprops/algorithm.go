@@ -39,11 +39,16 @@ type algorithmInfo struct {
 	// make cbom-lens assert something no standard says.
 	nistQuantumSecurityLevel *int
 	pqc                      isPqcInfo
-	// primitive is the CycloneDX cryptographic primitive. Empty means the
-	// caller decides, which is what the classical switch-ladder path relies on
-	// (publicKeyComponents derives signature vs pke from the certificate's
-	// KeyUsage). Registry entries state it, because a KEM is not a signature
-	// scheme and no amount of KeyUsage inspection will turn it into one.
+	// primitive is the CycloneDX cryptographic primitive. Empty now means
+	// "nothing named this algorithm", which is reached only by
+	// extractAlgorithmInfo's Unknown placeholder and by the TLS/SSH literals in
+	// parse_tls.go and nmap.go that stamp their own primitive onto the finished
+	// component. It used to mean "the caller decides", and the caller that
+	// decided was publicKeyComponents, which read the certificate's KeyUsage --
+	// so one RSA key had one algorithm asset seen through a signing certificate
+	// and a different one seen through a CSR. A primitive is a property of the
+	// algorithm, so it is established here, where the algorithm is named, and
+	// nowhere else.
 	primitive cdx.CryptoPrimitive
 }
 
@@ -56,6 +61,13 @@ type pqcInfo struct {
 	privKeySize   int
 	pubKeySize    int
 	signatureSize int
+	// seedSize is the length in bytes of the seed a private key may be stored
+	// as instead of its expanded form, or 0 for a scheme with no seed
+	// encoding. RFC 9881 sec. 6 makes the ML-DSA privateKey field a CHOICE of
+	// seed [0] (32 bytes, and the RECOMMENDED form), expandedKey, or both, so
+	// a stored ML-DSA key is legitimately either 32 bytes or privKeySize.
+	// RFC 9909 sec. 7 gives SLH-DSA no such alternative, so it leaves this 0.
+	seedSize int
 }
 
 func (pqcInfo) isPqcInfo() {}
@@ -69,6 +81,9 @@ type kemInfo struct {
 	encapKeySize   int
 	decapKeySize   int
 	ciphertextSize int
+	// seedSize is the length in bytes of the (d, z) seed pair a decapsulation
+	// key may be stored as instead of its expanded form. See pqcInfo.seedSize.
+	seedSize int
 }
 
 func (kemInfo) isPqcInfo() {}
@@ -96,6 +111,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			privKeySize:   2560,
 			pubKeySize:    1312,
 			signatureSize: 2420,
+			seedSize:      32,
 		},
 	},
 	"2.16.840.1.101.3.4.3.18": {
@@ -115,6 +131,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			privKeySize:   4032,
 			pubKeySize:    1952,
 			signatureSize: 3309,
+			seedSize:      32,
 		},
 	},
 	"2.16.840.1.101.3.4.3.19": {
@@ -134,6 +151,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			privKeySize:   4896,
 			pubKeySize:    2592,
 			signatureSize: 4627,
+			seedSize:      32,
 		},
 	},
 
@@ -405,6 +423,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			encapKeySize:   800,
 			decapKeySize:   1632,
 			ciphertextSize: 768,
+			seedSize:       64,
 		},
 	},
 	"2.16.840.1.101.3.4.4.2": {
@@ -424,6 +443,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			encapKeySize:   1184,
 			decapKeySize:   2400,
 			ciphertextSize: 1088,
+			seedSize:       64,
 		},
 	},
 	"2.16.840.1.101.3.4.4.3": {
@@ -443,6 +463,7 @@ var unsupportedAlgorithms = map[string]algorithmInfo{
 			encapKeySize:   1568,
 			decapKeySize:   3168,
 			ciphertextSize: 1568,
+			seedSize:       64,
 		},
 	},
 
@@ -551,6 +572,16 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 	switch keyType {
 	case "RSA":
 		meta.oid = "1.2.840.113549.1.1.1"
+		// pke, and not signature, for the algorithm the rsaEncryption OID above
+		// names. The 1.6 and 1.7 schemas describe the primitive enum with RSA as
+		// their own worked example of "public-key encryption schemes (pke)" and
+		// ECDSA as their example of "signature", and the specification's 1.7
+		// certificate conformance fixture gives a TLS leaf's rsaEncryption asset
+		// pke while carrying the signing fact on a separate SHA512withRSA asset.
+		// This package emits that second asset too, so nothing is lost by
+		// refusing to duplicate it here -- and a component whose oid says
+		// rsaEncryption and whose primitive says signature contradicts itself.
+		meta.primitive = cdx.CryptoPrimitivePKE
 		// encapsulate/decapsulate are KEM functions. An rsaEncryption key is
 		// not a KEM: it encrypts, decrypts, signs and verifies. This matches
 		// what the ECDSA and Ed25519 cases below declare for themselves.
@@ -583,6 +614,7 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 		}
 
 	case "ECDSA":
+		meta.primitive = cdx.CryptoPrimitiveSignature
 		meta.cryptoFunctions = []cdx.CryptoFunction{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
@@ -630,6 +662,7 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 
 	case "Ed25519":
 		meta.name = "Ed25519"
+		meta.primitive = cdx.CryptoPrimitiveSignature
 		meta.oid = "1.3.101.112" //NOSONAR - this is OID and not IP address
 		meta.paramSetID = "256"
 		meta.keySize = 256
@@ -642,6 +675,7 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 
 	case "DSA":
 		meta.oid = "1.2.840.10040.4.1"
+		meta.primitive = cdx.CryptoPrimitiveSignature
 		meta.cryptoFunctions = []cdx.CryptoFunction{
 			cdx.CryptoFunctionSign,
 			cdx.CryptoFunctionVerify,
@@ -666,8 +700,15 @@ func extractAlgorithmInfo(keyType string, key any) algorithmInfo {
 		}
 
 	default:
+		// No primitive, deliberately: nothing named this algorithm, so nothing
+		// can state what kind of algorithm it is. algorithmPrimitive's fallback
+		// then supplies "signature", which is a wart -- an X25519 certificate
+		// reaches this branch and gets published as a signature scheme -- kept
+		// only because it reproduces today's emitted value exactly, so this
+		// change moves no ref it does not have to. Fixing it means giving the
+		// placeholder a primitive-less component, which is a separate thread.
 		meta.name = "Unknown"
-		meta.oid = "0.0.0.0"
+		meta.oid = oidPlaceholder
 		meta.algorithmName = "crypto/algorithm/unknown"
 	}
 
@@ -711,6 +752,26 @@ func sortedCryptoFunctions(fns []cdx.CryptoFunction) []cdx.CryptoFunction {
 		return strings.Compare(string(a), string(b))
 	})
 	return out
+}
+
+// algorithmPrimitive returns the primitive an algorithmInfo declares, falling
+// back to signature for the one info that declares none.
+//
+// It was called registryPrimitive and took only registry entries, where it
+// exists because hardcoding "signature" at the PKIX and PKCS#8 call sites
+// reported an ML-KEM encapsulation key as a signature scheme. Every producer
+// building a component out of an algorithmInfo now routes through it, so that
+// one algorithmInfo yields one component whichever producer built it: the
+// certificate, the CSR, the bare PUBLIC KEY block, the private key and the
+// registry paths cannot disagree about a value none of them computes.
+//
+// The remaining fallback covers extractAlgorithmInfo's Unknown placeholder and
+// nothing else. See that branch for why it is a wart rather than a rule.
+func algorithmPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
+	if info.primitive != "" {
+		return info.primitive
+	}
+	return cdx.CryptoPrimitiveSignature
 }
 
 func (i algorithmInfo) componentWOBomRef(withIlm bool) cdx.Component {

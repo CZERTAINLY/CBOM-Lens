@@ -40,18 +40,17 @@ Two smaller additions: the `key-wrap` primitive, and `tlsGroups` / `tlsSignature
 
 CBOM-Lens tracks discovered cryptographic components using content-based identifiers (sha256) during the scanning and correlation phase. This approach enables accurate correlation of identical keys or certificates discovered across different contexts—filesystem scans, container images, and network port scans.
 
-However, content-based hashes are unsuitable for the final CBOM output because hash values can potentially be used to reverse-engineer or identify the underlying cryptographic secrets through rainbow tables or brute-force attacks.
+Those hashes are not what the document publishes. A digest printed in a shared artifact is an invitation to match it offline against candidate inputs, and it says more about the scanned material than a reference needs to say in order to do its job, which is to join components inside one document.
 
-To address this security concern, CBOM-Lens post-processes the CBOM after correlation is complete. It replaces each content-based hash with a randomly generated UUID, providing stable yet cryptographically secure identifiers for every component.
+To address this security concern, CBOM-Lens post-processes the CBOM after correlation is complete. It replaces each content-based hash with a UUIDv5 derived from the reference it replaces (`uuid.NewSHA1` over the full pre-rewrite `bom-ref`), so the digest never reaches the document.
 
 **Key characteristics:**
 - **Unique**: Each component receives a distinct identifier within the CBOM
-- **Secure**: UUIDs contain no information about the underlying cryptographic material
-- **Stable (per CBOM document)**: References remain consistent within a single CBOM document
+- **Opaque, not one-way**: the UUID hides the digest but does not break the derivation — it is a deterministic function of the reference, so anyone able to reconstruct that reference can reconstruct the UUID
+- **Stable**: the same component data yields the same reference, and therefore the same UUID, in every document that describes it
 - **Format-preserving**: Original reference format (e.g., `component@hash`) is maintained as `component@uuid`
 
-> [!WARNING]
-> Component references (`bom-ref`) are unique within a single CBOM document only. The same cryptographic component discovered in separate scans will receive different UUIDs in each resulting CBOM.
+Nearly every reference is derived from material that is public anyway — a certificate, a public key, or an algorithm's own description in the document. The one exception is a post-quantum private key, whose reference is derived from secret material; the consequences of the determinism above are set out in [Private-key references](pqc-support.md#private-key-references).
 
 > [!WARNING]
 > A `bom-ref` is derived from the component's contents, so **correcting a component's data moves its

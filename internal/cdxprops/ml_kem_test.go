@@ -14,12 +14,48 @@ import (
 // registered in the NIST CSOR.
 var mlKEM768OID = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}
 
-// synthPKCS8 builds a minimal PKCS#8 PrivateKeyInfo carrying oid.
+// synthPKCS8 builds a minimal PKCS#8 PrivateKeyInfo carrying oid, with a
+// privateKey body the size of that algorithm's expanded private key.
 //
-// unsupportedPKCS8PrivateKey only reads version and privateKeyAlgorithm, so a
-// placeholder privateKey octet string is enough to exercise the real parse
-// path without embedding key material.
+// unsupportedPKCS8PrivateKey never interprets the body as key material, so
+// zero bytes of the right length exercise the real parse path without embedding
+// a key. The length matters: the function refuses to report a key from a body
+// that is not a legal encoding of one, so the old four-byte placeholder would
+// make every sized OID in the sweep return an algorithm and no key, and the
+// sweep's key assertions would be testing the rejection path while claiming to
+// test the happy one.
+//
+// This deliberately uses the EXPANDED size rather than the seed. Both are
+// accepted, and sizing the synthetic body at the seed would make the sweep pass
+// even if the seed alternative stopped being accepted -- which is how real
+// seed-only keys were dropped once already.
+//
+// Algorithms the registry states no size for (XMSS, XMSS-MT, HSS-LMS) get one
+// byte. Nothing can be validated for them, so any non-empty body yields their
+// key -- but the body has to be non-empty: an empty one is refused for every
+// algorithm, and a zero-length body would put those three OIDs back on the
+// rejection path this helper exists to stay off.
 func synthPKCS8(t *testing.T, oid asn1.ObjectIdentifier) []byte {
+	t.Helper()
+
+	info := unsupportedAlgorithms[oid.String()]
+	size := 1
+	switch sizes := info.pqc.(type) {
+	case kemInfo:
+		if sizes.decapKeySize > 0 {
+			size = sizes.decapKeySize
+		}
+	case pqcInfo:
+		if sizes.privKeySize > 0 {
+			size = sizes.privKeySize
+		}
+	}
+	return synthPKCS8Body(t, oid, size)
+}
+
+// synthPKCS8Body is synthPKCS8 with the privateKey body length chosen, so the
+// undersized-body rejection can be driven directly.
+func synthPKCS8Body(t *testing.T, oid asn1.ObjectIdentifier, bodyLen int) []byte {
 	t.Helper()
 
 	der, err := asn1.Marshal(struct {
@@ -29,19 +65,56 @@ func synthPKCS8(t *testing.T, oid asn1.ObjectIdentifier) []byte {
 	}{
 		Version:    0,
 		Algo:       pkix.AlgorithmIdentifier{Algorithm: oid},
-		PrivateKey: []byte{0x04, 0x02, 0xde, 0xad},
+		PrivateKey: make([]byte, bodyLen),
 	})
 	require.NoError(t, err)
 	return der
 }
 
-// synthPKIX builds a minimal SubjectPublicKeyInfo carrying oid.
+// synthPKIX builds a minimal SubjectPublicKeyInfo carrying oid, with a
+// publicKey BIT STRING the size of that algorithm's public key -- its
+// encapsulation key for a KEM.
+//
+// unsupportedPKIX never interprets those bytes as key material, so zeroes of
+// the right length exercise the real parse path without embedding a key. The
+// length matters: the function refuses to report a key from a body that is not
+// exactly the size the registry states, so the old four-byte 0xdeadbeef
+// placeholder would make every sized OID in the sweep return an algorithm and
+// no key, and the sweep's key assertions would be testing the rejection path
+// while claiming to test the happy one. That four-byte body is the literal
+// input the guard was written to refuse.
+//
+// Algorithms the registry states no size for (XMSS, XMSS-MT, HSS-LMS) get one
+// byte, mirroring synthPKCS8. Nothing can be validated for them, so any
+// non-empty body yields their key -- but the body has to be non-empty: an empty
+// one is refused for every algorithm, and a zero-length body would put those
+// three OIDs back on the rejection path this helper exists to stay off.
 func synthPKIX(t *testing.T, oid asn1.ObjectIdentifier) []byte {
+	t.Helper()
+
+	info := unsupportedAlgorithms[oid.String()]
+	size := 1
+	switch sizes := info.pqc.(type) {
+	case kemInfo:
+		if sizes.encapKeySize > 0 {
+			size = sizes.encapKeySize
+		}
+	case pqcInfo:
+		if sizes.pubKeySize > 0 {
+			size = sizes.pubKeySize
+		}
+	}
+	return synthPKIXBody(t, oid, size)
+}
+
+// synthPKIXBody is synthPKIX with the publicKey body length chosen, so the
+// wrong-size rejection can be driven directly.
+func synthPKIXBody(t *testing.T, oid asn1.ObjectIdentifier, bodyLen int) []byte {
 	t.Helper()
 
 	der, err := asn1.Marshal(pkixStruct{
 		Algorithm: pkix.AlgorithmIdentifier{Algorithm: oid},
-		PublicKey: asn1.BitString{Bytes: []byte{0xde, 0xad, 0xbe, 0xef}, BitLength: 32},
+		PublicKey: asn1.BitString{Bytes: make([]byte, bodyLen), BitLength: bodyLen * 8},
 	})
 	require.NoError(t, err)
 	return der
@@ -55,7 +128,7 @@ func TestMLKEM768PKCS8PrivateKey(t *testing.T) {
 	t.Parallel()
 
 	c := NewConverter().WithIlmExtensions(true)
-	algo, err := c.unsupportedPKCS8PrivateKey(synthPKCS8(t, mlKEM768OID))
+	_, algo, err := c.unsupportedPKCS8PrivateKey(t.Context(), synthPKCS8(t, mlKEM768OID))
 	require.NoError(t, err, "an ML-KEM PKCS#8 key must be recognised, not rejected")
 
 	require.Equal(t, "ML-KEM-768", algo.Name)
@@ -91,7 +164,7 @@ func TestMLKEM768PKIXPublicKey(t *testing.T) {
 	t.Parallel()
 
 	c := NewConverter()
-	key, algo, err := c.unsupportedPKIX(synthPKIX(t, mlKEM768OID))
+	key, algo, err := c.unsupportedPKIX(t.Context(), synthPKIX(t, mlKEM768OID))
 	require.NoError(t, err)
 
 	require.Equal(t, "ML-KEM-768", algo.Name)
@@ -111,7 +184,7 @@ func TestSLHDSAPKIXKeepsSignaturePrimitive(t *testing.T) {
 	t.Parallel()
 
 	c := NewConverter()
-	_, algo, err := c.unsupportedPKIX(synthPKIX(t,
+	_, algo, err := c.unsupportedPKIX(t.Context(), synthPKIX(t,
 		asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 20}))
 	require.NoError(t, err)
 

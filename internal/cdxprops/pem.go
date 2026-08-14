@@ -3,28 +3,41 @@ package cdxprops
 import (
 	"context"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 
-// PEMBundleToCDX converts a PEM bundle to CycloneDX components
-func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle, location string) ([]cdx.Component, error) {
+// restOfPEMBundleToCDX converts the parts of a PEM bundle Converter.PEMBundle
+// does not handle itself -- certificate requests, standalone public keys, CRLs,
+// and the blocks the scanner could not parse -- into CycloneDX components.
+//
+// PEMBundle takes the certificates and the keypairs, and calls this for the
+// rest; the name says which half is which.
+func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBundle) ([]cdx.Component, []cdx.Dependency, []cbom.Relationship, error) {
 	components := make([]cdx.Component, 0)
+	var deps []cdx.Dependency
+	var rels []cbom.Relationship
 	var errs []error
 
 	// Convert certificate requests
 	for _, csr := range bundle.CertificateRequests {
-		components = append(components, csrToCDX(csr, location))
+		csrCompos, csrDeps, csrRels := c.csrToCDX(ctx, csr)
+		components = append(components, csrCompos...)
+		deps = append(deps, csrDeps...)
+		rels = append(rels, csrRels...)
 	}
 
 	// Convert public keys
@@ -34,41 +47,154 @@ func (c Converter) restOfPEMBundleToCDX(ctx context.Context, bundle model.PEMBun
 		// publicKeyComponents yields no key component when the key cannot be
 		// identified — a DSA PUBLIC KEY block parses via ParsePKIXPublicKey but
 		// MarshalPKIXPublicKey refuses *dsa.PublicKey, and with no certificate
-		// there is no SPKI to hash instead. Appending the zero Component here
-		// and setting Format on it dereferenced a nil CryptoProperties and took
-		// the whole scan down. The Format assignment was redundant anyway: the
-		// dispatch loop in PEMBundle sets it for every component, nil-checking
-		// first.
-		if pubKeyCompo.BOMRef == "" {
+		// there is no SPKI to hash instead. Appending that absent key and
+		// setting Format on it dereferenced a nil CryptoProperties and took the
+		// whole scan down, which is why the assignment stays out of the
+		// producers. The Format assignment was redundant anyway: PEMBundle's
+		// central setPEMFormat applies it to every component whose asset type is
+		// related-crypto-material, and only those (#213).
+		if pubKeyCompo == nil {
 			continue
 		}
-		components = append(components, pubKeyCompo)
+		components = append(components, *pubKeyCompo)
 	}
 
 	// Convert CRLs
 	for _, crl := range bundle.CRLs {
-		components = append(components, crlToCDX(crl, location))
+		crlCompos, crlDeps := c.crlToCDX(ctx, crl)
+		components = append(components, crlCompos...)
+		deps = append(deps, crlDeps...)
 	}
 
 	// try to parse unrecognized parts of a PEM
 	for _, i := range slices.Sorted(maps.Keys(bundle.ParseErrors)) {
 		parseErr := bundle.ParseErrors[i]
 		block := bundle.RawBlocks[i]
-		compos, err := c.analyzeParseError(block, parseErr)
+		compos, err := c.analyzeParseError(ctx, block, parseErr)
 		if err != nil {
-			errs = append(errs, err)
+			// Say WHICH block failed. errors.Join below flattens every block's
+			// error into one multi-line blob, and PEMBundle logs that blob and
+			// drops it -- so for a file holding several keys under OIDs outside
+			// the registry (no LMS, no XMSS, no composite arcs) the operator got
+			// a wall of "unsupported fallback oid" naming neither the file nor
+			// which key in it, while the BOM's statistics showed nothing amiss.
+			// The index and type are both in hand here and nowhere afterwards.
+			errs = append(errs, fmt.Errorf("pem block %d (%s): %w", i, block.Type, err))
 			continue
 		}
 		components = append(components, compos...)
 	}
 
-	return components, errors.Join(errs...)
+	return components, deps, rels, errors.Join(errs...)
 }
 
-func csrToCDX(csr *x509.CertificateRequest, _ string) cdx.Component {
+// csrToCDX converts a certificate signing request into the request component,
+// the algorithm of the key it asks to have certified, and -- when that key can
+// be identified -- the key material itself, plus the edge from the request to
+// it.
+//
+// The key is the whole reason a request exists, and this used to drop it: Go
+// hands over PublicKey and PublicKeyAlgorithm and neither was read, so a
+// scanned .csr contributed one asset naming a subject and no cryptography at
+// all. An inventory built from that cannot answer "which requests are asking
+// us to certify a key we are about to have to migrate" -- the question a
+// pending request is the earliest possible place to answer.
+//
+// The bom-ref is content-addressed over the request's own DER, mirroring
+// crypto/certificate/<name>@<hash(cert.Raw)>. Without a bom-ref at all
+// Builder.appendDetection dropped the component, so scanning a .csr reported
+// nothing and exited 0; an empty Name would have done the same, hence
+// nameOrUnknown's fallback.
+//
+// It deliberately does NOT use Converter.BOMRefHash. That hashes the
+// component's JSON, and nothing in this component distinguishes one requested
+// key from another -- the key is a SEPARATE component, not a field here -- so
+// two requests for the same subject with different keys would hash to one ref
+// and the Builder's first-wins dedup would silently discard the second. The
+// DER covers the key. TestPEMBundle_TwoCSRsSameSubjectStayDistinct pins it.
+//
+// Both the key and the algorithm are conditional, because
+// x509.ParseCertificateRequest does NOT fail on an SPKI algorithm it does not
+// recognise: it returns successfully with
+// PublicKeyAlgorithm=UnknownPublicKeyAlgorithm and a nil PublicKey, which is
+// what every post-quantum request in the wild currently produces.
+//
+// That answer is no longer the last word on it. The registry is now the second
+// thing tried, not the first: when Go's enum could not name the algorithm,
+// requestedKeyComponents looks the SPKI's own OID up there, so a request for a
+// key this tool has an entry for -- every ML-DSA, ML-KEM and SLH-DSA arc --
+// reaches the branches below with a real algorithm and a real key, and never
+// reaches the placeholder at all. The placeholder is what is left when the
+// registry misses too, and what follows is about those requests: the ones
+// nothing names.
+//
+// The key goes because publicKeyComponents yields nil for it, and appending an
+// absent key would hand the Builder a refless component to drop while the
+// dependency edge below pointed at a ref present nowhere in the document. Same
+// guard, same reason, as the standalone public keys in restOfPEMBundleToCDX.
+//
+// The algorithm goes because on that path there is no algorithm to report.
+// publicKeyAlgorithmInfo falls through to a placeholder that names the asset
+// "Unknown", stamps it with oidPlaceholder and takes publicKeyComponents' own
+// default primitive, "signature" -- and none of those three is a fact about the
+// request, so an ML-KEM or X25519 request was published to the inventory as a
+// signature scheme under an arc nothing is registered under, which a consumer
+// cannot tell from a real one. The single true proposition in it, that the
+// request references SOME algorithm, was not expressible here in any case:
+// nothing pointed at the component, because the request carries no algorithmRef
+// and the key that would have carried one was never built. And its ref is a
+// Converter.BOMRefHash over content identical for every such request, so one
+// asset stood in for every post-quantum request on the host and did nothing but
+// accumulate an occurrence per file. What the SPKI really declares survives:
+// spkiOIDFromRaw reads the OID off the DER and the Warn hands it to the
+// operator, as a diagnostic about an input this tool cannot describe rather
+// than as a claim in the document.
+//
+// That branch discards the KEY as well, which is today a distinction without a
+// difference: the only way a request reaches the placeholder is
+// UnknownPublicKeyAlgorithm, whose PublicKey is nil, so hashPublicKey has
+// already failed and key is nil, which the guard below would drop anyway. It stops being one the day Go grows a PublicKeyAlgorithm value
+// publicKeyAlgorithmInfo's switch has no case for -- publicKeyComponents would
+// then hand over a real, marshallable key while the algorithm still fell
+// through to the placeholder, and this branch would drop a key it could have
+// described, under a Warn that names only the algorithm. Dropping it is still
+// the right answer, because such a key is no more describable than the
+// algorithm it belongs to: publicKeyComponents copies info.name and info.oid
+// onto it, so it would ship as an asset NAMED "Unknown" and stamped with
+// oidPlaceholder -- the same two fabrications, one component over -- and its
+// algorithmRef would point at the component this branch is refusing to emit --
+// a dangling ref of the same class the key guard below prevents, running the
+// other way: that one keeps the request's dependency edge off a key that was
+// never built, this one would leave a key pointing at an algorithm that never
+// was. What that key wants is an SPKI-OID fallback for requests. There is now
+// one -- requestedKeyComponents runs the request's own SubjectPublicKeyInfo
+// through unsupportedPKIX -- but it is gated on UnknownPublicKeyAlgorithm and
+// so does not reach this case: a request Go named with a value
+// publicKeyAlgorithmInfo's switch has no case for never consults the registry
+// at all. That is the gate failing in the direction it was chosen to fail in,
+// argued on requestedKeyComponents itself. What the fallback does cover is the
+// case that exists today -- a request Go could not name, carrying an OID the
+// registry knows -- which is described under the name the registry gives it and
+// never reaches this branch. What is left here is the key belonging to an
+// algorithm nothing this tool consults names, and publication under a name
+// nothing gave it is still not a substitute.
+//
+// A DSA request keeps its algorithm, and that is why the test below is over the
+// emitted component and not over key.BOMRef. Go's getPublicKeyAlgorithmFromOID
+// maps the DSA OID and parsePublicKey builds a *dsa.PublicKey, so the name
+// DSA-2048 and the OID 1.2.840.10040.4.1 are both real -- but
+// MarshalPKIXPublicKey refuses a *dsa.PublicKey, so the request lands in the
+// same refless-key state while carrying a genuine migration finding, one
+// restOfPEMBundleToCDX already publishes for the same key met in a PUBLIC KEY
+// block. Stating the rule over the artefact also means it stops firing by
+// itself the day an SPKI-OID fallback for requests gives that branch something
+// true to say.
+func (c Converter) csrToCDX(ctx context.Context, csr *x509.CertificateRequest) ([]cdx.Component, []cdx.Dependency, []cbom.Relationship) {
+	name := nameOrUnknown(csr.Subject)
 	compo := cdx.Component{
-		Type: cdx.ComponentTypeCryptographicAsset,
-		Name: fmt.Sprintf("CSR: %s", csr.Subject.CommonName),
+		Type:   cdx.ComponentTypeCryptographicAsset,
+		Name:   "CSR: " + name,
+		BOMRef: "crypto/csr/" + name + "@" + c.bomRefHasher(csr.Raw),
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
 			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
@@ -80,85 +206,680 @@ func csrToCDX(csr *x509.CertificateRequest, _ string) cdx.Component {
 			{Name: "subject", Value: csr.Subject.String()},
 		},
 	}
-	return compo
+
+	// The key-to-algorithm edge is not built here: whichever producer
+	// requestedKeyComponents reaches -- publicKeyComponents, or unsupportedPKIX
+	// on the recovery path -- already writes it as
+	// relatedCryptoMaterialProperties.algorithmRef, and Builder.model turns
+	// that into a relationship generically. Adding a second one would emit the
+	// same edge twice.
+	algo, key := c.requestedKeyComponents(ctx, csr)
+	// The placeholder case satisfies key == nil too, so it has to be tested
+	// first or the branch below emits the component this one exists to
+	// suppress. CryptoProperties is never nil: componentWOBomRef allocates it
+	// unconditionally.
+	if algo.CryptoProperties.OID == oidPlaceholder {
+		slog.WarnContext(ctx, "not reporting an algorithm for a certificate request: nothing maps this SPKI OID to an algorithm",
+			"subject", csr.Subject.String(),
+			"spki_oid", spkiOIDFromRaw(csr.RawSubjectPublicKeyInfo))
+		return []cdx.Component{compo}, nil, nil
+	}
+	if key == nil {
+		return []cdx.Component{compo, algo}, nil, nil
+	}
+	// Two channels, because the two schema versions carry this edge in
+	// different places and neither is derivable from the other. 1.6 has no
+	// field on relatedCryptoMaterialProperties for material pointing at
+	// material, so the request-to-key edge is a document-level dependency
+	// there. 1.7 does -- relatedCryptographicAssets, with a "publicKey" type --
+	// and Builder.cryptoRels cannot recover an edge that never had a 1.6 field
+	// to be read back out of, so the relationship is stated rather than
+	// inferred.
+	return []cdx.Component{compo, algo, *key},
+		[]cdx.Dependency{{
+			Ref:          compo.BOMRef,
+			Dependencies: &[]string{key.BOMRef},
+		}},
+		[]cbom.Relationship{{
+			From: cbom.AssetRef(compo.BOMRef),
+			To:   cbom.AssetRef(key.BOMRef),
+			Kind: cbom.RelRequestedKey,
+		}}
 }
 
-func crlToCDX(crl *x509.RevocationList, location string) cdx.Component {
+// requestedKeyComponents describes the key a certificate request asks to have
+// certified: the algorithm, and the key material when the request establishes
+// it.
+//
+// It exists because a request under a registered ML-DSA, ML-KEM or SLH-DSA OID
+// never consulted the registry at all: Go returns such a request successfully
+// with UnknownPublicKeyAlgorithm and a nil PublicKey, so the algorithm fell
+// through to the placeholder and csrToCDX suppressed it, and the key was never
+// built. A scanned post-quantum .csr contributed the request component and
+// nothing else, while the identical SubjectPublicKeyInfo in a `PUBLIC KEY`
+// block or a CERTIFICATE beside it produced a full algorithm and key. The SPKI
+// is on the request, byte for byte, in RawSubjectPublicKeyInfo.
+//
+// It survives publicKeyComponents taking SPKI bytes, which looks like it should
+// retire this function: hand it csr.RawSubjectPublicKeyInfo and it consults the
+// registry itself. It must not be handed them, and the reason is the branch
+// BELOW the registry hit. On a registry MISS that function keeps the arc the
+// SPKI declares -- info.oid = oidFallback, primitive unknown -- which is right
+// for a certificate, whose asset has to exist and whose subjectPublicKeyRef has
+// to resolve. It is wrong here: it leaves algo.CryptoProperties.OID something
+// other than oidPlaceholder, so csrToCDX's suppression never fires, and the
+// unmarshallable-key fallback then hashes the request's own SPKI and publishes
+// a key for it. Passing the bytes through fails four tests --
+// CSRWithUnnameableAlgorithmIsLoggedAtWarn, CSRWarnNamesItsAttributes,
+// CSRWithUnidentifiableKeyHandsTheBuilderNothingToDrop and
+// CSRWithDSAKeyKeepsItsTruthfulAlgorithm -- which is the policy, stated: a
+// request is not a certificate, and it does not publish what nothing names.
+//
+// The recovery is unsupportedPKIX itself rather than a lookup written here.
+// That function already reads one decode of the SubjectPublicKeyInfo for both
+// the OID and the body, takes the primitive from the registry entry
+// (hardcoding "signature" reported an ML-KEM encapsulation key as a signature
+// scheme), refuses a body that is not this algorithm's public key through the
+// same rejectPublicKeyBody the certificate path uses, and hashes the SPKI into
+// the same crypto/key/<name>@<digest> ref. A request asserting a key on the
+// same evidence has to buy it at the same price, and a second copy of any of
+// that is how one path comes to hold an opinion its sibling does not.
+//
+// It runs BEFORE publicKeyComponents, not on the placeholder branch after it.
+// publicKeyComponents warns "cannot identify public key: omitting key
+// component" on its way to that placeholder, and recovering afterwards would
+// leave that line in the operator's log next to a document that carries the key
+// it says was dropped.
+//
+// The gate is Go's own answer. publicKeyAlgorithmInfo sends
+// UnknownPublicKeyAlgorithm to extractAlgorithmInfo's default branch, the only
+// place oidPlaceholder is ever written, so this is the same condition
+// csrToCDX's suppression tests for, asked one step earlier -- before the Warn
+// rather than after it. Should Go ever grow a PublicKeyAlgorithm value that
+// switch has no case for, this gate misses and the request falls back to
+// today's behaviour: the placeholder, the suppression, and its Warn. That is
+// the safe direction to fail in.
+//
+// The error is deliberately dropped. Its only realistic value is "unsupported
+// fallback oid <arc>" for an OID outside the registry -- oqs-provider's
+// 1.3.9999.6.1.1, say -- and the caller's Warn already hands the operator that
+// same arc under spki_oid, alongside the subject that says WHICH request it
+// was. Logging here would emit two lines about one refusal, the weaker one
+// first. The other errors unsupportedPKIX can return cannot arise from this
+// caller: RawSubjectPublicKeyInfo is the exact bytes of one
+// SubjectPublicKeyInfo element, so there is no trailing data and nothing left
+// to fail to decode.
+//
+// TestPEMBundle_CSRWithRegisteredPQCOIDYieldsItsKey pins the recovery;
+// TestPEMBundle_CSRWithRegisteredOIDIsSilent pins that neither Warn fires on
+// it; TestPEMBundle_CSRWithUnregisteredOIDStaysWellFormed pins that a registry
+// miss still suppresses; TestPEMBundle_CSRWhoseAlgorithmGoNamedKeepsIt pins the
+// gate, that a request whose algorithm Go could name keeps it and is not taken
+// over by the registry lookup; and
+// TestPQCPipeline_CSRSPKIRejectedBodyYieldsAlgorithmNotKey pins the rejected
+// body, where unsupportedPKIX returns no error and no key: the algorithm
+// survives, the key does not.
+func (c Converter) requestedKeyComponents(ctx context.Context, csr *x509.CertificateRequest) (algo cdx.Component, key *cdx.Component) {
+	if csr.PublicKeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
+		// NOTE the return order: unsupportedPKIX yields (key, algo, err) and
+		// publicKeyComponents yields (algo, key). The key is a *cdx.Component
+		// and the algorithm a value, so swapping them no longer compiles -- but
+		// the orders still disagree, and the reason to read this twice is that
+		// they did once publish the key material as the algorithm.
+		if recoveredKey, recoveredAlgo, err := c.unsupportedPKIX(ctx, csr.RawSubjectPublicKeyInfo); err == nil {
+			return recoveredAlgo, recoveredKey
+		}
+	}
+	return c.publicKeyComponents(ctx, csr.PublicKeyAlgorithm, csr.PublicKey, nil)
+}
+
+// crlToCDX converts a certificate revocation list into the list component, the
+// algorithm it was signed with, and -- for a hash-then-sign scheme -- the hash
+// that algorithm decomposes into, plus the edge between those two.
+//
+// The signature algorithm is the only cryptographic claim a revocation list
+// makes, and it was parsed by Go, left sitting in the struct, and dropped: a
+// scanned .crl reported an issuer, two timestamps and a count of revocations.
+// A list still signed with SHA-1 is an operational finding, and the tool named
+// the file without naming that.
+//
+// The algorithm is reached through relatedCryptoMaterialProperties.algorithmRef
+// rather than a dependency edge, which is how every other piece of key material
+// in this package names its algorithm; the schema calls the field "the bom-ref
+// to the algorithm used to generate the related cryptographic material", and
+// the signature is what generated this list. Builder.model turns it into a
+// relationship generically, and the 1.7 emitter maps it onto
+// relatedCryptographicAssets, where 1.6's algorithmRef is deprecated.
+//
+// The bom-ref is content-addressed over the list's own DER, mirroring
+// crypto/certificate/<name>@<hash(cert.Raw)>. Without a bom-ref at all
+// Builder.appendDetection dropped the component, so scanning a .crl reported
+// nothing and exited 0.
+//
+// It deliberately does NOT use Converter.BOMRefHash, for the reason given on
+// csrToCDX: hashing the component's JSON would let two distinct lists with the
+// same issuer and timestamps collapse onto one ref.
+//
+// There is no "location" property. Now that the ref is content-addressed, the
+// same CRL found at two paths dedups to one component and the stored copy
+// would have kept only the first location -- a property that quietly lies
+// about where the asset was seen. evidence.occurrences already carries every
+// location, and populating it is the Builder's job.
+//
+// It DOES carry pem_type=CRL, mirroring csrToCDX's pem_type=CSR. Both
+// components declare relatedCryptoMaterialProperties.type as "other" because
+// CycloneDX's RelatedCryptoMaterialType enum has no CSR or CRL variant, so
+// "other" is the only schema-native shape either can take -- which also makes
+// it useless for telling the two apart. pem_type is the sole machine-readable
+// discriminator between them, so leaving it off here was not asymmetry by
+// design, it silently made every CRL indistinguishable from a CSR to anything
+// reading properties instead of guessing from the Name string.
+func (c Converter) crlToCDX(ctx context.Context, crl *x509.RevocationList) ([]cdx.Component, []cdx.Dependency) {
+	name := nameOrUnknown(crl.Issuer)
+	props := []cdx.Property{
+		{Name: "pem_type", Value: "CRL"},
+		{Name: "issuer", Value: crl.Issuer.String()},
+		{Name: "this_update", Value: crl.ThisUpdate.Format(time.RFC3339)},
+	}
+	// RFC 5280 makes nextUpdate OPTIONAL. Formatting it unconditionally
+	// published the zero time, "0001-01-01T00:00:00Z", as a real expiry.
+	if !crl.NextUpdate.IsZero() {
+		props = append(props, cdx.Property{Name: "next_update", Value: crl.NextUpdate.Format(time.RFC3339)})
+	}
+	props = append(props, cdx.Property{Name: "revoked_count", Value: fmt.Sprintf("%d", len(crl.RevokedCertificateEntries))})
+
+	// x509.RevocationList carries the signature algorithm and the DER, which is
+	// everything the certificate path ever read, so the two cannot describe the
+	// same algorithm differently. RFC 5280's CertificateList has the same
+	// top-level ASN.1 shape as Certificate, so the OID is read from crl.Raw the
+	// same way.
+	sigAlgCompo, hashAlgCompo := c.signatureAlgorithmComponents(ctx, crl.SignatureAlgorithm, crl.Raw)
+
 	compo := cdx.Component{
-		Type: cdx.ComponentTypeCryptographicAsset,
-		Name: "Certificate Revocation List",
+		Type:   cdx.ComponentTypeCryptographicAsset,
+		Name:   "CRL: " + name,
+		BOMRef: "crypto/crl/" + name + "@" + c.bomRefHasher(crl.Raw),
 		CryptoProperties: &cdx.CryptoProperties{
 			AssetType: cdx.CryptoAssetTypeRelatedCryptoMaterial,
 			RelatedCryptoMaterialProperties: &cdx.RelatedCryptoMaterialProperties{
-				Type: cdx.RelatedCryptoMaterialTypeOther,
+				Type:         cdx.RelatedCryptoMaterialTypeOther,
+				AlgorithmRef: cdx.BOMReference(sigAlgCompo.BOMRef),
 			},
 		},
-		Properties: &[]cdx.Property{
-			{Name: "location", Value: location},
-			{Name: "issuer", Value: crl.Issuer.String()},
-			{Name: "this_update", Value: crl.ThisUpdate.Format(time.RFC3339)},
-			{Name: "next_update", Value: crl.NextUpdate.Format(time.RFC3339)},
-			{Name: "revoked_count", Value: fmt.Sprintf("%d", len(crl.RevokedCertificateEntries))},
-		},
+		Properties: &props,
 	}
-	return compo
+
+	// signatureAlgorithmComponents returns a nil second value only when nothing
+	// names a hash for the algorithm, which is narrower than "the scheme signs
+	// the message directly": every algorithm Go's enum knows decomposes into
+	// one, Ed25519 included, because RFC 8032 builds it on SHA-512 and
+	// getAlgorithmProperties says so. The nil is reached through
+	// UnknownSignatureAlgorithm, whose OID either misses the registry or hits an
+	// entry that maps to no hash of its own -- ML-DSA, ML-KEM, HSS/LMS, XMSS;
+	// only SLH-DSA's entries map to a hash, SHA-256 or SHAKE-256, and they are
+	// the sole cases getAlgorithmProperties fills in. Dereferencing it unconditionally
+	// is the crash; emitting an edge to a component that was never built is the
+	// dangling ref.
+	if hashAlgCompo == nil {
+		return []cdx.Component{compo, sigAlgCompo}, nil
+	}
+	return []cdx.Component{compo, sigAlgCompo, *hashAlgCompo},
+		[]cdx.Dependency{{
+			Ref:          sigAlgCompo.BOMRef,
+			Dependencies: &[]string{hashAlgCompo.BOMRef},
+		}}
+}
+
+// nameOrUnknown names a PEM object that has no serial number to fall back on,
+// for its bom-ref and its Name: a request by its subject, a list by its issuer.
+// It follows formatCertificateName as far as a certificate does -- CN if there
+// is one, else the full DN -- and stops at "unknown" where a certificate would
+// go on to its serial.
+//
+// That fallback is about the REF, not about the drop. It does not exist to keep
+// Builder.appendDetection from discarding an empty Name -- the "CSR: " and
+// "CRL: " prefixes already guarantee the Name is non-empty whatever this
+// returns. It exists because the ref is crypto/csr/<name>@<digest>, and without
+// it an empty subject produces "crypto/csr/@sha256:..." -- a ref a reader
+// cannot tell from a truncation or a formatting bug.
+//
+// One function rather than one per object: the two differed only in which
+// pkix.Name they read, and each restated the fallback literal, so a change to
+// what an unnamed object is called could land on one ref namespace and miss the
+// other.
+func nameOrUnknown(name pkix.Name) string {
+	return nameOrFallback(name, func() string { return "unknown" })
 }
 
 // Helper functions
-func (c Converter) analyzeParseError(block model.PEMBlock, origErr error) ([]cdx.Component, error) {
+func (c Converter) analyzeParseError(ctx context.Context, block model.PEMBlock, origErr error) ([]cdx.Component, error) {
 	switch block.Type {
 	case "PRIVATE KEY":
-		algo, err := c.unsupportedPKCS8PrivateKey(block.Bytes)
+		key, algo, err := c.unsupportedPKCS8PrivateKey(ctx, block.Bytes)
 		if err != nil {
 			return nil, errors.Join(origErr, err)
 		}
-		return []cdx.Component{algo}, nil
+		// A PKCS#8 body that is not a legal encoding of the key the registry
+		// describes yields no key: unsupportedPKCS8PrivateKey returns nil for
+		// it, and the algorithm stands on the OID alone.
+		//
+		// Every producer of key material in this package now says "no key" this
+		// way. It used to be split -- nil here, a zero Component from
+		// unsupportedPKIX and publicKeyComponents -- so each of the six call
+		// sites re-derived which sentinel its producer spoke, and one of them
+		// (Converter.PEMBundle) read the ref out with strings.Cut before testing
+		// anything, which is what made the conversion delicate rather than
+		// mechanical. With one representation the compiler decides, not the
+		// reader.
+		if key == nil {
+			return []cdx.Component{algo}, nil
+		}
+		return []cdx.Component{*key, algo}, nil
 	case "PUBLIC KEY":
-		key, algo, err := c.unsupportedPKIX(block.Bytes)
+		key, algo, err := c.unsupportedPKIX(ctx, block.Bytes)
 		if err != nil {
 			return nil, errors.Join(origErr, err)
 		}
-		return []cdx.Component{key, algo}, nil
+		// unsupportedPKIX yields the algorithm alone when the PKIX body is not
+		// exactly the size the registry states for this algorithm's public key.
+		// Same guard, same reason, and now the same shape as the PRIVATE KEY
+		// branch above.
+		if key == nil {
+			return []cdx.Component{algo}, nil
+		}
+		return []cdx.Component{*key, algo}, nil
 	}
 	return nil, origErr
 }
 
 // ********** PQC support **********
 
-func (c Converter) unsupportedPKCS8PrivateKey(der []byte) (cdx.Component, error) {
+// unsupportedPKCS8PrivateKey handles a `PRIVATE KEY` PEM block Go's stdlib
+// cannot parse, returning the key material component and the algorithm
+// component that describes it.
+//
+// It used to return the algorithm alone, while its sibling unsupportedPKIX
+// returned a key and an algorithm. Since #213 stopped stamping
+// relatedCryptoMaterialProperties onto everything, an ML-DSA, SLH-DSA or ML-KEM
+// private key contributed no related-crypto-material asset at all: a CBOM that
+// named the algorithm but never said a key existed.
+//
+// The two claims it can make are not equally supported by the input, which is
+// why they are decided separately. The OID establishes that the algorithm is
+// REFERENCED here -- true whatever the bytes after it turn out to be. That a
+// KEY exists is a claim about the body, and validating the wrapper alone did
+// not check the body at all: a SEQUENCE carrying the ML-DSA-65 OID and four
+// bytes of garbage asserted a full private key, silently. So a body too small
+// to be the key the registry describes yields the algorithm and no key, which
+// is exactly what this function returned before it learned to emit key
+// material.
+//
+// That "no key" case is why the key is a pointer: nil is how this function says
+// the body is not a legal encoding of a key, so the caller reads the answer
+// rather than re-deriving it from an empty component. The two claims ride the
+// return type the way the input supports them -- the algorithm as a value,
+// because the OID establishes it whatever follows, and the key behind a
+// pointer, because the body may establish nothing at all.
+func (c Converter) unsupportedPKCS8PrivateKey(ctx context.Context, der []byte) (key *cdx.Component, algo cdx.Component, err error) {
 	var pkcs8 pkcs8Struct
-	_, err := asn1.Unmarshal(der, &pkcs8)
-	if err != nil {
-		return cdx.Component{}, fmt.Errorf("parsing PKCS#8 via ASN.1: %w", err)
+	rest, uerr := asn1.Unmarshal(der, &pkcs8)
+	if uerr != nil {
+		err = fmt.Errorf("parsing PKCS#8 via ASN.1: %w", uerr)
+		return
+	}
+	// asn1.Unmarshal returns what it did not consume, and discarding that
+	// accepted anything appended after the PrivateKeyInfo. Since the ref is a
+	// digest of the whole block, one key plus n different tails is n distinct
+	// private-key assets all claiming to be the same key -- unbounded, and
+	// indistinguishable in the document from n real keys.
+	// x509.ParsePKCS8PrivateKey rejects trailing data for the same reason.
+	if len(rest) > 0 {
+		err = fmt.Errorf("parsing PKCS#8 via ASN.1: %d bytes of trailing data", len(rest))
+		return
+	}
+	// RFC 5208 defines version 0, RFC 5958 adds 1 for a OneAsymmetricKey that
+	// carries a publicKey. Any other value means this is not a structure whose
+	// layout is known, so the field measured below need not be the private key
+	// at all -- and the field was decoded and then never looked at, so version
+	// -1 was reported as a full private key.
+	if pkcs8.Version != 0 && pkcs8.Version != 1 {
+		err = fmt.Errorf("unsupported PKCS#8 version %d", pkcs8.Version)
+		return
 	}
 	info, ok := unsupportedAlgorithms[pkcs8.Algo.Algorithm.String()]
 	if !ok {
-		return cdx.Component{}, fmt.Errorf("unsupported fallback oid %q", pkcs8.Algo.Algorithm.String())
+		err = fmt.Errorf("unsupported fallback oid %q", pkcs8.Algo.Algorithm.String())
+		return
 	}
 
-	algo := info.componentWOBomRef(c.ilm)
+	algo = info.componentWOBomRef(c.ilm)
 	// This path set no primitive at all, so every PQC private key produced an
 	// algorithm component with the field missing, while the public-key path
 	// produced one with it set. Both now take it from the registry.
-	setAlgorithmPrimitive(&algo, registryPrimitive(info))
+	setAlgorithmPrimitive(&algo, algorithmPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
-	return algo, nil
-}
 
-// registryPrimitive returns the primitive a registry entry declares, falling
-// back to signature for entries that do not state one.
-func registryPrimitive(info algorithmInfo) cdx.CryptoPrimitive {
-	if info.primitive != "" {
-		return info.primitive
+	// Check the ENCODING, not a length floor. RFC 9881 sec. 6 makes the ML-DSA
+	// privateKey field a CHOICE -- seed [0] (32 bytes), expandedKey, or both --
+	// and names the seed the RECOMMENDED form; ML-KEM has the same shape with a
+	// 64-byte (d, z) seed. So one algorithm has several legal body lengths that
+	// differ by two orders of magnitude, and neither bound works alone:
+	//
+	//   - A floor at the expanded size rejected real keys. Every ML-DSA and
+	//     ML-KEM fixture in cdxtest/testdata is OpenSSL's default "both"
+	//     encoding -- SLH-DSA has no seed alternative and stores the raw key,
+	//     whose length equals its expanded size -- so 4032/2400 passed
+	//     all of them and looked correct, while a genuine seed-only key from
+	//     `openssl genpkey -provparam ml-dsa.output_formats=seed-only` (body 34)
+	//     was reported as no key at all. Node.js exports seed-only by default,
+	//     so those are keys in the wild.
+	//   - A floor at the seed accepted 32 bytes of noise under an ML-DSA OID as
+	//     a full private key -- the exact confident-report-over-garbage this
+	//     guard exists to prevent, back one alternative lower.
+	//
+	// There is no content test to make: nothing distinguishes a valid seed from
+	// 32 arbitrary bytes. But the legal encodings are enumerable, so the tags
+	// and declared lengths can be checked, and that rules out every body between
+	// the alternatives without rejecting any of the alternatives themselves.
+	if reason := rejectPrivateKeyBody(info, pkcs8.PrivateKey); reason != "" {
+		slog.WarnContext(ctx, "not reporting a private key: the PKCS#8 body is not a legal encoding of one",
+			"algorithm", info.name,
+			"oid", info.oid,
+			"body_bytes", len(pkcs8.PrivateKey),
+			"reason", reason)
+		// The OID established that the algorithm is referenced here, whatever
+		// the body turned out to hold, so algo stands. Nothing in this block
+		// establishes that a key exists: nil IS the answer, not a component
+		// that happens to be empty.
+		return nil, algo, nil
 	}
-	return cdx.CryptoPrimitiveSignature
+
+	relatedProps := &cdx.RelatedCryptoMaterialProperties{
+		Type:         cdx.RelatedCryptoMaterialTypePrivateKey,
+		AlgorithmRef: cdx.BOMReference(algo.BOMRef),
+		// No Value. unsupportedPKIX sets it because the DER it holds is a
+		// PUBLIC key; the same field here would publish the secret into a
+		// document that gets uploaded and shared. Converter.PrivateKey sets
+		// none either.
+	}
+
+	// Size only when the registry states one, exactly mirroring the guard in
+	// unsupportedPKIX so the two post-quantum paths cannot drift. Every
+	// registry keySize is currently 0, so no size is emitted.
+	//
+	// It deliberately does NOT fall back to pqcInfo.privKeySize or
+	// kemInfo.decapKeySize. The schema's relatedCryptoMaterialProperties.size
+	// is in BITS, while those are the byte counts from FIPS 204 and FIPS 203 --
+	// 4032 for ML-DSA-65 would understate the key eightfold AND validate, so
+	// nothing downstream would ever catch it.
+	if info.keySize > 0 {
+		relatedProps.Size = &info.keySize
+	}
+
+	key = &cdx.Component{
+		Type:        cdx.ComponentTypeCryptographicAsset,
+		Name:        info.name,
+		Description: "Private Key",
+		// The ref hashes the PRIVATE DER, because pkcs8Struct decodes only
+		// version and privateKeyAlgorithm -- the public key is not recoverable
+		// here. So the correlation Converter.PrivateKey deliberately buys, the
+		// private and public halves of one keypair sharing a digest, is NOT
+		// available for post-quantum keys: these pair with their public
+		// counterpart only through AlgorithmRef, i.e. by algorithm and not by
+		// keypair. Do not read the classical invariant into the shared
+		// crypto/private_key/ prefix.
+		//
+		// Accepted trade-off, recorded because it is the only ref on the PEM
+		// path derived from secret material. It is not the only one in the
+		// document: leaks.go hashes finding.Secret itself, and everything
+		// below applies there with far less entropy behind it -- a password
+		// or token is short enough to guess offline, not merely to confirm.
+		// Builder.safeRef
+		// rewrites this to <prefix>@<uuidv5>, which hides the digest but does
+		// NOT break the derivation -- uuid.NewSHA1 is deterministic over the
+		// raw ref, so the emitted UUID is reconstructible from a candidate key
+		// file. The CBOM is therefore a confirmation oracle: someone who
+		// already holds a key can prove it was scanned, and
+		// evidence.occurrences tells them where. Judged acceptable because it
+		// discloses nothing to anyone who does not already have the key, and
+		// content addressing is what lets the same key found at two paths
+		// dedupe to one asset. The alternative, hashing the location, trades
+		// that away and makes refs move when the scan root changes.
+		BOMRef: fmt.Sprintf("crypto/private_key/%s@%s", strings.ToLower(info.name), c.bomRefHasher(der)),
+		CryptoProperties: &cdx.CryptoProperties{
+			AssetType:                       cdx.CryptoAssetTypeRelatedCryptoMaterial,
+			OID:                             info.oid,
+			RelatedCryptoMaterialProperties: relatedProps,
+		},
+	}
+
+	return key, algo, nil
 }
 
-func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err error) {
+// registryKeyBodySizes returns the two sizes in BYTES that a PKCS#8 privateKey
+// body for this algorithm can declare: the seed, when the scheme has a seed
+// alternative, and the expanded private key. Either is 0 when the registry
+// states none.
+//
+// A KEM's private half is its decapsulation key and a signature scheme's is its
+// private key, carried by different registry shapes (kemInfo vs pqcInfo), so
+// reading only privKeySize would silently return 0 -- no check at all -- for
+// every ML-KEM parameter set.
+//
+// These are byte counts from FIPS 203/204/205, RFC 9881 and RFC 9909. They are
+// NOT the schema's relatedCryptoMaterialProperties.size, which is in bits; see
+// the comment on that field's guard above.
+func registryKeyBodySizes(info algorithmInfo) (seed, expanded int) {
+	switch sizes := info.pqc.(type) {
+	case kemInfo:
+		return sizes.seedSize, sizes.decapKeySize
+	case pqcInfo:
+		return sizes.seedSize, sizes.privKeySize
+	}
+	return 0, 0
+}
+
+// rejectPrivateKeyBody returns why body cannot be a private key for info, or ""
+// when it is one of the legal encodings.
+//
+// The accepted set is, in the order tried:
+//
+//   - the raw key, unwrapped. This is how SLH-DSA is stored (RFC 9909 sec. 7
+//     gives it no seed alternative) and it is what the fixtures hold: 64 bytes
+//     for SHA2-128s, not 66. It is also accepted for the seed-bearing schemes,
+//     where RFC 9881 does not define it: a producer that skips the CHOICE
+//     wrapper emits a real key, and reporting a real key as absent is the
+//     failure this check exists to avoid, inverted.
+//   - expandedKey, a plain OCTET STRING of the expanded size.
+//   - seed, `[0] OCTET STRING` of the seed size -- the RECOMMENDED form, and
+//     what Node.js writes by default.
+//   - both, SEQUENCE { seed, expandedKey } -- OpenSSL's default.
+//
+// An empty body is refused whatever the algorithm. For XMSS, XMSS-MT and
+// HSS-LMS that is ALL that is refused, and the reason is not a missing size but
+// a missing ENCODING: no RFC defines what the PKCS#8 privateKey field holds
+// under those three OIDs, so there is no tag, no length and no structure to
+// check. RFC 8554 sec. 3.3: "The private key format is not included as it is
+// not needed for interoperability and an implementation MAY use any private key
+// format." Sec. 4.2 and sec. 5.2 say it again per level -- "The format of the
+// LM-OTS private key is an internal matter to the implementation, and this
+// document does not attempt to define it", and the same sentence for the LMS
+// private key. RFC 8391 sec. 4.1.7: "Note that we do not define any specific
+// format or handling for the XMSS private key SK by introducing this
+// algorithm"; sec. 4.2.2: "This document does not define any specific format
+// for the XMSS^MT private key SK_MT as it is not required for
+// interoperability." The one byte layout RFC 8554 does print is the private key
+// data in Test Case 2 of Appendix F, which sec. 3.3 offers "for clarity" as an
+// example -- it is an illustration, NOT a format, and nothing may be validated
+// against it.
+//
+// A minimum-length floor was tried and rejected. The only candidate number is
+// m: RFC 9858 Table 2 registers LMS_SHA256_M24_H5..H25 and
+// LMS_SHAKE_M24_H5..H25, all m=24, the smallest of any registered LMS parameter
+// set (RFC 8554 Table 2's baseline is m=32). But that MUST -- RFC 8554 sec.
+// 5.2, "An LMS private key MAY be generated pseudorandomly from a secret value;
+// in this case, the secret value MUST be at least m bytes long ..." -- bounds an
+// OPTIONAL, internal, explicitly non-interoperable key-GENERATION input, not
+// the bytes a producer places in a transmitted privateKey OCTET STRING; the
+// same paragraph adds "The details of how this process is done do not affect
+// interoperability". And RFC 8391 states no equivalent number for XMSS at all,
+// so the floor could not be applied uniformly to the three entries even if it
+// were sound. One arbitrary byte is therefore accepted under these OIDs, on
+// purpose: with no defined encoding, dropping a real key is the worse error.
+// TestPQCPipeline_UndefinedPrivateKeyEncodingRejectsOnlyEmptyBody pins both the
+// one-byte case and the rejected 24-byte floor.
+func rejectPrivateKeyBody(info algorithmInfo, body []byte) string {
+	if len(body) == 0 {
+		return "empty body"
+	}
+
+	seed, expanded := registryKeyBodySizes(info)
+	// No size in the registry means no defined encoding either: XMSS, XMSS-MT
+	// and HSS-LMS reach here, and the doc comment above records why nothing
+	// past the emptiness check can be asserted about their bodies.
+	if expanded == 0 {
+		return ""
+	}
+
+	if len(body) == expanded ||
+		derOctetStringOf(body, expanded, "") ||
+		(seed > 0 && derOctetStringOf(body, seed, "tag:0")) ||
+		(seed > 0 && derSeedAndExpandedOf(body, seed, expanded)) {
+		return ""
+	}
+
+	if seed > 0 {
+		return fmt.Sprintf("not a %d-byte seed, a %d-byte expanded key, or both", seed, expanded)
+	}
+	return fmt.Sprintf("not a %d-byte key", expanded)
+}
+
+// derOctetStringOf reports whether body is exactly one OCTET STRING -- or,
+// with params "tag:0", one implicitly-tagged `[0] OCTET STRING` -- carrying
+// want bytes. The trailing-byte check is what makes this a shape test rather
+// than a prefix test: raw noise whose first bytes happen to read as a valid
+// header does not end where the header says it does.
+//
+// params is passed straight to asn1.UnmarshalWithParams; "" reproduces plain
+// asn1.Unmarshal. "tag:0" is the seed alternative, `[0] OCTET STRING` of want
+// bytes -- 0x80 0x20 followed by 32 bytes for ML-DSA.
+func derOctetStringOf(body []byte, want int, params string) bool {
+	var content []byte
+	rest, err := asn1.UnmarshalWithParams(body, &content, params)
+	return err == nil && len(rest) == 0 && len(content) == want
+}
+
+// derSeedAndExpandedOf reports whether body is the `both` alternative and
+// nothing else: SEQUENCE { seed OCTET STRING, expandedKey OCTET STRING }, two
+// children, no third.
+//
+// That "no third" is the RFC's, not a house rule. RFC 9881 sec. 6 (ML-DSA) and
+// RFC 9935 sec. 6 (ML-KEM) write the production with no extension marker, and
+// neither ASN.1 module -- X509-ML-DSA-2025 and X509-ML-KEM-2025, Appendix A of
+// each, both `DEFINITIONS IMPLICIT TAGS` -- declares EXTENSIBILITY IMPLIED, so
+// nothing supplies the "..." the syntax omits. The omission is deliberate: the
+// OneAsymmetricKey those same sections replicate one paragraph earlier carries
+// "..." twice. Both RFCs also say privateKey holds "one of the following
+// DER-encoded CHOICE structures", and DER admits one encoding per value. A
+// SEQUENCE of {seed, expandedKey, anything} is therefore not a key this tool
+// declines to describe -- it is not a key of this algorithm, and the caller is
+// right to report the OID's algorithm and no key material.
+//
+// This is the opposite call from the one pkcs8Struct makes one wrapper out, and
+// both are correct because the two productions differ. RFC 5958's
+// OneAsymmetricKey IS extensible and real keys append attributes [0] and
+// publicKey [1]; the laxity Go's asn1 grants a struct with fewer fields than the
+// SEQUENCE has is what lets those keys parse, so pkcs8Struct leans on it on
+// purpose. Inside `both` there is no marker to honour and the same laxity is a
+// hole. This function used to unmarshal into a two-field struct and check the
+// returned rest, but rest is what follows the OUTER SEQUENCE and never what is
+// left INSIDE it, so a third element was accepted in silence and the body
+// reported as a key. The check was strict in the two places it could afford to
+// be sloppy and sloppy in the one place it could not: derOctetStringOf has
+// always required len(rest) == 0, which is complete for the seed-only and
+// expandedKey-only alternatives because each is a single element, so two of the
+// three CHOICE arms were strict and only this one was not.
+//
+// Hence the shape. The outer element is read as a RawValue and its class, tag
+// and constructed bit asserted by hand, because asn1.RawValue matches ANY tag
+// and the struct this replaces was silently supplying all three checks.
+// Restating them keeps a primitive 0x10 (whose content would otherwise decode
+// identically), a SET 0x31 and a context-tagged 0xA0 out, which is also what
+// both sec. 6s ask for: "the ASN.1 tag explicitly indicates which variant of
+// CHOICE is present ... rather than any other heuristic". The children are then
+// read out of the SEQUENCE's CONTENT, where the leftover really is the leftover.
+// Unmarshalling a child into []byte already demands a universal, primitive OCTET
+// STRING, so a `[0] OCTET STRING` first child -- the seed alternative's own
+// tagging, illegal in this position -- and a nested SEQUENCE are refused without
+// a further assertion.
+//
+// The two lengths stay positional: swapping the halves gives a SEQUENCE whose
+// members are individually the right size and which encodes no key.
+func derSeedAndExpandedOf(body []byte, wantSeed, wantExpanded int) bool {
+	var outer asn1.RawValue
+	rest, err := asn1.Unmarshal(body, &outer)
+	if err != nil || len(rest) != 0 ||
+		outer.Class != asn1.ClassUniversal ||
+		outer.Tag != asn1.TagSequence ||
+		!outer.IsCompound {
+		return false
+	}
+
+	var seed []byte
+	afterSeed, err := asn1.Unmarshal(outer.Bytes, &seed)
+	if err != nil || len(seed) != wantSeed {
+		return false
+	}
+
+	var expanded []byte
+	afterExpanded, err := asn1.Unmarshal(afterSeed, &expanded)
+	return err == nil && len(afterExpanded) == 0 && len(expanded) == wantExpanded
+}
+
+// unsupportedPKIX describes a SubjectPublicKeyInfo Go's stdlib cannot parse,
+// returning the key material component and the algorithm component that
+// describes it.
+//
+// It takes the DER rather than a PEM block because the same structure arrives
+// from two places: analyzeParseError hands it the body of a `PUBLIC KEY` block
+// the scanner filed under ParseErrors, and requestedKeyComponents hands it a
+// certificate request's RawSubjectPublicKeyInfo -- a SubjectPublicKeyInfo with
+// no certificate and no PEM label of its own, since x509.ParseCertificateRequest
+// accepts an SPKI algorithm it cannot name and the block never reaches
+// ParseErrors at all. Same structure, same OID, same BIT STRING; one function,
+// so the registry lookup, the primitive and the body check cannot come to
+// differ between them.
+//
+// The two claims it can make are not equally supported by the input, for the
+// same reason unsupportedPKCS8PrivateKey's are not (see that function's
+// comment): the OID establishes that the algorithm is REFERENCED here, which is
+// true whatever the bytes after it turn out to be, but that a KEY exists is a
+// claim about the body. Validating only the wrapper let a SEQUENCE carrying the
+// ML-DSA-65 OID and four bytes of garbage assert a full public key, silently --
+// the guard that closed exactly this on the private half was never written for
+// this one, so the same four bytes were refused under a PKCS#8 wrapper and
+// accepted under a SubjectPublicKeyInfo.
+func (c Converter) unsupportedPKIX(ctx context.Context, der []byte) (key *cdx.Component, algo cdx.Component, err error) {
 	var pubKey pkixStruct
-	_, err = asn1.Unmarshal(der, &pubKey)
-	if err != nil {
-		err = fmt.Errorf("parsing PKIX via ASN.1: %w", err)
+	rest, uerr := asn1.Unmarshal(der, &pubKey)
+	if uerr != nil {
+		err = fmt.Errorf("parsing PKIX via ASN.1: %w", uerr)
+		return
+	}
+	// asn1.Unmarshal returns what it did not consume, and discarding that
+	// accepted anything appended after the SubjectPublicKeyInfo. Since the ref
+	// below is a digest of the whole block, one key plus n different tails is n
+	// distinct public-key assets all claiming to be the same key -- unbounded,
+	// and indistinguishable in the document from n real keys. The tail is
+	// published too: hashRawPublicKey base64s the whole der into
+	// relatedCryptoMaterialProperties.value, so the garbage goes out verbatim as
+	// the key's value. x509.ParsePKIXPublicKey rejects trailing data for the
+	// same reason -- which is what routes such a block here in the first place,
+	// this being the fallback for keys the stdlib refuses -- and
+	// unsupportedPKCS8PrivateKey enforces the identical rule, so the two paths
+	// cannot drift.
+	if len(rest) > 0 {
+		err = fmt.Errorf("parsing PKIX via ASN.1: %d bytes of trailing data", len(rest))
 		return
 	}
 	info, ok := unsupportedAlgorithms[pubKey.Algorithm.Algorithm.String()]
@@ -170,8 +891,22 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 	algo = info.componentWOBomRef(c.ilm)
 	// Trust the registry's primitive. Hardcoding "signature" here reported an
 	// ML-KEM encapsulation key as a signature algorithm.
-	setAlgorithmPrimitive(&algo, registryPrimitive(info))
+	setAlgorithmPrimitive(&algo, algorithmPrimitive(info))
 	c.BOMRefHash(&algo, info.algorithmName)
+
+	// Check the LENGTH, and check it exactly -- in bytes and in bits. Unlike
+	// the private half there is no CHOICE to enumerate: RFC 9881 sec. 4, and
+	// the SLH-DSA and ML-KEM equivalents, put the encoded public key directly
+	// in the BIT STRING, so one algorithm has exactly one legal body length
+	// rather than several.
+	if reason := rejectPublicKeyBody(info, pubKey.PublicKey); reason != "" {
+		slog.WarnContext(ctx, "not reporting a public key: the PKIX body is not this algorithm's public key",
+			"algorithm", info.name,
+			"oid", info.oid,
+			"body_bytes", len(pubKey.PublicKey.Bytes),
+			"reason", reason)
+		return
+	}
 
 	pubKeyValue, pubKeyHash := c.hashRawPublicKey(der)
 	// public key properties
@@ -191,7 +926,7 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 		relatedProps.Size = &info.keySize
 	}
 
-	key = cdx.Component{
+	key = &cdx.Component{
 		Type:   cdx.ComponentTypeCryptographicAsset,
 		Name:   info.name,
 		BOMRef: bomRef,
@@ -203,6 +938,119 @@ func (c Converter) unsupportedPKIX(der []byte) (key, algo cdx.Component, err err
 	}
 
 	return
+}
+
+// registryPublicKeyBodySize returns the size in BYTES that a
+// SubjectPublicKeyInfo's publicKey BIT STRING holds for this algorithm -- the
+// encapsulation key for a KEM, the public key for a signature scheme --
+// mirroring registryKeyBodySizes on the private half. It is 0 when the registry
+// states none.
+//
+// A KEM's public half is its encapsulation key and a signature scheme's is its
+// public key, carried by different registry shapes (kemInfo vs pqcInfo), so
+// reading only pubKeySize would silently return 0 -- no check at all -- for
+// every ML-KEM parameter set.
+//
+// These are byte counts from FIPS 203/204/205. They are NOT the schema's
+// relatedCryptoMaterialProperties.size, which is in bits, and they are not
+// algorithmInfo.keySize either: that field is in bits and is 0 on every
+// registry entry, so measuring the body against it would be no check at all.
+func registryPublicKeyBodySize(info algorithmInfo) int {
+	switch sizes := info.pqc.(type) {
+	case kemInfo:
+		return sizes.encapKeySize
+	case pqcInfo:
+		return sizes.pubKeySize
+	}
+	return 0
+}
+
+// rejectPublicKeyBody returns why pubKey cannot be info's public key, or ""
+// when it is.
+//
+// A PKCS#8 privateKey admits several legal lengths because RFC 9881 sec. 6
+// makes it a CHOICE of seed, expandedKey, or both, which is why
+// rejectPrivateKeyBody enumerates encodings and needs derOctetStringOf and its
+// siblings to tell them apart. A SubjectPublicKeyInfo has no such CHOICE: RFC
+// 9881 sec. 4, and the SLH-DSA (RFC 9909 sec. 5) and ML-KEM (RFC 9935 sec. 4)
+// equivalents, put the encoded key directly in the BIT STRING, so there is
+// exactly one legal (byte length, bit length) pair per algorithm and nothing
+// wrapping it to inspect. That is why this side has no shape helpers -- there
+// is no shape, only a length.
+//
+// The comparison is an EXACT match rather than a floor. A floor at the registry
+// size would still pass a body one byte short of a real key, and the four-byte
+// 0xdeadbeef this check exists to catch is a floor's blind spot at every
+// threshold below the real size. Too long is refused for the same reason too
+// short is: with the key encoded directly there is nothing to pad it with, so
+// an extra byte means these are not that key's bytes.
+//
+// asn1.BitString.Bytes excludes the leading unused-bits octet, so it is
+// directly comparable to the registry's byte counts: the ML-DSA-65 fixture's
+// BIT STRING is 1953 bytes on the wire and 1952 here.
+//
+// BitLength is not derived from Bytes, though, and checking the byte count is
+// not a substitute for checking it. encoding/asn1's decoder keeps the two
+// independent: it requires the unused bits a BIT STRING declares to actually
+// be zero, but never requires BitLength == len(Bytes)*8. A BIT STRING can
+// therefore decode with the registry's exact byte count and a BitLength a few
+// bits short of it -- 1 to 7, the range its one unused-bits octet can express
+// -- and a check that only reads len(Bytes) accepts it as a full key. RFC 9909
+// sec. 5 rules that out for a conformant encoder by stating the mapping
+// directly: "the most significant bit of the OCTET STRING value becomes the
+// most significant bit of the BIT STRING value ... the least significant bit
+// of the OCTET STRING becomes the least significant bit of the BIT STRING" --
+// a whole OCTET STRING mapped bit-for-bit leaves nothing unused. RFC 9881 sec.
+// 4 and RFC 9935 sec. 4 define the ML-DSA and ML-KEM public keys the same way,
+// as a fixed-size OCTET STRING placed in the BIT STRING with no wrapping, so
+// the same holds for them. A BitLength that disagrees with len(Bytes)*8 is
+// therefore refused exactly like a wrong byte count is: it is checked before
+// the registry lookup below, so it also catches this on XMSS, XMSS-MT and
+// HSS-LMS, which have no registry byte count to check against at all.
+//
+// An empty body is refused whatever the algorithm, for the same reason
+// rejectPrivateKeyBody refuses one: no encoding of any key is zero bytes, so
+// that much can be ruled out without knowing the algorithm, including for the
+// three entries the registry states no size for (XMSS, XMSS-MT, HSS-LMS: RFC
+// 9802 puts the parameters in the key value, not in the OID).
+//
+// It is reached three ways from two call sites, and that is why it is a
+// function rather than an inline comparison. unsupportedPKIX checks the
+// SubjectPublicKeyInfo of a standalone `PUBLIC KEY` block and, through
+// requestedKeyComponents, the SubjectPublicKeyInfo of a certificate REQUEST;
+// publicKeyComponents checks the SubjectPublicKeyInfo of a CERTIFICATE, on the
+// branch where Go could not parse the key and the raw SPKI is published in its
+// place. Those are the same structure, carrying the same BIT STRING under the
+// same OID, differing only in what is wrapped around them -- so a local length
+// comparison at either call site would be a second opinion on one rule, and one
+// path holding an opinion the others did not is the defect this closed in the
+// first place.
+func rejectPublicKeyBody(info algorithmInfo, pubKey asn1.BitString) string {
+	if len(pubKey.Bytes) == 0 {
+		return "empty body"
+	}
+
+	// encoding/asn1 keeps Bytes and BitLength independent: its decoder only
+	// requires the bits a BIT STRING declares unused to actually be zero, not
+	// that BitLength == len(Bytes)*8, so a body can decode with the right byte
+	// count and a BitLength a few bits short of it. None of these RFCs' PUBLIC-
+	// KEY definitions leave room for that -- see the doc comment above -- so
+	// this is checked exactly, the same way the byte count below is, and
+	// before the registry lookup so it applies to XMSS/XMSS-MT/HSS-LMS too,
+	// which registryPublicKeyBodySize has no byte count for.
+	if pubKey.BitLength != len(pubKey.Bytes)*8 {
+		return fmt.Sprintf("not a %d-bit public key", len(pubKey.Bytes)*8)
+	}
+
+	want := registryPublicKeyBodySize(info)
+	if want == 0 {
+		return ""
+	}
+
+	if len(pubKey.Bytes) != want {
+		return fmt.Sprintf("not a %d-byte public key", want)
+	}
+	return ""
 }
 
 func (c Converter) hashRawPublicKey(der []byte) (value, hash string) {

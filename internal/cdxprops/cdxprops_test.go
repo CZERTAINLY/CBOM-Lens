@@ -23,8 +23,19 @@ func TestMLDSA65PrivateKey(t *testing.T) {
 	detection := c.PEMBundle(t.Context(), bundle)
 	require.NotNil(t, detection)
 	compos := detection.Components
-	require.Len(t, compos, 1)
+	// The key component and the algorithm that describes it. Until the
+	// private-key path was fixed this was the algorithm alone, so a scan of an
+	// ML-DSA private key named the algorithm and never said a key existed.
+	require.Len(t, compos, 2)
 	require.Equal(t, "ML-DSA-65", compos[0].Name)
+
+	keyProps := compos[0].CryptoProperties.RelatedCryptoMaterialProperties
+	require.NotNil(t, keyProps)
+	require.Equal(t, cdx.RelatedCryptoMaterialTypePrivateKey, keyProps.Type)
+	require.Equal(t, "Private Key", compos[0].Description)
+	require.Equal(t, cdx.BOMReference(compos[1].BOMRef), keyProps.AlgorithmRef)
+	require.Empty(t, keyProps.Value, "a private key's DER must never be emitted as a value")
+	require.Nil(t, keyProps.Size)
 }
 
 func TestConverter_Nmap(t *testing.T) {

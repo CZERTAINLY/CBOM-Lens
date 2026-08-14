@@ -205,6 +205,9 @@
         "occurrences": [
           {
             "location": "/fixtures/ec-p256-cert.pem"
+          },
+          {
+            "location": "/fixtures/pki.pem"
           }
         ]
       },
@@ -310,36 +313,6 @@
       }
     },
     {
-      "bom-ref": "crypto/algorithm/rsa-2048@a11419cf-1522-5651-923d-17003bbaf47d",
-      "type": "cryptographic-asset",
-      "name": "RSA-2048",
-      "evidence": {
-        "occurrences": [
-          {
-            "location": "/fixtures/rsa-private-key.pem"
-          }
-        ]
-      },
-      "cryptoProperties": {
-        "assetType": "algorithm",
-        "algorithmProperties": {
-          "parameterSetIdentifier": "2048",
-          "executionEnvironment": "software-plain-ram",
-          "cryptoFunctions": [
-            "decrypt",
-            "encrypt",
-            "sign",
-            "verify"
-          ],
-          "classicalSecurityLevel": 112
-        },
-        "relatedCryptoMaterialProperties": {
-          "format": "PEM"
-        },
-        "oid": "1.2.840.113549.1.1.1"
-      }
-    },
-    {
       "bom-ref": "crypto/algorithm/sha-256-ecdsa@cc3b5016-e3d3-5617-a8c9-a136bbac834f",
       "type": "cryptographic-asset",
       "name": "ECDSA-SHA256",
@@ -347,6 +320,9 @@
         "occurrences": [
           {
             "location": "/fixtures/ec-p256-cert.pem"
+          },
+          {
+            "location": "/fixtures/pki.pem"
           }
         ]
       },
@@ -404,6 +380,9 @@
         "occurrences": [
           {
             "location": "/fixtures/ec-p256-cert.pem"
+          },
+          {
+            "location": "/fixtures/pki.pem"
           },
           {
             "location": "/fixtures/rsa-leaf-cert.pem"
@@ -490,8 +469,7 @@
           "subjectPublicKeyRef": "crypto/key/ecdsa-p-256@823fb799-8521-59bf-8e82-a78baf0e1daa",
           "certificateFormat": "X.509",
           "certificateExtension": ".pem"
-        },
-        "relatedCryptoMaterialProperties": {}
+        }
       }
     },
     {
@@ -526,8 +504,7 @@
           "subjectPublicKeyRef": "crypto/key/ed25519@f5edef3c-85d9-5b3a-ae14-b7aaac1a70e0",
           "certificateFormat": "X.509",
           "certificateExtension": ".pem"
-        },
-        "relatedCryptoMaterialProperties": {}
+        }
       }
     },
     {
@@ -542,6 +519,12 @@
         {
           "alg": "SHA-1",
           "content": "fbcfc6360507a8b51578c00e0dea422a23055515"
+        }
+      ],
+      "properties": [
+        {
+          "name": "key_usage",
+          "value": "digitalSignature,keyEncipherment"
         }
       ],
       "evidence": {
@@ -565,8 +548,78 @@
           "subjectPublicKeyRef": "crypto/key/rsa-2048@3d136069-8bc9-5281-85be-5b768dde13fc",
           "certificateFormat": "X.509",
           "certificateExtension": ".pem"
+        }
+      }
+    },
+    {
+      "bom-ref": "crypto/crl/crl-issuer.fixture.test@0e6e3e75-64ca-5a92-a925-e7334b75a09c",
+      "type": "cryptographic-asset",
+      "name": "CRL: crl-issuer.fixture.test",
+      "properties": [
+        {
+          "name": "pem_type",
+          "value": "CRL"
         },
-        "relatedCryptoMaterialProperties": {}
+        {
+          "name": "issuer",
+          "value": "CN=crl-issuer.fixture.test"
+        },
+        {
+          "name": "this_update",
+          "value": "2026-07-27T13:35:00Z"
+        },
+        {
+          "name": "next_update",
+          "value": "2027-07-27T13:35:00Z"
+        },
+        {
+          "name": "revoked_count",
+          "value": "1"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "/fixtures/pki.pem"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "other",
+          "algorithmRef": "crypto/algorithm/sha-256-ecdsa@cc3b5016-e3d3-5617-a8c9-a136bbac834f",
+          "format": "PEM"
+        }
+      }
+    },
+    {
+      "bom-ref": "crypto/csr/csr.fixture.test@213145e5-a9d4-5a7c-9b90-c41d60455fc2",
+      "type": "cryptographic-asset",
+      "name": "CSR: csr.fixture.test",
+      "properties": [
+        {
+          "name": "pem_type",
+          "value": "CSR"
+        },
+        {
+          "name": "subject",
+          "value": "CN=csr.fixture.test,O=CBOM Lens Fixtures"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "/fixtures/pki.pem"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "other",
+          "format": "PEM"
+        }
       }
     },
     {
@@ -587,6 +640,29 @@
           "algorithmRef": "crypto/algorithm/ecdsa-p-256@4ef9627d-b288-58e5-883e-d5276e5649c9",
           "value": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcgPPofKgoL+YrY8Dvo9blGv/WSUcFFGYlrUvgSwbIoEdB+0mFw6361gt8iXHGeI3xt/4G3O0ODOLQV50/S95sw==",
           "size": 256
+        },
+        "oid": "1.2.840.10045.3.1.7"
+      }
+    },
+    {
+      "bom-ref": "crypto/key/ecdsa-p-256@a79b2e41-3ac9-520d-b696-bc0f078b4a63",
+      "type": "cryptographic-asset",
+      "name": "ECDSA-P-256",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "/fixtures/pki.pem"
+          }
+        ]
+      },
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "public-key",
+          "algorithmRef": "crypto/algorithm/ecdsa-p-256@4ef9627d-b288-58e5-883e-d5276e5649c9",
+          "value": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqweqDkgcjtyTmq6lPrpOWRUIJyW4cUTxFyr+LMTt54XFq0qDvdGUd1EIPJjJkkveTujL9AFhORzGjx8dirTFZg==",
+          "size": 256,
+          "format": "PEM"
         },
         "oid": "1.2.840.10045.3.1.7"
       }
@@ -677,7 +753,7 @@
         "assetType": "related-crypto-material",
         "relatedCryptoMaterialProperties": {
           "type": "private-key",
-          "algorithmRef": "crypto/algorithm/rsa-2048@a11419cf-1522-5651-923d-17003bbaf47d",
+          "algorithmRef": "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0",
           "size": 2048,
           "format": "PEM"
         },
@@ -763,6 +839,12 @@
       "dependsOn": [
         "crypto/algorithm/rsa-2048@0e37c10e-4486-501f-9fbc-76098d8023b0",
         "crypto/algorithm/sha-256@a8503480-feab-51bb-9368-6eb238279847"
+      ]
+    },
+    {
+      "ref": "crypto/csr/csr.fixture.test@213145e5-a9d4-5a7c-9b90-c41d60455fc2",
+      "dependsOn": [
+        "crypto/key/ecdsa-p-256@a79b2e41-3ac9-520d-b696-bc0f078b4a63"
       ]
     }
   ],

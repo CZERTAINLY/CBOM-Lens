@@ -34,6 +34,24 @@ const (
 	RelMaterialAlgorithm  RelationshipKind = "material-algorithm"
 	RelProtocolCrypto     RelationshipKind = "protocol-crypto"
 	RelDependsOn          RelationshipKind = "depends-on"
+	// RelRequestedKey is the key a certificate request asks to have certified.
+	//
+	// It is the first kind with no 1.6 reference field behind it. Every other
+	// crypto kind here is recovered from one -- signatureAlgorithmRef,
+	// subjectPublicKeyRef, algorithmRef, cryptoRefArray -- by cryptoRels, which
+	// is why a converter could express them without knowing this type existed.
+	// A request relates to KEY MATERIAL, and 1.6 has no field for material
+	// pointing at material: algorithmRef is typed to an algorithm, and pointing
+	// it at a key would be a lie in the 1.6 document to buy an edge in the 1.7
+	// one.
+	//
+	// So the request's converter emits this relationship directly, which is the
+	// migration cryptoRels' own comment forecasts. Without it the edge exists
+	// only in the document-level dependencies array, and a 1.7 consumer walking
+	// relatedCryptographicAssets -- the native mechanism, and the reason
+	// algorithmRef is deprecated there -- reads every CRL's algorithm and misses
+	// every request's key.
+	RelRequestedKey RelationshipKind = "requested-key"
 )
 
 type Relationship struct {
@@ -55,6 +73,15 @@ const (
 	DetectionTypeCertificate  DetectionType = "CERTIFICATE"
 	DetectionTypePort         DetectionType = "PORT"
 	DetectionTypePEM          DetectionType = "PEM"
+	// DetectionTypeLeakPrivateKey is the value Converter.Leak has always
+	// produced for the gitleaks "private-key" rule: the uppercase of
+	// cdx.RelatedCryptoMaterialTypePrivateKey. It was never declared, so the
+	// vocabulary above looked closed while the field carried a ninth value.
+	//
+	// It is deliberately not folded into DetectionTypeLeakKEY: that would merge
+	// a leaked private key with an api-key finding and change a value tests
+	// already assert.
+	DetectionTypeLeakPrivateKey DetectionType = "PRIVATE-KEY"
 )
 
 type Detection struct {

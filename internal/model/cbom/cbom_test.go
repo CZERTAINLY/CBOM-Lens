@@ -56,6 +56,7 @@ func TestDetectionConstruction(t *testing.T) {
 	require.Equal(t, DetectionType("CERTIFICATE"), DetectionTypeCertificate)
 	require.Equal(t, DetectionType("PORT"), DetectionTypePort)
 	require.Equal(t, DetectionType("PEM"), DetectionTypePEM)
+	require.Equal(t, DetectionType("PRIVATE-KEY"), DetectionTypeLeakPrivateKey)
 
 	// Test Detection construction
 	detection := Detection{
