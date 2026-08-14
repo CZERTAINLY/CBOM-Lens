@@ -118,7 +118,7 @@ func (c Converter) publicKeyComponents(ctx context.Context, pubKeyAlg x509.Publi
 			// asset whose subjectPublicKeyRef must resolve.
 			info.oid = oidFallback
 			info.primitive = cdx.CryptoPrimitiveUnknown
-			slog.WarnContext(ctx, "can't find public key components", "oid", oidFallback)
+			slog.WarnContext(ctx, "no registry entry names this SPKI OID: publishing the key and algorithm as Unknown", "oid", oidFallback)
 		}
 	}
 

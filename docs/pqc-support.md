@@ -212,7 +212,8 @@ a location-derived reference would move whenever the scan root changed.
 
 RFC 5958's optional `publicKey [1]` field would close this where a producer
 emits it — the public half is then in the block, and a `SubjectPublicKeyInfo`
-could be reconstructed from it and the algorithm. Tracked as follow-up work.
+could be reconstructed from it and the algorithm. That is a possible follow-up,
+not scheduled work — no issue tracks it today.
 
 ## Test coverage
 

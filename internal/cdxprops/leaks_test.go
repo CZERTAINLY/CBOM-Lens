@@ -457,6 +457,64 @@ func TestPEMBundle_DetectionTypeIsPEM(t *testing.T) {
 	require.Equal(t, model.DetectionTypePEM, d.Type)
 }
 
+// TestLeak_CarriesTheRelationshipsPEMBundleBuilt pins the leak path's Rels to
+// the PEM path's, because the leak path reaches them only by delegation.
+//
+// Converter.Leak's private-key branch hands the finding's bundle to
+// Converter.PEMBundle and returns what comes back. It used to return the
+// Components and the Dependencies and drop the Rels, which is the one carrier
+// with no 1.6 reference field behind it: Builder.cryptoRels recovers
+// algorithmRef and its siblings by reading them back off the components, but a
+// certificate request's edge to the key it asks to have certified is stated in
+// Rels and nowhere else, so dropping it lost the edge outright rather than
+// degrading it. A file holding a private key beside a request reaches this path
+// whenever gitleaks reports the key, and the parallel PEM detection that would
+// have carried the same edge is not guaranteed -- a library caller can invoke
+// Converter.Leak on its own.
+//
+// Asserting equality against PEMBundle's own output rather than against a
+// literal is what keeps this true as csrToCDX grows edges: the delegation
+// either forwards them or this fails.
+func TestLeak_CarriesTheRelationshipsPEMBundleBuilt(t *testing.T) {
+	t.Parallel()
+
+	key, err := cdxtest.GenECPrivateKey(elliptic.P256())
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+	_, csrDER, err := cdxtest.GenCSR(key)
+	require.NoError(t, err)
+
+	content := append(
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})...,
+	)
+	const location = "key-and-request.pem"
+
+	bundle, err := pemscan.Scanner{}.Scan(t.Context(), content, location)
+	require.NoError(t, err)
+	require.Len(t, bundle.CertificateRequests, 1, "the fixture must reach csrToCDX")
+
+	c := cdxprops.NewConverter()
+
+	// Taken from the path that builds the edge, so the two cannot agree by both
+	// producing nothing.
+	want := c.PEMBundle(t.Context(), bundle)
+	require.NotEmpty(t, want.Rels, "the request must contribute a relationship")
+
+	got := c.Leak(t.Context(), model.Leaks{
+		Location: location,
+		Findings: []model.Finding{{
+			RuleID:    "private-key",
+			StartLine: 1,
+			Secret:    string(content),
+			PEMBundle: bundle,
+		}},
+	})
+	require.NotNil(t, got)
+	require.Equal(t, want.Rels, got.Rels)
+}
+
 // helper function to create int pointer
 func intPtr(i int) *int {
 	return &i

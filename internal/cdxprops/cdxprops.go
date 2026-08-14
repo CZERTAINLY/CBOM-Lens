@@ -13,6 +13,7 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 )
 
 type Converter struct {
@@ -67,13 +68,15 @@ func (c Converter) Leak(ctx context.Context, leaks model.Leaks) *model.Detection
 	// finding no longer changes its label depending on whether a PEM bundle
 	// came with it.
 	var typ model.DetectionType
+	var rels []cbom.Relationship
 	for _, finding := range leaks.Findings {
-		leakType, leakCompos, leakDeps := c.leakToComponents(ctx, leaks.Location, finding)
+		leakType, leakCompos, leakDeps, leakRels := c.leakToComponents(ctx, leaks.Location, finding)
 		if typ == "" && len(leakCompos) > 0 {
 			typ = leakType
 		}
 		compos = append(compos, leakCompos...)
 		deps = append(deps, leakDeps...)
+		rels = append(rels, leakRels...)
 	}
 
 	if len(compos) == 0 {
@@ -89,6 +92,12 @@ func (c Converter) Leak(ctx context.Context, leaks model.Leaks) *model.Detection
 		Location:     leaks.Location,
 		Components:   compos,
 		Dependencies: deps,
+		// A private-key finding that carries a PEM bundle delegates to
+		// PEMBundle, so it can produce the same relationships that path does --
+		// a CSR's edge to the key it asks to have certified being the one that
+		// exists today. Accumulated exactly as Components and Dependencies are;
+		// nil when no finding contributed one.
+		Rels: rels,
 	}
 }
 

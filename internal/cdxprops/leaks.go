@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/OmniTrustILM/cbom-lens/internal/model"
+	"github.com/OmniTrustILM/cbom-lens/internal/model/cbom"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
@@ -40,7 +41,7 @@ func leakDetectionType(cryptoType cdx.RelatedCryptoMaterialType) model.Detection
 	return model.DetectionType(strings.ToUpper(string(cryptoType)))
 }
 
-func (c Converter) leakToComponents(ctx context.Context, location string, finding model.Finding) (model.DetectionType, []cdx.Component, []cdx.Dependency) {
+func (c Converter) leakToComponents(ctx context.Context, location string, finding model.Finding) (model.DetectionType, []cdx.Component, []cdx.Dependency, []cbom.Relationship) {
 	var cryptoType cdx.RelatedCryptoMaterialType
 	switch {
 	case finding.RuleID == "private-key":
@@ -62,12 +63,19 @@ func (c Converter) leakToComponents(ctx context.Context, location string, findin
 	// Only the private-key branch sets this cryptoType, so delegating here is
 	// equivalent to the `case` this used to sit in — except that the detection
 	// type is now resolved first and therefore shared by both branches.
+	//
+	// All three of the Detection's carriers are forwarded, for the reason
+	// PEMBundle states about its own Rels: an edge the converter built but the
+	// Detection does not carry never reaches the Builder, and a crypto
+	// relationship has no 1.6 reference field to be recovered from later, so
+	// dropping it here loses it outright rather than degrading it. A CSR
+	// reached through this path would otherwise lose its requested-key edge
+	// whenever the parallel PEM detection is absent.
+	//
+	// PEMBundle returns a non-nil Detection on every path, so d is not tested.
 	if cryptoType == cdx.RelatedCryptoMaterialTypePrivateKey && !isZero(finding.PEMBundle) {
 		d := c.PEMBundle(ctx, finding.PEMBundle)
-		if d == nil {
-			return detectionType, nil, nil
-		}
-		return detectionType, d.Components, d.Dependencies
+		return detectionType, d.Components, d.Dependencies, d.Rels
 	}
 
 	// The ref is a digest of the leaked secret itself, which is what lets the
@@ -101,7 +109,7 @@ func (c Converter) leakToComponents(ctx context.Context, location string, findin
 		},
 	}
 
-	return detectionType, []cdx.Component{compo}, nil
+	return detectionType, []cdx.Component{compo}, nil, nil
 }
 
 func isZero[T any](x T) bool {
