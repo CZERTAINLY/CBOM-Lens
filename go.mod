@@ -1,6 +1,6 @@
 module github.com/OmniTrustILM/cbom-lens
 
-go 1.26.5
+go 1.27
 
 require (
 	cuelang.org/go v0.17.1
@@ -12,7 +12,7 @@ require (
 	github.com/go-co-op/gocron/v2 v2.22.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/kaptinlin/jsonschema v0.9.8
+	github.com/kaptinlin/jsonschema v0.9.9
 	github.com/kodeart/go-problem/v2 v2.0.3
 	github.com/moby/moby/client v0.5.1
 	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0
