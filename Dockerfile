@@ -1,7 +1,7 @@
 ########################
 # Build Stage
 ########################
-FROM golang:1.26.6-alpine3.24 AS builder
+FROM golang:1.27.1-alpine3.24 AS builder
 
 ARG VERSION=dev
 ENV CGO_ENABLED=0 \
